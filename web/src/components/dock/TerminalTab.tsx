@@ -267,9 +267,9 @@ export function TerminalTab({
   }, [isActive])
 
   return (
-    <div className="relative h-full w-full bg-slate-900 overflow-hidden">
+    <div className="relative h-full w-full bg-theme-base overflow-hidden">
       {/* Mini toolbar */}
-      <div className="h-8 flex items-center gap-2 px-2 bg-slate-800/50 border-b border-slate-700/50">
+      <div className="h-8 flex items-center gap-2 px-2 bg-theme-surface/50 border-b border-theme-border/50">
         <Tooltip
           content={isConnected ? 'Connected to pod' : isConnecting ? 'Connecting...' : 'Disconnected - click Reconnect'}
           position="bottom"
@@ -281,7 +281,7 @@ export function TerminalTab({
             )}
           />
         </Tooltip>
-        <span className="text-xs text-slate-400">
+        <span className="text-xs text-theme-text-tertiary">
           {podName}
         </span>
 
@@ -290,7 +290,7 @@ export function TerminalTab({
             <select
               value={selectedContainer}
               onChange={(e) => handleContainerChange(e.target.value)}
-              className="appearance-none bg-slate-700 text-xs text-white px-2 py-0.5 pr-5 rounded border border-slate-600 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              className="appearance-none bg-theme-elevated text-xs text-theme-text-primary px-2 py-0.5 pr-5 rounded border border-theme-border-light focus:outline-none focus:ring-1 focus:ring-blue-500"
             >
               {containers.map((c) => (
                 <option key={c} value={c}>
@@ -298,14 +298,14 @@ export function TerminalTab({
                 </option>
               ))}
             </select>
-            <ChevronDown className="absolute right-1 top-1/2 -translate-y-1/2 w-3 h-3 text-slate-400 pointer-events-none" />
+            <ChevronDown className="absolute right-1 top-1/2 -translate-y-1/2 w-3 h-3 text-theme-text-tertiary pointer-events-none" />
           </div>
         )}
 
         {!isConnected && !isConnecting && (
           <button
             onClick={connect}
-            className="flex items-center gap-1 px-2 py-0.5 text-xs text-slate-400 hover:text-white hover:bg-slate-700 rounded"
+            className="flex items-center gap-1 px-2 py-0.5 text-xs text-theme-text-tertiary hover:text-theme-text-primary hover:bg-theme-elevated rounded"
           >
             <RefreshCw className="w-3 h-3" />
             Reconnect
@@ -319,7 +319,7 @@ export function TerminalTab({
           {errorType === 'shell_not_found' ? (
             <>
               <div className="text-amber-400 mb-2 text-sm">Shell not available</div>
-              <div className="text-xs text-slate-400 mb-4 max-w-md">
+              <div className="text-xs text-theme-text-tertiary mb-4 max-w-md">
                 This container doesn't have a shell (/bin/sh). This is common with distroless
                 or minimal container images. You can create a debug container to troubleshoot.
               </div>
@@ -343,7 +343,7 @@ export function TerminalTab({
                 </button>
                 <button
                   onClick={connect}
-                  className="flex items-center gap-2 px-3 py-1.5 bg-slate-700 text-white text-xs rounded hover:bg-slate-600"
+                  className="flex items-center gap-2 px-3 py-1.5 bg-theme-elevated text-theme-text-primary text-xs rounded hover:bg-theme-hover"
                 >
                   <RefreshCw className="w-3 h-3" />
                   Retry
@@ -353,7 +353,7 @@ export function TerminalTab({
           ) : (
             <>
               <div className="text-red-400 mb-2 text-sm">Failed to connect</div>
-              <div className="text-xs text-slate-500 mb-3">{error}</div>
+              <div className="text-xs text-theme-text-disabled mb-3">{error}</div>
               <button
                 onClick={connect}
                 className="flex items-center gap-2 px-3 py-1.5 bg-blue-600 text-white text-xs rounded hover:bg-blue-700"

@@ -188,7 +188,7 @@ export function PortForwardButton({
         <button
           disabled
           className={clsx(
-            'flex items-center gap-2 px-3 py-2 bg-slate-700 text-white text-sm rounded-lg opacity-50 cursor-not-allowed',
+            'flex items-center gap-2 px-3 py-2 bg-theme-elevated text-theme-text-primary text-sm rounded-lg opacity-50 cursor-not-allowed',
             className
           )}
           title="No ports available"
@@ -206,7 +206,7 @@ export function PortForwardButton({
           onClick={() => handlePortSelect(ports[0])}
           disabled={isPending}
           className={clsx(
-            'flex items-center gap-2 px-3 py-2 bg-slate-700 text-white text-sm rounded-lg hover:bg-slate-600 transition-colors disabled:opacity-50',
+            'flex items-center gap-2 px-3 py-2 bg-theme-elevated text-theme-text-primary text-sm rounded-lg hover:bg-theme-hover transition-colors disabled:opacity-50',
             className
           )}
           title={`Port forward to ${ports[0].port}`}
@@ -228,7 +228,7 @@ export function PortForwardButton({
           onClick={() => setIsOpen(!isOpen)}
           disabled={isLoading || isPending}
           className={clsx(
-            'flex items-center gap-2 px-3 py-2 bg-slate-700 text-white text-sm rounded-lg hover:bg-slate-600 transition-colors disabled:opacity-50',
+            'flex items-center gap-2 px-3 py-2 bg-theme-elevated text-theme-text-primary text-sm rounded-lg hover:bg-theme-hover transition-colors disabled:opacity-50',
             className
           )}
         >
@@ -242,11 +242,11 @@ export function PortForwardButton({
         </button>
 
         {isOpen && (
-          <div className="absolute top-full left-0 mt-1 w-64 bg-slate-800 border border-slate-700 rounded-lg shadow-xl z-50 py-1">
+          <div className="absolute top-full left-0 mt-1 w-64 bg-theme-surface border border-theme-border rounded-lg shadow-xl z-50 py-1">
             {/* Listen address toggle - only for local mode */}
             {!inCluster && (
-              <div className="px-3 py-2 border-b border-slate-700">
-                <div className="text-xs text-slate-500 mb-2">Listen on</div>
+              <div className="px-3 py-2 border-b border-theme-border">
+                <div className="text-xs text-theme-text-disabled mb-2">Listen on</div>
                 <div className="flex gap-1">
                   <button
                     onClick={(e) => { e.stopPropagation(); setListenAddress('127.0.0.1') }}
@@ -254,7 +254,7 @@ export function PortForwardButton({
                       'flex-1 flex items-center justify-center gap-1.5 px-2 py-1.5 text-xs rounded transition-colors',
                       listenAddress === '127.0.0.1'
                         ? 'bg-blue-600 text-white'
-                        : 'bg-slate-700 text-slate-400 hover:text-slate-200'
+                        : 'bg-theme-elevated text-theme-text-tertiary hover:text-theme-text-primary'
                     )}
                     title="Only accessible from this machine"
                   >
@@ -267,7 +267,7 @@ export function PortForwardButton({
                       'flex-1 flex items-center justify-center gap-1.5 px-2 py-1.5 text-xs rounded transition-colors',
                       listenAddress === '0.0.0.0'
                         ? 'bg-amber-600 text-white'
-                        : 'bg-slate-700 text-slate-400 hover:text-slate-200'
+                        : 'bg-theme-elevated text-theme-text-tertiary hover:text-theme-text-primary'
                     )}
                     title="Accessible from other machines on the network"
                   >
@@ -277,22 +277,22 @@ export function PortForwardButton({
                 </div>
               </div>
             )}
-            <div className="px-2 py-1.5 text-xs text-slate-500 border-b border-slate-700">
+            <div className="px-2 py-1.5 text-xs text-theme-text-disabled border-b border-theme-border">
               Select port to forward
             </div>
             {ports.map((port, i) => (
               <button
                 key={i}
                 onClick={() => handlePortSelect(port)}
-                className="w-full px-3 py-2 text-left text-sm text-slate-200 hover:bg-slate-700 flex items-center justify-between"
+                className="w-full px-3 py-2 text-left text-sm text-theme-text-primary hover:bg-theme-elevated flex items-center justify-between"
               >
                 <span className="flex items-center gap-2">
-                  <code className="text-blue-400">{port.port}</code>
-                  <span className="text-slate-500">/{port.protocol || 'TCP'}</span>
+                  <code className="text-accent-text">{port.port}</code>
+                  <span className="text-theme-text-disabled">/{port.protocol || 'TCP'}</span>
                 </span>
-                <span className="text-xs text-slate-500">
+                <span className="text-xs text-theme-text-disabled">
                   {port.name && <span className="mr-2">{port.name}</span>}
-                  {port.containerName && <span className="text-slate-600">{port.containerName}</span>}
+                  {port.containerName && <span className="text-theme-text-tertiary">{port.containerName}</span>}
                 </span>
               </button>
             ))}
@@ -358,7 +358,7 @@ export function PortForwardInlineButton({
       <button
         onClick={handleClick}
         disabled={disabled || isPending}
-        className="inline-flex items-center gap-1 px-1.5 py-0.5 bg-slate-600/50 hover:bg-blue-600/50 rounded text-xs transition-colors disabled:opacity-50 disabled:hover:bg-slate-600/50"
+        className="inline-flex items-center gap-1 px-1.5 py-0.5 bg-theme-elevated hover:bg-accent-muted rounded text-xs transition-colors disabled:opacity-50 disabled:hover:bg-theme-elevated"
         title={`Port forward ${port}`}
       >
         {port}/{protocol}

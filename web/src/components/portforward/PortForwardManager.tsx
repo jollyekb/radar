@@ -176,26 +176,26 @@ export function PortForwardManager({
     return (
       <button
         onClick={onToggleMinimize}
-        className="fixed bottom-4 left-4 z-40 flex items-center gap-2 px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg shadow-lg hover:bg-slate-700 transition-colors"
+        className="fixed bottom-4 left-4 z-40 flex items-center gap-2 px-3 py-2 bg-theme-surface border border-theme-border rounded-lg shadow-lg hover:bg-theme-elevated transition-colors"
       >
         <Radio className={clsx('w-4 h-4', errorSessions.length > 0 ? 'text-red-400' : 'text-green-400 animate-pulse')} />
-        <span className="text-sm text-slate-300">
+        <span className="text-sm text-theme-text-secondary">
           {activeSessions.length} port forward{activeSessions.length !== 1 ? 's' : ''}
           {errorSessions.length > 0 && <span className="text-red-400 ml-1">({errorSessions.length} failed)</span>}
         </span>
-        <ChevronUp className="w-4 h-4 text-slate-400" />
+        <ChevronUp className="w-4 h-4 text-theme-text-tertiary" />
       </button>
     )
   }
 
   return (
-    <div className="fixed bottom-4 left-4 z-40 w-80 bg-slate-800 border border-slate-700 rounded-lg shadow-2xl overflow-hidden">
+    <div className="fixed bottom-4 left-4 z-40 w-80 bg-theme-surface border border-theme-border rounded-lg shadow-2xl overflow-hidden">
       {/* Header */}
-      <div className="flex items-center justify-between px-3 py-2 bg-slate-700/50 border-b border-slate-700">
+      <div className="flex items-center justify-between px-3 py-2 bg-theme-elevated border-b border-theme-border">
         <div className="flex items-center gap-2">
-          <Plug className="w-4 h-4 text-blue-400" />
-          <span className="text-sm font-medium text-slate-200">Port Forwards</span>
-          <span className="text-xs px-1.5 py-0.5 bg-slate-600 rounded text-slate-300">
+          <Plug className="w-4 h-4 text-accent-text" />
+          <span className="text-sm font-medium text-theme-text-primary">Port Forwards</span>
+          <span className="text-xs px-1.5 py-0.5 bg-theme-hover rounded text-theme-text-secondary">
             {activeSessions.length}
           </span>
           {errorSessions.length > 0 && (
@@ -208,7 +208,7 @@ export function PortForwardManager({
           {onToggleMinimize && (
             <button
               onClick={onToggleMinimize}
-              className="p-1 text-slate-400 hover:text-white hover:bg-slate-600 rounded"
+              className="p-1 text-theme-text-tertiary hover:text-theme-text-primary hover:bg-theme-hover rounded"
             >
               <ChevronDown className="w-4 h-4" />
             </button>
@@ -216,7 +216,7 @@ export function PortForwardManager({
           {onClose && (
             <button
               onClick={onClose}
-              className="p-1 text-slate-400 hover:text-white hover:bg-slate-600 rounded"
+              className="p-1 text-theme-text-tertiary hover:text-theme-text-primary hover:bg-theme-hover rounded"
             >
               <X className="w-4 h-4" />
             </button>
@@ -228,18 +228,18 @@ export function PortForwardManager({
       <div className="max-h-64 overflow-y-auto">
         {isLoading ? (
           <div className="flex items-center justify-center p-4">
-            <Loader2 className="w-5 h-5 text-slate-400 animate-spin" />
+            <Loader2 className="w-5 h-5 text-theme-text-tertiary animate-spin" />
           </div>
         ) : activeSessions.length === 0 ? (
-          <div className="p-4 text-center text-sm text-slate-500">
+          <div className="p-4 text-center text-sm text-theme-text-disabled">
             No active port forwards
           </div>
         ) : (
-          <div className="divide-y divide-slate-700/50">
+          <div className="divide-y divide-theme-border">
             {activeSessions.map((session) => (
               <div key={session.id} className={clsx(
                 'p-3',
-                session.status === 'error' ? 'bg-red-500/10' : 'hover:bg-slate-700/30'
+                session.status === 'error' ? 'bg-red-500/10' : 'hover:bg-theme-elevated'
               )}>
                 <div className="flex items-start justify-between gap-2">
                   <div className="flex-1 min-w-0">
@@ -250,7 +250,7 @@ export function PortForwardManager({
                           session.status === 'running' ? 'bg-green-500' : 'bg-red-500'
                         )}
                       />
-                      <span className="text-sm text-slate-200 font-medium truncate">
+                      <span className="text-sm text-theme-text-primary font-medium truncate">
                         {session.serviceName || session.podName}
                       </span>
                       {session.status === 'error' && (
@@ -259,7 +259,7 @@ export function PortForwardManager({
                         </span>
                       )}
                     </div>
-                    <div className="mt-1 text-xs text-slate-500">
+                    <div className="mt-1 text-xs text-theme-text-disabled">
                       {session.namespace} · Port {session.podPort}
                     </div>
                     {session.status === 'error' && session.error && (
@@ -270,8 +270,8 @@ export function PortForwardManager({
                     {session.status === 'running' && (
                       <div className="mt-1.5 flex items-center gap-2">
                         {editingPortId === session.id ? (
-                          <div className="flex items-center text-xs bg-slate-900 rounded text-blue-400 font-mono">
-                            <span className="pl-2 py-1 text-slate-500 select-none">
+                          <div className="flex items-center text-xs bg-theme-base rounded text-accent-text font-mono">
+                            <span className="pl-2 py-1 text-theme-text-disabled select-none">
                               {session.listenAddress === '0.0.0.0' ? '0.0.0.0' : 'localhost'}:
                             </span>
                             <input
@@ -294,13 +294,13 @@ export function PortForwardManager({
                                 }
                               }}
                               onBlur={() => setEditingPortId(null)}
-                              className="w-16 bg-transparent border-none pr-2 py-1 text-blue-400 font-mono text-xs outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                              className="w-16 bg-transparent border-none pr-2 py-1 text-accent-text font-mono text-xs outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                             />
                           </div>
                         ) : (
                           <code
                             className={clsx(
-                              'group/port text-xs bg-slate-900 px-2 py-1 rounded text-blue-400 transition-all inline-flex items-center gap-1',
+                              'group/port text-xs bg-theme-base px-2 py-1 rounded text-accent-text transition-all inline-flex items-center gap-1',
                               changingPortId === session.id
                                 ? 'opacity-50'
                                 : 'cursor-pointer hover:ring-1 hover:ring-blue-500/50'
@@ -316,7 +316,7 @@ export function PortForwardManager({
                               <Loader2 className="w-3 h-3 animate-spin inline mr-1" />
                             )}
                             {session.listenAddress === '0.0.0.0' ? '0.0.0.0' : 'localhost'}:{session.localPort}
-                            <PenLine className="w-3 h-3 text-slate-500 opacity-0 group-hover/port:opacity-100 transition-opacity" />
+                            <PenLine className="w-3 h-3 text-theme-text-disabled opacity-0 group-hover/port:opacity-100 transition-opacity" />
                           </code>
                         )}
                         <button
@@ -326,7 +326,7 @@ export function PortForwardManager({
                             'flex items-center gap-1 px-1.5 py-0.5 text-xs rounded transition-colors',
                             session.listenAddress === '0.0.0.0'
                               ? 'bg-amber-500/20 text-amber-400 hover:bg-amber-500/30'
-                              : 'bg-slate-700 text-slate-400 hover:bg-slate-600 hover:text-slate-200'
+                              : 'bg-theme-elevated text-theme-text-tertiary hover:bg-theme-hover hover:text-theme-text-primary'
                           )}
                           title={session.listenAddress === '0.0.0.0'
                             ? 'Click to switch to localhost only'
@@ -351,7 +351,7 @@ export function PortForwardManager({
                       <>
                         <button
                           onClick={() => handleCopyUrl(session)}
-                          className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-600 rounded"
+                          className="p-1.5 text-theme-text-tertiary hover:text-theme-text-primary hover:bg-theme-hover rounded"
                           title="Copy URL"
                         >
                           {copiedId === session.id ? (
@@ -362,7 +362,7 @@ export function PortForwardManager({
                         </button>
                         <button
                           onClick={() => handleOpenUrl(session)}
-                          className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-600 rounded"
+                          className="p-1.5 text-theme-text-tertiary hover:text-theme-text-primary hover:bg-theme-hover rounded"
                           title="Open in browser"
                         >
                           <ExternalLink className="w-3.5 h-3.5" />
@@ -372,7 +372,7 @@ export function PortForwardManager({
                     <button
                       onClick={() => stopMutation.mutate(session.id)}
                       disabled={stopMutation.isPending}
-                      className="p-1.5 text-slate-400 hover:text-red-400 hover:bg-slate-600 rounded disabled:opacity-50"
+                      className="p-1.5 text-theme-text-tertiary hover:text-red-400 hover:bg-theme-hover rounded disabled:opacity-50"
                       title={session.status === 'error' ? 'Dismiss' : 'Stop'}
                     >
                       <Trash2 className="w-3.5 h-3.5" />

@@ -56,7 +56,7 @@ export function BottomDock() {
 
   return (
     <div
-      className="fixed bottom-0 left-0 right-0 bg-slate-900 border-t border-slate-700 flex flex-col z-40"
+      className="fixed bottom-0 left-0 right-0 bg-theme-base border-t border-theme-border flex flex-col z-40"
       style={{ height: isExpanded ? height : 36 }}
     >
       {/* Resize handle */}
@@ -68,7 +68,7 @@ export function BottomDock() {
       )}
 
       {/* Tab bar */}
-      <div className="flex items-center h-9 px-2 bg-slate-800 border-b border-slate-700">
+      <div className="flex items-center h-9 px-2 bg-theme-surface border-b border-theme-border">
         <div className="flex items-center gap-1 flex-1 overflow-x-auto">
           {tabs.map(tab => (
             <TabButton
@@ -88,7 +88,7 @@ export function BottomDock() {
           {tabs.length > 1 && (
             <button
               onClick={closeAll}
-              className="p-1 text-slate-400 hover:text-white hover:bg-slate-700 rounded"
+              className="p-1 text-theme-text-tertiary hover:text-theme-text-primary hover:bg-theme-elevated rounded"
               title="Close all"
             >
               <Trash2 className="w-3.5 h-3.5" />
@@ -96,7 +96,7 @@ export function BottomDock() {
           )}
           <button
             onClick={toggleExpanded}
-            className="p-1 text-slate-400 hover:text-white hover:bg-slate-700 rounded"
+            className="p-1 text-theme-text-tertiary hover:text-theme-text-primary hover:bg-theme-elevated rounded"
             title={isExpanded ? 'Collapse' : 'Expand'}
           >
             {isExpanded ? (
@@ -143,8 +143,8 @@ function TabButton({
       className={clsx(
         'flex items-center gap-1.5 px-2 py-1 rounded text-xs cursor-pointer group',
         isActive
-          ? 'bg-slate-700 text-white'
-          : 'text-slate-400 hover:text-white hover:bg-slate-700/50'
+          ? 'bg-theme-elevated text-theme-text-primary'
+          : 'text-theme-text-tertiary hover:text-theme-text-primary hover:bg-theme-elevated/50'
       )}
       onClick={onSelect}
     >
@@ -155,7 +155,7 @@ function TabButton({
           e.stopPropagation()
           onClose()
         }}
-        className="p-0.5 rounded opacity-0 group-hover:opacity-100 hover:bg-slate-600"
+        className="p-0.5 rounded opacity-0 group-hover:opacity-100 hover:bg-theme-hover"
       >
         <X className="w-3 h-3" />
       </button>
