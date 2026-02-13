@@ -126,6 +126,7 @@ func (s *Server) handleStartPortForward(w http.ResponseWriter, r *http.Request) 
 	// If service name provided, find a pod backing it and resolve the target port
 	podName := req.PodName
 	podPort := req.PodPort
+	serviceResolved := false
 	if req.ServiceName != "" && podName == "" {
 		foundPod, containerPort, err := findPodForService(r.Context(), req.Namespace, req.ServiceName, req.PodPort)
 		if err != nil {
@@ -134,12 +135,16 @@ func (s *Server) handleStartPortForward(w http.ResponseWriter, r *http.Request) 
 		}
 		podName = foundPod
 		podPort = containerPort
+		serviceResolved = true
 	}
 
-	// Validate that the pod actually exposes this port
-	if err := validatePodPort(r.Context(), req.Namespace, podName, podPort); err != nil {
-		s.writeError(w, http.StatusBadRequest, err.Error())
-		return
+	// Validate that the pod actually exposes this port (skip for service-resolved ports
+	// since the service spec is authoritative and containers may not declare ports)
+	if !serviceResolved {
+		if err := validatePodPort(r.Context(), req.Namespace, podName, podPort); err != nil {
+			s.writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
 	}
 
 	// Find available local port if not specified
@@ -387,15 +392,15 @@ func findPodForService(ctx context.Context, namespace, serviceName string, servi
 		containerPort = int(targetPort.IntVal)
 	}
 
+	// Return the first running pod — the service spec is authoritative for the port,
+	// and containers can listen on ports without declaring them in the pod spec.
 	for _, pod := range pods.Items {
 		if pod.Status.Phase == corev1.PodRunning {
-			if podHasPort(&pod, containerPort) {
-				return pod.Name, containerPort, nil
-			}
+			return pod.Name, containerPort, nil
 		}
 	}
 
-	return "", 0, fmt.Errorf("no running pod found with port %d", containerPort)
+	return "", 0, fmt.Errorf("no running pod found")
 }
 
 // resolveNamedPort looks up a named port in a pod's containers and returns the container port number.
