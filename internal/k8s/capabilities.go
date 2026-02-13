@@ -4,6 +4,7 @@ import (
 	"context"
 	"log"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	authv1 "k8s.io/api/authorization/v1"
@@ -60,14 +61,16 @@ var (
 	cachedCapabilities *Capabilities
 	capabilitiesMu     sync.RWMutex
 	capabilitiesExpiry time.Time
-	capabilitiesTTL    = 60 * time.Second
+	capabilitiesTTL      = 60 * time.Second
+	capabilitiesErrorTTL = 5 * time.Second // Short TTL when API errors caused fail-closed results
 
 	// ForceDisableHelmWrite overrides the helmWrite capability to false (for dev testing)
 	ForceDisableHelmWrite bool
 )
 
-// CheckCapabilities checks RBAC permissions using SelfSubjectAccessReview
-// Results are cached for 60 seconds to avoid hammering the API
+// CheckCapabilities checks RBAC permissions using SelfSubjectAccessReview.
+// Results are cached for 60 seconds normally, or 5 seconds when API errors
+// caused fail-closed results (to allow rapid retry without long UI disruption).
 func CheckCapabilities(ctx context.Context) (*Capabilities, error) {
 	capabilitiesMu.RLock()
 	if cachedCapabilities != nil && time.Now().Before(capabilitiesExpiry) {
@@ -98,83 +101,80 @@ func CheckCapabilities(ctx context.Context) (*Capabilities, error) {
 	checkCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	// Check each capability in parallel using local variables to avoid data race.
+	// Check each capability in parallel.
 	// Try cluster-wide first, then namespace-scoped as fallback for namespace-scoped users.
+	// Track API errors to avoid caching transient failures for the full TTL.
 	fallbackNs := GetEffectiveNamespace()
+	var hadErrors atomic.Bool
+
+	type capCheck struct {
+		resource string
+		verb     string
+		result   *bool
+	}
+
+	caps := &Capabilities{}
+	checks := []capCheck{
+		{"pods/exec", "create", &caps.Exec},
+		{"pods/log", "get", &caps.Logs},
+		{"pods/portforward", "create", &caps.PortForward},
+		{"secrets", "list", &caps.Secrets},
+		{"secrets", "create", &caps.HelmWrite},
+	}
+
 	var wg sync.WaitGroup
-	var execAllowed, logsAllowed, portForwardAllowed, secretsAllowed, helmWriteAllowed bool
+	wg.Add(len(checks))
 
-	wg.Add(5)
-
-	go func() {
-		defer wg.Done()
-		execAllowed = canI(checkCtx, "", "", "pods/exec", "create")
-		if !execAllowed && fallbackNs != "" {
-			execAllowed = canI(checkCtx, fallbackNs, "", "pods/exec", "create")
-		}
-	}()
-
-	go func() {
-		defer wg.Done()
-		logsAllowed = canI(checkCtx, "", "", "pods/log", "get")
-		if !logsAllowed && fallbackNs != "" {
-			logsAllowed = canI(checkCtx, fallbackNs, "", "pods/log", "get")
-		}
-	}()
-
-	go func() {
-		defer wg.Done()
-		portForwardAllowed = canI(checkCtx, "", "", "pods/portforward", "create")
-		if !portForwardAllowed && fallbackNs != "" {
-			portForwardAllowed = canI(checkCtx, fallbackNs, "", "pods/portforward", "create")
-		}
-	}()
-
-	go func() {
-		defer wg.Done()
-		secretsAllowed = canI(checkCtx, "", "", "secrets", "list")
-		if !secretsAllowed && fallbackNs != "" {
-			secretsAllowed = canI(checkCtx, fallbackNs, "", "secrets", "list")
-		}
-	}()
-
-	go func() {
-		defer wg.Done()
-		helmWriteAllowed = canI(checkCtx, "", "", "secrets", "create")
-		if !helmWriteAllowed && fallbackNs != "" {
-			helmWriteAllowed = canI(checkCtx, fallbackNs, "", "secrets", "create")
-		}
-	}()
+	for _, check := range checks {
+		go func(c capCheck) {
+			defer wg.Done()
+			allowed, apiErr := canI(checkCtx, "", "", c.resource, c.verb)
+			if allowed {
+				*c.result = true
+				return
+			}
+			if fallbackNs != "" {
+				allowed, nsApiErr := canI(checkCtx, fallbackNs, "", c.resource, c.verb)
+				if allowed {
+					*c.result = true
+					return
+				}
+				apiErr = apiErr || nsApiErr
+			}
+			if apiErr {
+				hadErrors.Store(true)
+			}
+		}(check)
+	}
 
 	wg.Wait()
-
-	// Build capabilities struct after all goroutines complete
-	caps := &Capabilities{
-		Exec:        execAllowed,
-		Logs:        logsAllowed,
-		PortForward: portForwardAllowed,
-		Secrets:     secretsAllowed,
-		HelmWrite:   helmWriteAllowed,
-	}
 
 	if ForceDisableHelmWrite {
 		caps.HelmWrite = false
 	}
 
-	// Cache the result
+	// Cache the result. Use a short TTL if API errors caused fail-closed results,
+	// so transient K8s API failures don't hide UI controls for a full minute.
+	ttl := capabilitiesTTL
+	if hadErrors.Load() {
+		ttl = capabilitiesErrorTTL
+		log.Printf("Warning: capability checks had API errors, using short cache TTL (%v)", ttl)
+	}
 	cachedCapabilities = caps
-	capabilitiesExpiry = time.Now().Add(capabilitiesTTL)
+	capabilitiesExpiry = time.Now().Add(ttl)
 
 	return caps, nil
 }
 
 // canI checks if the current user/service account can perform an action.
-// The group parameter specifies the API group (empty string for core API resources).
-func canI(ctx context.Context, namespace, group, resource, verb string) bool {
+// The group parameter specifies the API group (empty string for core resources like pods, secrets).
+// Returns (allowed, apiErr) where apiErr=true means the API call itself failed
+// (distinct from RBAC denial where allowed=false, apiErr=false).
+func canI(ctx context.Context, namespace, group, resource, verb string) (allowed bool, apiErr bool) {
 	k8sClient := GetClient()
 	if k8sClient == nil {
 		log.Printf("Warning: K8s client nil in canI check for %s %s", verb, resource)
-		return false // Fail closed if no client
+		return false, true
 	}
 
 	review := &authv1.SelfSubjectAccessReview{
@@ -190,12 +190,11 @@ func canI(ctx context.Context, namespace, group, resource, verb string) bool {
 
 	result, err := k8sClient.AuthorizationV1().SelfSubjectAccessReviews().Create(ctx, review, metav1.CreateOptions{})
 	if err != nil {
-		// Log the error and fail closed
 		log.Printf("Warning: SelfSubjectAccessReview failed for %s %s: %v", verb, resource, err)
-		return false
+		return false, true
 	}
 
-	return result.Status.Allowed
+	return result.Status.Allowed, false
 }
 
 // InvalidateCapabilitiesCache forces the next CheckCapabilities call to refresh
@@ -292,7 +291,8 @@ func CheckResourcePermissions(ctx context.Context) *PermissionCheckResult {
 	for _, check := range checks {
 		go func(c permCheck) {
 			defer wg.Done()
-			*c.result = canI(ctx, "", c.group, c.resource, "list")
+			allowed, _ := canI(ctx, "", c.group, c.resource, "list")
+			*c.result = allowed
 		}(check)
 	}
 
@@ -326,7 +326,8 @@ func CheckResourcePermissions(ctx context.Context) *PermissionCheckResult {
 			for _, check := range nsChecks {
 				go func(c permCheck) {
 					defer wg.Done()
-					*c.result = canI(ctx, fallbackNs, c.group, c.resource, "list")
+					allowed, _ := canI(ctx, fallbackNs, c.group, c.resource, "list")
+					*c.result = allowed
 				}(check)
 			}
 			wg.Wait()
