@@ -110,8 +110,9 @@ export function ActivitySummary({ namespaces, topology, onNavigate }: ActivitySu
   return (
     <button
       onClick={onNavigate}
-      className="group flex flex-col h-[260px] rounded-lg border-[3px] border-blue-500/30 bg-theme-surface/50 hover:-translate-y-1 hover:shadow-[0_12px_24px_rgba(0,0,0,0.12)] hover:border-blue-500/60 transition-all duration-200 text-left cursor-pointer"
+      className="group h-[260px] rounded-lg border-[3px] border-blue-500/30 bg-theme-surface/50 hover:-translate-y-1 hover:shadow-[0_12px_24px_rgba(0,0,0,0.12)] hover:border-blue-500/60 transition-all duration-200 text-left cursor-pointer"
     >
+      <div className="flex flex-col h-full w-full">
       <div className="flex items-center justify-between px-4 py-2 border-b border-theme-border">
         <div className="flex items-center gap-2">
           <Clock className="w-4 h-4 text-blue-500" />
@@ -164,6 +165,7 @@ export function ActivitySummary({ namespaces, topology, onNavigate }: ActivitySu
       <div className="px-4 py-1.5 border-t border-theme-border flex items-center justify-end gap-1.5 text-xs font-medium text-blue-500 group-hover:text-blue-400 transition-colors">
         Open Timeline
         <ArrowRight className="w-3.5 h-3.5 transition-transform group-hover:translate-x-0.5" />
+      </div>
       </div>
     </button>
   )

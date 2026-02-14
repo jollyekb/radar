@@ -22,10 +22,11 @@ export function CertificateHealthCard({ data, onNavigate }: CertificateHealthCar
     <button
       onClick={onNavigate}
       className={clsx(
-        'group flex flex-col h-[260px] rounded-lg border-[3px] bg-theme-surface/50 hover:-translate-y-1 hover:shadow-[0_12px_24px_rgba(0,0,0,0.12)] transition-all duration-200 text-left cursor-pointer',
+        'group h-[260px] rounded-lg border-[3px] bg-theme-surface/50 hover:-translate-y-1 hover:shadow-[0_12px_24px_rgba(0,0,0,0.12)] transition-all duration-200 text-left cursor-pointer',
         borderColor
       )}
     >
+      <div className="flex flex-col h-full w-full">
       <div className="flex items-center justify-between px-4 py-2 border-b border-theme-border">
         <div className="flex items-center gap-2">
           <Shield className={clsx('w-4 h-4', accentColor)} />
@@ -86,6 +87,7 @@ export function CertificateHealthCard({ data, onNavigate }: CertificateHealthCar
           View Secrets
           <ArrowRight className="w-3.5 h-3.5 transition-transform group-hover:translate-x-0.5" />
         </span>
+      </div>
       </div>
     </button>
   )
