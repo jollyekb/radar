@@ -22,7 +22,7 @@ import type { NavigateToResource } from '../../utils/navigation'
 import { refToSelectedResource } from '../../utils/navigation'
 import { isChangeEvent, isHistoricalEvent } from '../../types'
 import { useChanges, useResourceWithRelationships, usePodLogs, useDeleteResource, useTopology } from '../../api/client'
-import { ConfirmDialog } from '../ui/ConfirmDialog'
+import { ForceDeleteConfirmDialog } from '../ui/ForceDeleteConfirmDialog'
 import { getKindBadgeColor, getHealthBadgeColor } from '../../utils/badge-colors'
 import { buildResourceHierarchy, getAllEventsFromHierarchy, isProblematicEvent, type ResourceLane } from '../../utils/resource-hierarchy'
 import {
@@ -502,9 +502,9 @@ function ActionsDropdown({ kind, namespace, name, onBack }: { kind: string; name
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   const deleteMutation = useDeleteResource()
 
-  const handleDeleteConfirm = () => {
+  function handleDeleteConfirm(force: boolean) {
     deleteMutation.mutate(
-      { kind: kind.toLowerCase() + 's', namespace, name }, // Convert kind to plural for API
+      { kind: kind.toLowerCase() + 's', namespace, name, force }, // Convert kind to plural for API
       {
         onSuccess: () => {
           setShowDeleteConfirm(false)
@@ -556,16 +556,13 @@ function ActionsDropdown({ kind, namespace, name, onBack }: { kind: string; name
         </>
       )}
 
-      {/* Delete confirmation dialog */}
-      <ConfirmDialog
+      <ForceDeleteConfirmDialog
         open={showDeleteConfirm}
         onClose={() => setShowDeleteConfirm(false)}
         onConfirm={handleDeleteConfirm}
-        title="Delete Resource"
-        message={`Are you sure you want to delete "${name}"?`}
-        details={`This will permanently delete the ${kind} "${name}" from the "${namespace}" namespace.`}
-        confirmLabel="Delete"
-        variant="danger"
+        resourceName={name}
+        resourceKind={kind}
+        namespaceName={namespace}
         isLoading={deleteMutation.isPending}
       />
     </div>

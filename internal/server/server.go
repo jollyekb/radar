@@ -1240,8 +1240,14 @@ func (s *Server) handleDeleteResource(w http.ResponseWriter, r *http.Request) {
 	kind := chi.URLParam(r, "kind")
 	namespace := chi.URLParam(r, "namespace")
 	name := chi.URLParam(r, "name")
+	force := r.URL.Query().Get("force") == "true"
 
-	err := k8s.DeleteResource(r.Context(), kind, namespace, name)
+	err := k8s.DeleteResource(r.Context(), k8s.DeleteResourceOptions{
+		Kind:      kind,
+		Namespace: namespace,
+		Name:      name,
+		Force:     force,
+	})
 	if err != nil {
 		if apierrors.IsNotFound(err) {
 			s.writeError(w, http.StatusNotFound, err.Error())
@@ -1251,6 +1257,11 @@ func (s *Server) handleDeleteResource(w http.ResponseWriter, r *http.Request) {
 			s.writeError(w, http.StatusForbidden, err.Error())
 			return
 		}
+		if strings.Contains(err.Error(), "stuck in Terminating state") {
+			s.writeError(w, http.StatusConflict, err.Error())
+			return
+		}
+		log.Printf("[delete] Failed to delete %s %s/%s (force=%v): %v", kind, namespace, name, force, err)
 		s.writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}

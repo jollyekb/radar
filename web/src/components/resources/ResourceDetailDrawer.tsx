@@ -21,7 +21,7 @@ import {
 import { clsx } from 'clsx'
 import { stringify as yamlStringify } from 'yaml'
 import { useResource, useResourceEvents, useUpdateResource, useDeleteResource, useTriggerCronJob, useSuspendCronJob, useResumeCronJob, useRestartWorkload, useFluxReconcile, useFluxSyncWithSource, useFluxSuspend, useFluxResume, useArgoSync, useArgoRefresh, useArgoSuspend, useArgoResume } from '../../api/client'
-import { ConfirmDialog } from '../ui/ConfirmDialog'
+import { ForceDeleteConfirmDialog } from '../ui/ForceDeleteConfirmDialog'
 import type { SelectedResource, Relationships, ResourceRef } from '../../types'
 import { refToSelectedResource } from '../../utils/navigation'
 import {
@@ -479,9 +479,9 @@ function ActionsBar({ resource, data, onClose }: ActionsBarProps) {
   // Workload restart mutation
   const restartWorkloadMutation = useRestartWorkload()
 
-  const handleDeleteConfirm = () => {
+  function handleDeleteConfirm(force: boolean) {
     deleteMutation.mutate(
-      { kind: resource.kind, namespace: resource.namespace, name: resource.name },
+      { kind: resource.kind, namespace: resource.namespace, name: resource.name, force },
       {
         onSuccess: () => {
           setShowDeleteConfirm(false)
@@ -702,16 +702,13 @@ function ActionsBar({ resource, data, onClose }: ActionsBarProps) {
         Delete
       </button>
 
-      {/* Delete confirmation dialog */}
-      <ConfirmDialog
+      <ForceDeleteConfirmDialog
         open={showDeleteConfirm}
         onClose={() => setShowDeleteConfirm(false)}
         onConfirm={handleDeleteConfirm}
-        title="Delete Resource"
-        message={`Are you sure you want to delete "${resource.name}"?`}
-        details={`This will permanently delete the ${formatKindName(resource.kind)} "${resource.name}" from the "${resource.namespace}" namespace.`}
-        confirmLabel="Delete"
-        variant="danger"
+        resourceName={resource.name}
+        resourceKind={formatKindName(resource.kind)}
+        namespaceName={resource.namespace}
         isLoading={deleteMutation.isPending}
       />
     </div>
