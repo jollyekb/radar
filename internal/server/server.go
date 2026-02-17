@@ -106,6 +106,7 @@ func (s *Server) setupRoutes() {
 		r.Get("/heap", pprof.Handler("heap").ServeHTTP)
 		r.Get("/mutex", pprof.Handler("mutex").ServeHTTP)
 		r.Get("/threadcreate", pprof.Handler("threadcreate").ServeHTTP)
+		r.Get("/goroutineleak", pprof.Handler("goroutineleak").ServeHTTP) // requires GOEXPERIMENT=goroutineleakprofile at build time
 	})
 
 	// API routes

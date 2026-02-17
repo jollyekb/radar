@@ -47,9 +47,10 @@ COPY --from=frontend-builder /app/web/dist internal/static/dist/
 ARG VERSION=dev
 ARG TARGETOS=linux
 ARG TARGETARCH=amd64
+ARG GOEXPERIMENT=""
 
 # Build the binary
-RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
+RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} GOEXPERIMENT=${GOEXPERIMENT} \
     go build -ldflags "-s -w -X main.version=${VERSION}" \
     -o /radar ./cmd/explorer
 
