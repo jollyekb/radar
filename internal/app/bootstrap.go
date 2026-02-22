@@ -13,6 +13,7 @@ import (
 	"github.com/skyhook-io/radar/internal/helm"
 	"github.com/skyhook-io/radar/internal/k8s"
 	mcppkg "github.com/skyhook-io/radar/internal/mcp"
+	prometheuspkg "github.com/skyhook-io/radar/internal/prometheus"
 	"github.com/skyhook-io/radar/internal/server"
 	"github.com/skyhook-io/radar/internal/static"
 	"github.com/skyhook-io/radar/internal/timeline"
@@ -96,8 +97,8 @@ func BuildTimelineStoreConfig(cfg AppConfig) timeline.StoreConfig {
 	return storeCfg
 }
 
-// RegisterCallbacks registers Helm, timeline, and traffic reset/reinit functions
-// used for both initial cluster initialization and context switching.
+// RegisterCallbacks registers Helm, timeline, traffic, and Prometheus reset/reinit
+// functions used for both initial cluster initialization and context switching.
 // Must be called before InitializeCluster.
 func RegisterCallbacks(cfg AppConfig, timelineStoreCfg timeline.StoreConfig) {
 	k8s.RegisterHelmFuncs(helm.ResetClient, helm.ReinitClient)
@@ -106,16 +107,28 @@ func RegisterCallbacks(cfg AppConfig, timelineStoreCfg timeline.StoreConfig) {
 		return timeline.ReinitStore(timelineStoreCfg)
 	})
 
+	// Initialize Prometheus metrics client (must come before SetManualURL)
+	prometheuspkg.Initialize(k8s.GetClient(), k8s.GetConfig(), k8s.GetContextName())
+
 	if cfg.PrometheusURL != "" {
 		u, err := url.Parse(cfg.PrometheusURL)
 		if err != nil || (u.Scheme != "http" && u.Scheme != "https") {
 			log.Fatalf("Invalid --prometheus-url %q: must be a valid HTTP(S) URL (e.g., http://prometheus-server.monitoring:9090)", cfg.PrometheusURL)
 		}
 		traffic.SetMetricsURL(cfg.PrometheusURL)
+		prometheuspkg.SetManualURL(cfg.PrometheusURL)
 	}
 
 	k8s.RegisterTrafficFuncs(traffic.Reset, func() error {
 		return traffic.ReinitializeWithConfig(k8s.GetClient(), k8s.GetConfig(), k8s.GetContextName())
+	})
+
+	k8s.RegisterPrometheusFuncs(prometheuspkg.Reset, func() error {
+		prometheuspkg.Reinitialize(k8s.GetClient(), k8s.GetConfig(), k8s.GetContextName())
+		if cfg.PrometheusURL != "" {
+			prometheuspkg.SetManualURL(cfg.PrometheusURL)
+		}
+		return nil
 	})
 }
 
@@ -179,6 +192,21 @@ func InitializeCluster() {
 		Context:     k8s.GetContextName(),
 		ClusterName: k8s.GetClusterName(),
 	})
+
+	// Auto-discover Prometheus in the background so charts are ready immediately
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		client := prometheuspkg.GetClient()
+		if client == nil {
+			return
+		}
+		if _, _, err := client.EnsureConnected(ctx); err != nil {
+			log.Printf("[prometheus] Auto-discovery: %v", err)
+		} else {
+			log.Printf("[prometheus] Auto-discovery succeeded")
+		}
+	}()
 }
 
 // Shutdown performs graceful teardown of all subsystems and the HTTP server.

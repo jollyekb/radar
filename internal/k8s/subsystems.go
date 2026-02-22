@@ -12,8 +12,8 @@ import (
 // Returns an error if a critical subsystem (resource cache) fails to
 // initialize. All other subsystems log warnings and continue in degraded mode.
 //
-// External subsystem callbacks (timeline, helm, traffic) must be registered
-// via the Register*Funcs methods before calling this function.
+// External subsystem callbacks (timeline, helm, traffic, prometheus) must be
+// registered via the Register*Funcs methods before calling this function.
 //
 // The progress callback receives human-readable status messages suitable for
 // display in the UI (e.g. via SSE connection status updates).
@@ -99,6 +99,17 @@ func InitAllSubsystems(progress func(string)) error {
 		}
 	}
 
+	// 8. Prometheus metrics client
+	contextSwitchMu.RLock()
+	promReinitFn := prometheusReinitFunc
+	contextSwitchMu.RUnlock()
+	if promReinitFn != nil {
+		progress("Initializing Prometheus metrics...")
+		if err := promReinitFn(); err != nil {
+			log.Printf("Warning: Prometheus init failed: %v", err)
+		}
+	}
+
 	return nil
 }
 
@@ -107,6 +118,14 @@ func InitAllSubsystems(progress func(string)) error {
 // Each reset is wrapped in a panic recover so a failure in one subsystem
 // does not prevent remaining subsystems from being torn down.
 func ResetAllSubsystems() {
+	// 8. Prometheus metrics client
+	contextSwitchMu.RLock()
+	promResetFn := prometheusResetFunc
+	contextSwitchMu.RUnlock()
+	if promResetFn != nil {
+		safeReset("prometheus", promResetFn)
+	}
+
 	// 7. Traffic
 	contextSwitchMu.RLock()
 	trResetFn := trafficResetFunc
