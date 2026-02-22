@@ -304,7 +304,8 @@ function AppInner() {
     if (params.toString() !== new URLSearchParams(currentSearch).toString()) {
       setSearchParams(params, { replace: true })
     }
-  }, [namespacesKey, topologyMode, groupingMode, mainView, searchParams, setSearchParams])
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- reads window.location.search, not searchParams
+  }, [namespacesKey, topologyMode, groupingMode, mainView, setSearchParams])
 
   // Sync state from URL when navigating (back/forward)
   useEffect(() => {
