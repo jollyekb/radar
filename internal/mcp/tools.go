@@ -40,12 +40,15 @@ func logToolCall[In any](name string, handler func(context.Context, *mcp.CallToo
 }
 
 func registerTools(server *mcp.Server) {
+	readOnly := &mcp.ToolAnnotations{ReadOnlyHint: true}
+
 	mcp.AddTool(server, &mcp.Tool{
 		Name: "get_dashboard",
 		Description: "Get cluster health overview including resource counts, " +
 			"problems (failing pods, unhealthy deployments), recent warning events, " +
 			"and Helm release status. Start here to understand cluster state before " +
 			"drilling into specific resources.",
+		Annotations: readOnly,
 	}, logToolCall("get_dashboard", handleGetDashboard))
 
 	mcp.AddTool(server, &mcp.Tool{
@@ -53,6 +56,7 @@ func registerTools(server *mcp.Server) {
 		Description: "List Kubernetes resources of a given kind with minified summaries. " +
 			"Supports all built-in kinds (pods, deployments, services, etc.) and CRDs. " +
 			"Use to discover what's running before inspecting individual resources.",
+		Annotations: readOnly,
 	}, logToolCall("list_resources", handleListResources))
 
 	mcp.AddTool(server, &mcp.Tool{
@@ -60,6 +64,7 @@ func registerTools(server *mcp.Server) {
 		Description: "Get detailed information about a single Kubernetes resource. " +
 			"Returns minified spec, status, and metadata. " +
 			"Use after list_resources to drill into a specific resource.",
+		Annotations: readOnly,
 	}, logToolCall("get_resource", handleGetResource))
 
 	mcp.AddTool(server, &mcp.Tool{
@@ -67,12 +72,14 @@ func registerTools(server *mcp.Server) {
 		Description: "Get the topology graph showing relationships between Kubernetes resources. " +
 			"Returns nodes and edges representing Deployments, Services, Ingresses, Pods, etc. " +
 			"Use 'traffic' view for network flow or 'resources' view for ownership hierarchy.",
+		Annotations: readOnly,
 	}, logToolCall("get_topology", handleGetTopology))
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name: "get_events",
 		Description: "Get recent Kubernetes warning events, deduplicated and sorted by recency. " +
 			"Useful for diagnosing issues — shows event reason, message, and occurrence count.",
+		Annotations: readOnly,
 	}, logToolCall("get_events", handleGetEvents))
 
 	mcp.AddTool(server, &mcp.Tool{
@@ -80,13 +87,83 @@ func registerTools(server *mcp.Server) {
 		Description: "Get filtered log lines from a pod, prioritizing errors and warnings. " +
 			"Returns diagnostically relevant lines (errors, panics, stack traces) or " +
 			"falls back to the last 20 lines if no error patterns match.",
+		Annotations: readOnly,
 	}, logToolCall("get_pod_logs", handleGetPodLogs))
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name: "list_namespaces",
 		Description: "List all Kubernetes namespaces with their status. " +
 			"Use to discover available namespaces before filtering other queries.",
+		Annotations: readOnly,
 	}, logToolCall("list_namespaces", handleListNamespaces))
+
+	// --- Helm tools (read-only) ---
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name: "list_helm_releases",
+		Description: "List all Helm releases in the cluster with their status and health. " +
+			"Returns release name, namespace, chart, version, status (deployed/failed/pending), " +
+			"and resource health (healthy/degraded/unhealthy). " +
+			"Use to get an overview of what's deployed via Helm before inspecting individual releases.",
+		Annotations: readOnly,
+	}, logToolCall("list_helm_releases", handleListHelmReleases))
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name: "get_helm_release",
+		Description: "Get detailed information about a specific Helm release including owned resources " +
+			"and their status. Optionally include values, revision history, or manifest diff between revisions " +
+			"using the 'include' parameter (comma-separated: values, history, diff). " +
+			"For diff, also provide diff_revision_1 and optionally diff_revision_2.",
+		Annotations: readOnly,
+	}, logToolCall("get_helm_release", handleGetHelmRelease))
+
+	// --- Workload logs tool (read-only) ---
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name: "get_workload_logs",
+		Description: "Get aggregated, AI-filtered logs from all pods of a workload (Deployment, StatefulSet, " +
+			"or DaemonSet). Logs are collected from all matching pods concurrently, filtered for errors/warnings, " +
+			"and deduplicated. More useful than get_pod_logs when you need logs across all replicas of a workload.",
+		Annotations: readOnly,
+	}, logToolCall("get_workload_logs", handleGetWorkloadLogs))
+
+	// --- Write tools (workload, cronjob, gitops) ---
+
+	boolPtr := func(b bool) *bool { return &b }
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name: "manage_workload",
+		Description: "Perform operations on a Kubernetes workload (Deployment, StatefulSet, or DaemonSet). " +
+			"Supported actions: 'restart' triggers a rolling restart, 'scale' changes the replica count " +
+			"(requires 'replicas' parameter), 'rollback' reverts to a previous revision " +
+			"(requires 'revision' parameter). Use list_resources or get_dashboard first to identify the target.",
+		Annotations: &mcp.ToolAnnotations{
+			DestructiveHint: boolPtr(false),
+		},
+	}, logToolCall("manage_workload", handleManageWorkload))
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name: "manage_cronjob",
+		Description: "Perform operations on a Kubernetes CronJob. Supported actions: " +
+			"'trigger' creates a manual Job run from the CronJob's template, " +
+			"'suspend' pauses the CronJob schedule (no new Jobs will be created), " +
+			"'resume' re-enables a suspended CronJob's schedule.",
+		Annotations: &mcp.ToolAnnotations{
+			DestructiveHint: boolPtr(false),
+		},
+	}, logToolCall("manage_cronjob", handleManageCronJob))
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name: "manage_gitops",
+		Description: "Perform operations on GitOps resources (ArgoCD or FluxCD). " +
+			"For ArgoCD: actions are 'sync' (trigger deployment), 'suspend' (disable auto-sync), " +
+			"'resume' (re-enable auto-sync). Resource kind is always Application. " +
+			"For FluxCD: actions are 'reconcile' (trigger sync), 'suspend', 'resume'. " +
+			"Requires 'kind' parameter (kustomization, helmrelease, gitrepository, etc.).",
+		Annotations: &mcp.ToolAnnotations{
+			DestructiveHint: boolPtr(false),
+		},
+	}, logToolCall("manage_gitops", handleManageGitOps))
 }
 
 // Tool input types
