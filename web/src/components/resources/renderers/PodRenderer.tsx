@@ -7,7 +7,7 @@ import { PortForwardInlineButton } from '../../portforward/PortForwardButton'
 import { useOpenTerminal, useOpenLogs } from '../../dock'
 import { Tooltip } from '../../ui/Tooltip'
 import { useCanExec, useCanViewLogs, useCanPortForward } from '../../../contexts/CapabilitiesContext'
-import { usePodMetrics, usePodMetricsHistory, usePrometheusStatus } from '../../../api/client'
+import { usePodMetrics, usePodMetricsHistory, usePrometheusResourceMetrics, usePrometheusStatus } from '../../../api/client'
 import { MetricsChart } from '../../ui/MetricsChart'
 import { ImageFilesystemModal } from '../ImageFilesystemModal'
 
@@ -139,11 +139,21 @@ export function PodRenderer({ data, onCopy, copied, onNavigate }: PodRendererPro
   const canViewLogs = useCanViewLogs()
   const canPortForward = useCanPortForward()
 
-  // Fetch pod metrics (current and historical) — hidden when Prometheus is connected
-  const { data: prometheusStatus } = usePrometheusStatus()
-  const prometheusConnected = prometheusStatus?.connected === true
+  // Fetch pod metrics (current and historical)
   const { data: metrics } = usePodMetrics(namespace, podName)
   const { data: metricsHistory } = usePodMetricsHistory(namespace, podName)
+
+  // Hide metrics-server section only when Prometheus actually has CPU data for this pod.
+  // Also hide while the CPU probe is loading (when Prometheus is connected) to avoid a brief flash.
+  const { data: prometheusStatus } = usePrometheusStatus()
+  const prometheusConnected = prometheusStatus?.connected === true
+  const { data: prometheusCPU, isLoading: prometheusCPULoading, error: prometheusCPUError } = usePrometheusResourceMetrics(
+    'Pod', namespace ?? '', podName ?? '', 'cpu', '1h', prometheusConnected,
+  )
+  const prometheusHasCPU = !prometheusCPUError && (prometheusCPU?.result?.series?.some(
+    s => s.dataPoints?.length > 0,
+  ) ?? false)
+  const hideMetricsServer = prometheusHasCPU || (prometheusConnected && prometheusCPULoading)
 
   // Check for problems
   const problems = getPodProblems(data)
@@ -507,8 +517,8 @@ export function PodRenderer({ data, onCopy, copied, onNavigate }: PodRendererPro
         </div>
       </Section>
 
-      {/* Resource Usage (from metrics-server) — hidden when Prometheus charts are available */}
-      {!prometheusConnected && !!(metrics?.containers?.length || metricsHistory?.containers?.length) && (
+      {/* Resource Usage (from metrics-server) — hidden when Prometheus has CPU/memory data */}
+      {!hideMetricsServer && !!(metrics?.containers?.length || metricsHistory?.containers?.length) && (
         <Section title="Resource Usage" icon={Activity} defaultExpanded>
           <div className="space-y-4">
             {(metricsHistory?.containers || metrics?.containers || []).map((historyContainer) => {

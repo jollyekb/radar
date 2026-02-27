@@ -1,7 +1,7 @@
 import { Server, HardDrive, Globe, Tag, Activity } from 'lucide-react'
 import { clsx } from 'clsx'
 import { Section, PropertyList, Property, ConditionsSection, AlertBanner } from '../drawer-components'
-import { useNodeMetrics, useNodeMetricsHistory, usePrometheusStatus } from '../../../api/client'
+import { useNodeMetrics, useNodeMetricsHistory, usePrometheusResourceMetrics, usePrometheusStatus } from '../../../api/client'
 import { MetricsChart } from '../../ui/MetricsChart'
 import { formatMemoryString } from '../../../utils/format'
 
@@ -75,10 +75,20 @@ export function NodeRenderer({ data, relationships }: NodeRendererProps) {
 
   // Fetch node metrics (current and historical)
   const nodeName = metadata.name
-  const { data: prometheusStatus } = usePrometheusStatus()
-  const prometheusConnected = prometheusStatus?.connected === true
   const { data: metrics } = useNodeMetrics(nodeName)
   const { data: metricsHistory } = useNodeMetricsHistory(nodeName)
+
+  // Hide metrics-server section only when Prometheus actually has CPU data for this node.
+  // Also hide while the CPU probe is loading (when Prometheus is connected) to avoid a brief flash.
+  const { data: prometheusStatus } = usePrometheusStatus()
+  const prometheusConnected = prometheusStatus?.connected === true
+  const { data: prometheusCPU, isLoading: prometheusCPULoading, error: prometheusCPUError } = usePrometheusResourceMetrics(
+    'Node', '', nodeName ?? '', 'cpu', '1h', prometheusConnected,
+  )
+  const prometheusHasCPU = !prometheusCPUError && (prometheusCPU?.result?.series?.some(
+    s => s.dataPoints?.length > 0,
+  ) ?? false)
+  const hideMetricsServer = prometheusHasCPU || (prometheusConnected && prometheusCPULoading)
 
   // Extract platform info from labels
   const instanceType = labels['node.kubernetes.io/instance-type']
@@ -143,8 +153,8 @@ export function NodeRenderer({ data, relationships }: NodeRendererProps) {
         </div>
       </Section>
 
-      {/* Resource Usage (from metrics-server) — hidden when Prometheus charts are available */}
-      {!prometheusConnected && (metrics?.usage || metricsHistory?.dataPoints?.length) && (
+      {/* Resource Usage (from metrics-server) — hidden when Prometheus has CPU/memory data */}
+      {!hideMetricsServer && (metrics?.usage || metricsHistory?.dataPoints?.length) && (
         <Section title="Resource Usage" icon={Activity} defaultExpanded>
           {metricsHistory?.dataPoints && metricsHistory.dataPoints.length > 0 ? (
             <div className="space-y-4">
