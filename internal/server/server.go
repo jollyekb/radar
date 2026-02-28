@@ -118,6 +118,7 @@ func (s *Server) setupRoutes() {
 		r.Get("/events/stream", s.broadcaster.HandleSSE)
 		r.Get("/pods/{namespace}/{name}/logs/stream", s.handlePodLogsStream)
 		r.Get("/pods/{namespace}/{name}/exec", s.handlePodExec)
+		r.Get("/pods/{namespace}/{name}/files/download", s.handlePodFileDownload)
 		r.Get("/workloads/{kind}/{namespace}/{name}/logs/stream", s.handleWorkloadLogsStream)
 
 		// All other API routes get a 60-second timeout
@@ -148,6 +149,9 @@ func (s *Server) setupRoutes() {
 
 			// Pod debug (ephemeral container)
 			r.Post("/pods/{namespace}/{name}/debug", s.handleCreateDebugContainer)
+
+			// Pod file browser
+			r.Get("/pods/{namespace}/{name}/files", s.handlePodFileList)
 
 			// Metrics (from metrics.k8s.io API)
 			r.Get("/metrics/pods/{namespace}/{name}", s.handlePodMetrics)

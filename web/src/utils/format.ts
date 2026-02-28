@@ -215,3 +215,19 @@ export function formatResourceSpec(resources: { cpu?: string; memory?: string })
 
   return parts.join(', ') || '-'
 }
+
+// =============================================================================
+// General Byte Formatting
+// =============================================================================
+
+/**
+ * Format a byte count to a human-readable string (KB, MB, GB, TB).
+ * Uses decimal (1024-based) units without the "i" suffix.
+ */
+export function formatBytes(bytes: number): string {
+  if (bytes === 0) return '0 B'
+  const k = 1024
+  const sizes = ['B', 'KB', 'MB', 'GB', 'TB']
+  const i = Math.floor(Math.log(bytes) / Math.log(k))
+  return `${parseFloat((bytes / Math.pow(k, i)).toFixed(1))} ${sizes[i]}`
+}

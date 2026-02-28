@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Server, HardDrive, Terminal as TerminalIcon, FileText, Activity, CirclePlay } from 'lucide-react'
+import { Server, HardDrive, Terminal as TerminalIcon, FileText, Activity, CirclePlay, FolderOpen } from 'lucide-react'
 import { clsx } from 'clsx'
 import { Section, PropertyList, Property, ConditionsSection, CopyHandler, AlertBanner, ResourceLink } from '../drawer-components'
 import { formatResources, formatDuration } from '../resource-utils'
@@ -10,6 +10,7 @@ import { useCanExec, useCanViewLogs, useCanPortForward } from '../../../contexts
 import { usePodMetrics, usePodMetricsHistory, usePrometheusResourceMetrics, usePrometheusStatus } from '../../../api/client'
 import { MetricsChart } from '../../ui/MetricsChart'
 import { ImageFilesystemModal } from '../ImageFilesystemModal'
+import { PodFilesystemModal } from '../PodFilesystemModal'
 
 function parseValidDate(dateStr: string): Date | null {
   const d = new Date(dateStr)
@@ -163,6 +164,9 @@ export function PodRenderer({ data, onCopy, copied, onNavigate }: PodRendererPro
   const [selectedImage, setSelectedImage] = useState<string | null>(null)
   const imagePullSecrets = data.spec?.imagePullSecrets?.map((s: { name: string }) => s.name) || []
 
+  // Pod filesystem modal state
+  const [podFilesContainer, setPodFilesContainer] = useState<string | null>(null)
+
   const handleOpenTerminal = (containerName?: string) => {
     const container = containerName || containers[0]?.name
     if (namespace && podName && container) {
@@ -289,13 +293,14 @@ export function PodRenderer({ data, onCopy, copied, onNavigate }: PodRendererPro
                     </div>
                     <div className="flex items-center gap-2">
                       {canViewLogs && (
-                        <button
-                          onClick={() => handleOpenLogs(container.name)}
-                          className="p-1 text-slate-400 hover:text-blue-400 hover:bg-slate-600/50 rounded transition-colors"
-                          title={`View logs for ${container.name}`}
-                        >
-                          <FileText className="w-4 h-4" />
-                        </button>
+                        <Tooltip content="Logs" delay={150}>
+                          <button
+                            onClick={() => handleOpenLogs(container.name)}
+                            className="p-1 text-slate-400 hover:text-blue-400 hover:bg-slate-600/50 rounded transition-colors"
+                          >
+                            <FileText className="w-4 h-4" />
+                          </button>
+                        </Tooltip>
                       )}
                       <span className={clsx('px-2 py-0.5 text-xs rounded', statusColor)}>
                         {statusLabel}
@@ -303,13 +308,14 @@ export function PodRenderer({ data, onCopy, copied, onNavigate }: PodRendererPro
                     </div>
                   </div>
                   <div className="text-xs text-theme-text-secondary space-y-1">
-                    <button
-                      className="truncate text-blue-400 hover:text-blue-300 hover:underline text-left w-full"
-                      title="Click to view filesystem"
-                      onClick={() => setSelectedImage(container.image)}
-                    >
-                      Image: {container.image}
-                    </button>
+                    <Tooltip content="Browse image filesystem from registry" delay={150} position="bottom">
+                      <button
+                        className="truncate text-blue-400 hover:text-blue-300 hover:underline text-left w-full"
+                        onClick={() => setSelectedImage(container.image)}
+                      >
+                        Image: {container.image}
+                      </button>
+                    </Tooltip>
                     {command && (
                       <div className="text-theme-text-tertiary font-mono break-all">
                         $ {command}
@@ -383,22 +389,34 @@ export function PodRenderer({ data, onCopy, copied, onNavigate }: PodRendererPro
                   <span className="text-sm font-medium text-theme-text-primary">{container.name}</span>
                   <div className="flex items-center gap-2">
                     {stateKey === 'running' && canExec && (
-                      <button
-                        onClick={() => handleOpenTerminal(container.name)}
-                        className="p-1 text-slate-400 hover:text-blue-400 hover:bg-slate-600/50 rounded transition-colors"
-                        title={`Open terminal in ${container.name}`}
-                      >
-                        <TerminalIcon className="w-4 h-4" />
-                      </button>
+                      <Tooltip content="Terminal" delay={150}>
+                        <button
+                          onClick={() => handleOpenTerminal(container.name)}
+                          className="p-1 text-slate-400 hover:text-blue-400 hover:bg-slate-600/50 rounded transition-colors"
+                        >
+                          <TerminalIcon className="w-4 h-4" />
+                        </button>
+                      </Tooltip>
+                    )}
+                    {stateKey === 'running' && canExec && (
+                      <Tooltip content="Browse files" delay={150}>
+                        <button
+                          onClick={() => setPodFilesContainer(container.name)}
+                          className="p-1 text-slate-400 hover:text-blue-400 hover:bg-slate-600/50 rounded transition-colors"
+                        >
+                          <FolderOpen className="w-4 h-4" />
+                        </button>
+                      </Tooltip>
                     )}
                     {canViewLogs && (
-                      <button
-                        onClick={() => handleOpenLogs(container.name)}
-                        className="p-1 text-slate-400 hover:text-blue-400 hover:bg-slate-600/50 rounded transition-colors"
-                        title={`View logs for ${container.name}`}
-                      >
-                        <FileText className="w-4 h-4" />
-                      </button>
+                      <Tooltip content="Logs" delay={150}>
+                        <button
+                          onClick={() => handleOpenLogs(container.name)}
+                          className="p-1 text-slate-400 hover:text-blue-400 hover:bg-slate-600/50 rounded transition-colors"
+                        >
+                          <FileText className="w-4 h-4" />
+                        </button>
+                      </Tooltip>
                     )}
                     <span className={clsx(
                       'px-2 py-0.5 text-xs rounded',
@@ -419,7 +437,7 @@ export function PodRenderer({ data, onCopy, copied, onNavigate }: PodRendererPro
                 <div className="text-xs text-theme-text-secondary space-y-1">
                   <button
                     className="truncate text-blue-400 hover:text-blue-300 hover:underline text-left w-full"
-                    title="Click to view filesystem"
+                    title="Browse static image filesystem from registry"
                     onClick={() => setSelectedImage(container.image)}
                   >
                     Image: {container.image}
@@ -612,6 +630,28 @@ export function PodRenderer({ data, onCopy, copied, onNavigate }: PodRendererPro
           namespace={namespace || ''}
           podName={podName || ''}
           pullSecrets={imagePullSecrets}
+          onSwitchToPodFiles={isRunning && canExec ? () => {
+            // Find which container uses this image and open pod files for it
+            const match = containers.find((c: any) => c.image === selectedImage)
+            setPodFilesContainer(match?.name || containers[0]?.name)
+          } : undefined}
+        />
+      )}
+
+      {/* Pod Filesystem Modal */}
+      {podFilesContainer && (
+        <PodFilesystemModal
+          open={!!podFilesContainer}
+          onClose={() => setPodFilesContainer(null)}
+          namespace={namespace || ''}
+          podName={podName || ''}
+          containers={containers.map((c: { name: string }) => c.name)}
+          initialContainer={podFilesContainer}
+          onSwitchToImageFiles={() => {
+            // Find which image this container uses and open image filesystem
+            const match = containers.find((c: any) => c.name === podFilesContainer)
+            if (match?.image) setSelectedImage(match.image)
+          }}
         />
       )}
     </>

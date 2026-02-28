@@ -1,8 +1,11 @@
 import { useState, useRef, useEffect, useMemo, useCallback } from 'react'
+import { createPortal } from 'react-dom'
 import { X, Folder, File, Link2, ChevronRight, ChevronDown, AlertTriangle, Loader2, Search, Download, HardDrive, Shield, ShieldCheck, Terminal, Copy, Check, RefreshCw } from 'lucide-react'
 import { clsx } from 'clsx'
 import { useImageMetadata, ApiError } from '../../api/client'
 import type { FileNode, ImageFilesystem } from '../../types'
+import { formatBytes } from '../../utils/format'
+import { downloadBlob, filterTree } from './file-browser-utils'
 
 const API_BASE = '/api'
 
@@ -34,6 +37,7 @@ interface ImageFilesystemModalProps {
   namespace: string
   podName: string
   pullSecrets: string[]
+  onSwitchToPodFiles?: () => void
 }
 
 export function ImageFilesystemModal({
@@ -43,6 +47,7 @@ export function ImageFilesystemModal({
   namespace,
   podName,
   pullSecrets,
+  onSwitchToPodFiles,
 }: ImageFilesystemModalProps) {
   const dialogRef = useRef<HTMLDivElement>(null)
   const [searchQuery, setSearchQuery] = useState('')
@@ -118,8 +123,8 @@ export function ImageFilesystemModal({
   const showConfirmation = metadata && !metadata.cached && !filesystem && !isLoadingFilesystem && !error
   const showFilesystem = displayFilesystem && displayFilesystem.root
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center">
+  return createPortal(
+    <div className="fixed inset-0 z-[100] flex items-center justify-center">
       {/* Backdrop */}
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
 
@@ -230,20 +235,31 @@ export function ImageFilesystemModal({
         </div>
 
         {/* Footer with stats */}
-        {displayFilesystem && (
-          <div className="p-3 border-t border-theme-border text-xs text-theme-text-tertiary flex items-center gap-4 shrink-0">
-            <span>{displayFilesystem.totalFiles.toLocaleString()} files</span>
-            <span>{formatBytes(displayFilesystem.totalSize)}</span>
-            {displayFilesystem.layers && <span>{displayFilesystem.layers.length} layers</span>}
-            {displayFilesystem.digest && (
-              <span className="truncate" title={displayFilesystem.digest}>
-                Digest: {displayFilesystem.digest.substring(0, 20)}...
-              </span>
-            )}
-          </div>
-        )}
+        <div className="p-3 border-t border-theme-border text-xs text-theme-text-tertiary flex items-center gap-4 shrink-0">
+          {displayFilesystem && (
+            <>
+              <span>{displayFilesystem.totalFiles.toLocaleString()} files</span>
+              <span>{formatBytes(displayFilesystem.totalSize)}</span>
+              {displayFilesystem.layers && <span>{displayFilesystem.layers.length} layers</span>}
+              {displayFilesystem.digest && (
+                <span className="truncate" title={displayFilesystem.digest}>
+                  Digest: {displayFilesystem.digest.substring(0, 20)}...
+                </span>
+              )}
+            </>
+          )}
+          {onSwitchToPodFiles && (
+            <button
+              onClick={() => { onClose(); onSwitchToPodFiles() }}
+              className="ml-auto text-blue-400 hover:text-blue-300 hover:underline"
+            >
+              Browse live files from running pod &rarr;
+            </button>
+          )}
+        </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }
 
@@ -623,14 +639,7 @@ function FileTreeNode({ node, depth, defaultExpanded = true, image, namespace, p
       }
 
       const blob = await response.blob()
-      const url = window.URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = node.name
-      document.body.appendChild(a)
-      a.click()
-      window.URL.revokeObjectURL(url)
-      document.body.removeChild(a)
+      downloadBlob(blob, node.name)
     } catch (err) {
       console.error('Download failed:', err)
     } finally {
@@ -729,34 +738,3 @@ function FileTreeNode({ node, depth, defaultExpanded = true, image, namespace, p
   )
 }
 
-// ============================================================================
-// Utility Functions
-// ============================================================================
-
-function formatBytes(bytes: number): string {
-  if (bytes === 0) return '0 B'
-  const k = 1024
-  const sizes = ['B', 'KB', 'MB', 'GB', 'TB']
-  const i = Math.floor(Math.log(bytes) / Math.log(k))
-  return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i]
-}
-
-function filterTree(node: FileNode, query: string): FileNode | null {
-  // If this node matches, return it with all children
-  if (node.name.toLowerCase().includes(query)) {
-    return node
-  }
-
-  // If it's a directory, filter children recursively
-  if (node.type === 'dir' && node.children) {
-    const filteredChildren = node.children
-      .map((child) => filterTree(child, query))
-      .filter((child): child is FileNode => child !== null)
-
-    if (filteredChildren.length > 0) {
-      return { ...node, children: filteredChildren }
-    }
-  }
-
-  return null
-}

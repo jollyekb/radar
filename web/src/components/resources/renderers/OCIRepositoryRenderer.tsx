@@ -2,6 +2,7 @@ import { Package, AlertTriangle, CheckCircle2 } from 'lucide-react'
 import { clsx } from 'clsx'
 import { Section, PropertyList, Property, ConditionsSection } from '../drawer-components'
 import { formatAge } from '../resource-utils'
+import { formatBytes } from '../../../utils/format'
 import { GitOpsStatusBadge, SyncCountdown } from '../../gitops'
 import { fluxConditionsToGitOpsStatus, type FluxCondition } from '../../../types/gitops'
 
@@ -149,12 +150,4 @@ export function OCIRepositoryRenderer({ data }: OCIRepositoryRendererProps) {
       <ConditionsSection conditions={conditions} />
     </>
   )
-}
-
-function formatBytes(bytes: number): string {
-  if (bytes === 0) return '0 B'
-  const k = 1024
-  const sizes = ['B', 'KB', 'MB', 'GB']
-  const i = Math.floor(Math.log(bytes) / Math.log(k))
-  return `${parseFloat((bytes / Math.pow(k, i)).toFixed(1))} ${sizes[i]}`
 }
