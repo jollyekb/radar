@@ -26,13 +26,19 @@ A clear and concise description of what you expected to happen.
 
 If applicable, add screenshots to help explain your problem.
 
-## Environment
+## Diagnostics (optional)
 
-- OS: [e.g., macOS 14.0, Ubuntu 22.04]
+A diagnostics snapshot helps us debug faster — it captures your environment, cluster info, and Radar state automatically. It doesn't include secrets, credentials, or resource contents, but you're welcome to review and redact anything you'd prefer not to share. In Radar, press `Ctrl+Shift+D` → **Copy as Markdown**, or click the bug icon (bottom-right corner) → **Report Bug**.
+
+<details><summary>Diagnostics snapshot</summary>
+
+<!-- Paste here -->
+
+</details>
+
+If you'd rather not include diagnostics, these basics help:
 - Radar version: [e.g., 0.9.0]
-- Kubernetes version: [e.g., 1.28]
-- Cluster type: [e.g., GKE, EKS, minikube, kind]
-- Browser: [e.g., Chrome 120]
+- Kubernetes: [e.g., 1.28, GKE, EKS, minikube]
 
 ## Logs
 
