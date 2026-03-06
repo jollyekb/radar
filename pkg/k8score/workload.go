@@ -359,19 +359,27 @@ func (m *WorkloadManager) listDeploymentRevisions(ctx context.Context, namespace
 		return nil, fmt.Errorf("failed to list replicasets: %w", err)
 	}
 
+	return BuildDeploymentRevisions(rsList.Items, workloadUID), nil
+}
+
+// BuildDeploymentRevisions builds WorkloadRevision[] from unstructured ReplicaSets owned by a Deployment.
+// workloadUID filters by UID-based ownership; pass empty string to skip UID-based filter.
+func BuildDeploymentRevisions(rsList []unstructured.Unstructured, workloadUID string) []WorkloadRevision {
 	var revisions []WorkloadRevision
 	var maxRevision int64
 
-	for _, rs := range rsList.Items {
-		owned := false
-		for _, ref := range rs.GetOwnerReferences() {
-			if string(ref.UID) == workloadUID {
-				owned = true
-				break
+	for _, rs := range rsList {
+		if workloadUID != "" {
+			owned := false
+			for _, ref := range rs.GetOwnerReferences() {
+				if string(ref.UID) == workloadUID {
+					owned = true
+					break
+				}
 			}
-		}
-		if !owned {
-			continue
+			if !owned {
+				continue
+			}
 		}
 
 		revStr, ok := rs.GetAnnotations()["deployment.kubernetes.io/revision"]
@@ -414,7 +422,7 @@ func (m *WorkloadManager) listDeploymentRevisions(ctx context.Context, namespace
 
 	sort.Slice(revisions, func(i, j int) bool { return revisions[i].Number > revisions[j].Number })
 
-	return revisions, nil
+	return revisions
 }
 
 func (m *WorkloadManager) listControllerRevisions(ctx context.Context, namespace, name, workloadUID string) ([]WorkloadRevision, error) {
@@ -428,19 +436,27 @@ func (m *WorkloadManager) listControllerRevisions(ctx context.Context, namespace
 		return nil, fmt.Errorf("failed to list controllerrevisions: %w", err)
 	}
 
+	return BuildControllerRevisions(crList.Items, workloadUID), nil
+}
+
+// BuildControllerRevisions builds WorkloadRevision[] from unstructured ControllerRevisions owned by a StatefulSet or DaemonSet.
+// workloadUID filters by UID-based ownership; pass empty string to skip UID-based filter.
+func BuildControllerRevisions(crList []unstructured.Unstructured, workloadUID string) []WorkloadRevision {
 	var revisions []WorkloadRevision
 	var maxRevision int64
 
-	for _, cr := range crList.Items {
-		owned := false
-		for _, ref := range cr.GetOwnerReferences() {
-			if string(ref.UID) == workloadUID {
-				owned = true
-				break
+	for _, cr := range crList {
+		if workloadUID != "" {
+			owned := false
+			for _, ref := range cr.GetOwnerReferences() {
+				if string(ref.UID) == workloadUID {
+					owned = true
+					break
+				}
 			}
-		}
-		if !owned {
-			continue
+			if !owned {
+				continue
+			}
 		}
 
 		revNum, found, err := unstructured.NestedInt64(cr.Object, "revision")
@@ -483,7 +499,7 @@ func (m *WorkloadManager) listControllerRevisions(ctx context.Context, namespace
 
 	sort.Slice(revisions, func(i, j int) bool { return revisions[i].Number > revisions[j].Number })
 
-	return revisions, nil
+	return revisions
 }
 
 // RollbackWorkload rolls back a Deployment, StatefulSet, or DaemonSet to a specific revision.

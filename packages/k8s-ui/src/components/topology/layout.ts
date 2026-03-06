@@ -20,15 +20,28 @@ const GROUP_PADDING_NO_HEADER = {
   right: 30,
 }
 
-// Worker instance management
-let layoutWorker: Worker | null = null
-let requestIdCounter = 0
-const pendingRequests = new Map<number, {
-  resolve: (result: WorkerLayoutResult) => void
-  reject: (error: Error) => void
-}>()
+// ---------------------------------------------------------------------------
+// Layout engine abstraction
+//
+// Two execution strategies for ELK layout:
+//   'worker'      — Web Worker (Vite/Radar). Keeps the main thread free.
+//   'main-thread' — Inline ELK (webpack/Next.js). Workers can't load the
+//                   layout.worker.ts file under webpack, so we run ELK
+//                   directly using elkjs/lib/elk.bundled.js.
+//
+// The active strategy is set once via `setLayoutEngine()` (exported).
+// Defaults to 'worker' — consumers on webpack call setLayoutEngine('main-thread').
+// ---------------------------------------------------------------------------
 
-interface WorkerLayoutResult {
+type LayoutEngine = 'worker' | 'main-thread'
+let layoutEngine: LayoutEngine = 'worker'
+
+/** Set the ELK layout execution strategy. Call once at app init. */
+export function setLayoutEngine(engine: LayoutEngine) {
+  layoutEngine = engine
+}
+
+interface LayoutResult {
   groupLayouts: Array<{
     groupId: string
     groupKey: string
@@ -46,9 +59,40 @@ interface WorkerLayoutResult {
   error?: string
 }
 
-function getLayoutWorker(): Worker {
+// ELK algorithm options (shared between worker and main-thread engines)
+const elkOptionsGroup = {
+  'elk.algorithm': 'layered',
+  'elk.direction': 'RIGHT',
+  'elk.layered.considerModelOrder.strategy': 'NODES_AND_EDGES',
+  'elk.spacing.nodeNode': '40',
+  'elk.layered.spacing.nodeNodeBetweenLayers': '85',
+  'elk.layered.spacing.edgeNodeBetweenLayers': '25',
+  'elk.edgeRouting': 'ORTHOGONAL',
+  'elk.layered.nodePlacement.strategy': 'NETWORK_SIMPLEX',
+}
+
+const elkOptionsGroupLayout = {
+  'elk.algorithm': 'layered',
+  'elk.direction': 'RIGHT',
+  'elk.layered.considerModelOrder.strategy': 'NODES_AND_EDGES',
+  'elk.spacing.nodeNode': '80',
+  'elk.layered.spacing.nodeNodeBetweenLayers': '120',
+  'elk.edgeRouting': 'ORTHOGONAL',
+  'elk.layered.nodePlacement.strategy': 'NETWORK_SIMPLEX',
+}
+
+// ---------------------------------------------------------------------------
+// Worker engine
+// ---------------------------------------------------------------------------
+let layoutWorker: Worker | null = null
+let requestIdCounter = 0
+const pendingRequests = new Map<number, {
+  resolve: (result: LayoutResult) => void
+  reject: (error: Error) => void
+}>()
+
+function getOrCreateWorker(): Worker {
   if (!layoutWorker) {
-    // Use URL constructor for better Vite compatibility with workers
     layoutWorker = new Worker(new URL('./layout.worker.ts', import.meta.url), { type: 'module' })
     layoutWorker.onmessage = (e: MessageEvent) => {
       const { requestId, ...result } = e.data
@@ -58,13 +102,12 @@ function getLayoutWorker(): Worker {
         if (result.error) {
           pending.reject(new Error(result.error))
         } else {
-          pending.resolve(result as WorkerLayoutResult)
+          pending.resolve(result as LayoutResult)
         }
       }
     }
     layoutWorker.onerror = (e) => {
-      console.error('Layout worker error:', e)
-      // Reject all pending requests
+      console.error('[TopologyLayout] Worker error:', e)
       for (const [, pending] of pendingRequests) {
         pending.reject(new Error('Worker error'))
       }
@@ -74,25 +117,136 @@ function getLayoutWorker(): Worker {
   return layoutWorker
 }
 
-function runLayoutInWorker(
+function runLayoutViaWorker(
   elkGraph: ElkGraph,
   groupingMode: GroupingMode,
   hideGroupHeader: boolean,
   padding: typeof GROUP_PADDING
-): Promise<WorkerLayoutResult> {
+): Promise<LayoutResult> {
   return new Promise((resolve, reject) => {
-    const worker = getLayoutWorker()
+    const worker = getOrCreateWorker()
     const requestId = ++requestIdCounter
     pendingRequests.set(requestId, { resolve, reject })
-    worker.postMessage({
-      type: 'layout',
-      requestId,
-      elkGraph,
-      groupingMode,
-      hideGroupHeader,
-      padding,
-    })
+    worker.postMessage({ type: 'layout', requestId, elkGraph, groupingMode, hideGroupHeader, padding })
   })
+}
+
+// ---------------------------------------------------------------------------
+// Main-thread engine — same two-phase ELK layout as layout.worker.ts
+// but runs inline using elkjs/lib/elk.bundled.js (no web-worker dependency).
+// ---------------------------------------------------------------------------
+async function runLayoutOnMainThread(
+  elkGraph: ElkGraph,
+  groupingMode: GroupingMode,
+  hideGroupHeader: boolean,
+  padding: typeof GROUP_PADDING
+): Promise<LayoutResult> {
+  const ELK = (await import('elkjs/lib/elk.bundled.js')).default
+  const elk = new ELK()
+
+  const groupLayouts: LayoutResult['groupLayouts'] = []
+  const ungroupedNodes: LayoutResult['ungroupedNodes'] = []
+  const groupNodeIds = new Map<string, Set<string>>()
+
+  // Phase 1: Layout each group independently
+  for (const child of elkGraph.children) {
+    const isGroup = child.id.startsWith('group-')
+
+    if (isGroup && child.children && child.children.length > 0) {
+      const groupKey = child.id.replace(`group-${groupingMode}-`, '')
+      const minWidth = hideGroupHeader ? 300 : Math.max(500, groupKey.length * 16 + 200)
+      const nodeIds = new Set(child.children.map(c => c.id))
+      groupNodeIds.set(child.id, nodeIds)
+
+      const intraGroupEdges = elkGraph.edges.filter(e =>
+        nodeIds.has(e.sources[0]) && nodeIds.has(e.targets[0])
+      )
+
+      const layoutResult = await elk.layout({
+        id: child.id,
+        layoutOptions: {
+          ...elkOptionsGroup,
+          'elk.padding': `[left=${padding.left}, top=${padding.top}, right=${padding.right}, bottom=${padding.bottom}]`,
+        },
+        children: child.children,
+        edges: intraGroupEdges,
+      }) as any
+
+      groupLayouts.push({
+        groupId: child.id,
+        groupKey,
+        width: hideGroupHeader
+          ? (layoutResult.width || 300)
+          : Math.max(layoutResult.width || 300, minWidth),
+        height: layoutResult.height || 200,
+        children: (layoutResult.children || []).map((c: any) => ({
+          id: c.id, x: c.x || 0, y: c.y || 0,
+        })),
+        isCollapsed: false,
+      })
+    } else if (isGroup) {
+      const groupKey = child.id.replace(`group-${groupingMode}-`, '')
+      const minWidth = Math.max(400, groupKey.length * 16 + 180)
+      groupLayouts.push({
+        groupId: child.id, groupKey,
+        width: Math.max(child.width || 280, minWidth),
+        height: child.height || 90,
+        children: [], isCollapsed: true,
+      })
+    } else {
+      ungroupedNodes.push({ id: child.id, width: child.width || 200, height: child.height || 56 })
+    }
+  }
+
+  // Phase 2: Build meta-graph and position groups based on inter-group edges
+  const nodeToGroup = new Map<string, string>()
+  for (const [groupId, nodeIds] of groupNodeIds) {
+    for (const nodeId of nodeIds) nodeToGroup.set(nodeId, groupId)
+  }
+
+  const interGroupEdges: ElkEdge[] = []
+  const seen = new Set<string>()
+  for (const edge of elkGraph.edges) {
+    const sg = nodeToGroup.get(edge.sources[0])
+    const tg = nodeToGroup.get(edge.targets[0])
+    if (sg && tg && sg !== tg) {
+      const key = `${sg}->${tg}`
+      if (!seen.has(key)) { seen.add(key); interGroupEdges.push({ id: `inter-${key}`, sources: [sg], targets: [tg] }) }
+    } else if ((!sg && tg) || (sg && !tg)) {
+      const s = sg || edge.sources[0], t = tg || edge.targets[0], key = `${s}->${t}`
+      if (!seen.has(key)) { seen.add(key); interGroupEdges.push({ id: `inter-${key}`, sources: [s], targets: [t] }) }
+    }
+  }
+
+  const metaResult = await elk.layout({
+    id: 'meta-root',
+    layoutOptions: elkOptionsGroupLayout,
+    children: [
+      ...groupLayouts.map(g => ({ id: g.groupId, width: g.width, height: g.height })),
+      ...ungroupedNodes.map(n => ({ id: n.id, width: n.width, height: n.height })),
+    ],
+    edges: interGroupEdges,
+  }) as any
+
+  const groupPositions: Array<[string, { x: number; y: number }]> =
+    (metaResult.children || []).map((c: any) => [c.id, { x: c.x || 0, y: c.y || 0 }])
+
+  return { groupLayouts, ungroupedNodes, groupPositions }
+}
+
+// ---------------------------------------------------------------------------
+// Dispatcher — routes to the active engine
+// ---------------------------------------------------------------------------
+function runLayout(
+  elkGraph: ElkGraph,
+  groupingMode: GroupingMode,
+  hideGroupHeader: boolean,
+  padding: typeof GROUP_PADDING
+): Promise<LayoutResult> {
+  if (layoutEngine === 'main-thread') {
+    return runLayoutOnMainThread(elkGraph, groupingMode, hideGroupHeader, padding)
+  }
+  return runLayoutViaWorker(elkGraph, groupingMode, hideGroupHeader, padding)
 }
 
 interface ElkNode {
@@ -484,7 +638,7 @@ export async function applyHierarchicalLayout(
     const padding = hideGroupHeader ? GROUP_PADDING_NO_HEADER : GROUP_PADDING
 
     // Run layout in worker (off main thread)
-    const workerResult = await runLayoutInWorker(elkGraph, groupingMode, hideGroupHeader, padding)
+    const workerResult = await runLayout(elkGraph, groupingMode, hideGroupHeader, padding)
 
     if (workerResult.error) {
       return { nodes: [], positions: new Map(), error: workerResult.error }
