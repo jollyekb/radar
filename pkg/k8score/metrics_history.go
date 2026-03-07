@@ -105,6 +105,10 @@ type MetricsHistoryStore struct {
 	lastPodError                 string
 	lastNodeError                string
 
+	// OnError is called when a metrics collection error is logged.
+	// It allows callers to record errors in an external error log.
+	OnError func(subsystem, level, format string, args ...any)
+
 	stopCh    chan struct{}
 	startOnce sync.Once
 	stopOnce  sync.Once
@@ -214,25 +218,40 @@ func (s *MetricsHistoryStore) collectMetrics() {
 
 func (s *MetricsHistoryStore) collectPodMetrics(ctx context.Context, now time.Time) {
 	if s.dynClient == nil {
+		var shouldReport bool
+		var count int
 		s.mu.Lock()
 		s.consecutivePodErrors++
 		s.lastPodError = "dynamic client not initialized"
-		if s.consecutivePodErrors == 1 || s.consecutivePodErrors%20 == 0 {
-			log.Printf("[metrics] Pod metrics collection failed (count=%d): %s", s.consecutivePodErrors, s.lastPodError)
-		}
+		shouldReport = s.consecutivePodErrors == 1 || s.consecutivePodErrors%20 == 0
+		count = s.consecutivePodErrors
 		s.mu.Unlock()
+		if shouldReport {
+			log.Printf("[metrics] Pod metrics collection failed (count=%d): %s", count, "dynamic client not initialized")
+			if s.OnError != nil {
+				s.OnError("metrics", "error", "pod metrics collection failed (count=%d): %s", count, "dynamic client not initialized")
+			}
+		}
 		return
 	}
 
 	result, err := s.dynClient.Resource(PodMetricsGVR).List(ctx, metav1.ListOptions{})
 	if err != nil {
+		var shouldReport bool
+		var count int
+		errMsg := err.Error()
 		s.mu.Lock()
 		s.consecutivePodErrors++
-		s.lastPodError = err.Error()
-		if s.consecutivePodErrors == 1 || s.consecutivePodErrors%20 == 0 {
-			log.Printf("[metrics] Pod metrics collection failed (count=%d): %v", s.consecutivePodErrors, err)
-		}
+		s.lastPodError = errMsg
+		shouldReport = s.consecutivePodErrors == 1 || s.consecutivePodErrors%20 == 0
+		count = s.consecutivePodErrors
 		s.mu.Unlock()
+		if shouldReport {
+			log.Printf("[metrics] Pod metrics collection failed (count=%d): %v", count, err)
+			if s.OnError != nil {
+				s.OnError("metrics", "error", "pod metrics collection failed (count=%d): %v", count, err)
+			}
+		}
 		return
 	}
 
@@ -306,25 +325,40 @@ func (s *MetricsHistoryStore) collectPodMetrics(ctx context.Context, now time.Ti
 
 func (s *MetricsHistoryStore) collectNodeMetrics(ctx context.Context, now time.Time) {
 	if s.dynClient == nil {
+		var shouldReport bool
+		var count int
 		s.mu.Lock()
 		s.consecutiveNodeErrors++
 		s.lastNodeError = "dynamic client not initialized"
-		if s.consecutiveNodeErrors == 1 || s.consecutiveNodeErrors%20 == 0 {
-			log.Printf("[metrics] Node metrics collection failed (count=%d): %s", s.consecutiveNodeErrors, s.lastNodeError)
-		}
+		shouldReport = s.consecutiveNodeErrors == 1 || s.consecutiveNodeErrors%20 == 0
+		count = s.consecutiveNodeErrors
 		s.mu.Unlock()
+		if shouldReport {
+			log.Printf("[metrics] Node metrics collection failed (count=%d): %s", count, "dynamic client not initialized")
+			if s.OnError != nil {
+				s.OnError("metrics", "error", "node metrics collection failed (count=%d): %s", count, "dynamic client not initialized")
+			}
+		}
 		return
 	}
 
 	result, err := s.dynClient.Resource(NodeMetricsGVR).List(ctx, metav1.ListOptions{})
 	if err != nil {
+		var shouldReport bool
+		var count int
+		errMsg := err.Error()
 		s.mu.Lock()
 		s.consecutiveNodeErrors++
-		s.lastNodeError = err.Error()
-		if s.consecutiveNodeErrors == 1 || s.consecutiveNodeErrors%20 == 0 {
-			log.Printf("[metrics] Node metrics collection failed (count=%d): %v", s.consecutiveNodeErrors, err)
-		}
+		s.lastNodeError = errMsg
+		shouldReport = s.consecutiveNodeErrors == 1 || s.consecutiveNodeErrors%20 == 0
+		count = s.consecutiveNodeErrors
 		s.mu.Unlock()
+		if shouldReport {
+			log.Printf("[metrics] Node metrics collection failed (count=%d): %v", count, err)
+			if s.OnError != nil {
+				s.OnError("metrics", "error", "node metrics collection failed (count=%d): %v", count, err)
+			}
+		}
 		return
 	}
 
