@@ -7,6 +7,7 @@ import (
 	"os"
 
 	"github.com/skyhook-io/radar/internal/app"
+	"github.com/skyhook-io/radar/internal/config"
 	"github.com/skyhook-io/radar/internal/k8s"
 	"github.com/skyhook-io/radar/internal/updater"
 	versionpkg "github.com/skyhook-io/radar/internal/version"
@@ -25,18 +26,21 @@ var (
 )
 
 func main() {
-	// Parse flags (same K8s flags as CLI, no --port or --no-browser)
-	kubeconfig := flag.String("kubeconfig", "", "Path to kubeconfig file (default: ~/.kube/config)")
-	kubeconfigDir := flag.String("kubeconfig-dir", "", "Comma-separated directories containing kubeconfig files (mutually exclusive with --kubeconfig)")
-	namespace := flag.String("namespace", "", "Initial namespace filter (empty = all namespaces)")
+	// Load persistent config (~/.radar/config.json) for flag defaults.
+	fileCfg := config.Load()
+
+	// Parse flags (defaults come from config file, falling back to hardcoded values)
+	kubeconfig := flag.String("kubeconfig", fileCfg.Kubeconfig, "Path to kubeconfig file (default: ~/.kube/config)")
+	kubeconfigDir := flag.String("kubeconfig-dir", fileCfg.KubeconfigDirsFlag(), "Comma-separated directories containing kubeconfig files (mutually exclusive with --kubeconfig)")
+	namespace := flag.String("namespace", fileCfg.Namespace, "Initial namespace filter (empty = all namespaces)")
 	showVersion := flag.Bool("version", false, "Show version and exit")
-	historyLimit := flag.Int("history-limit", 10000, "Maximum number of events to retain in timeline")
+	historyLimit := flag.Int("history-limit", fileCfg.HistoryLimitOr(10000), "Maximum number of events to retain in timeline")
 	debugEvents := flag.Bool("debug-events", false, "Enable verbose event debugging")
 	fakeInCluster := flag.Bool("fake-in-cluster", false, "Simulate in-cluster mode for testing")
 	disableHelmWrite := flag.Bool("disable-helm-write", false, "Simulate restricted Helm permissions")
-	timelineStorage := flag.String("timeline-storage", "memory", "Timeline storage backend: memory or sqlite")
-	timelineDBPath := flag.String("timeline-db", "", "Path to timeline database file (default: ~/.radar/timeline.db)")
-	prometheusURL := flag.String("prometheus-url", "", "Manual Prometheus/VictoriaMetrics URL (skips auto-discovery)")
+	timelineStorage := flag.String("timeline-storage", fileCfg.TimelineStorageOr("memory"), "Timeline storage backend: memory or sqlite")
+	timelineDBPath := flag.String("timeline-db", fileCfg.TimelineDBPath, "Path to timeline database file (default: ~/.radar/timeline.db)")
+	prometheusURL := flag.String("prometheus-url", fileCfg.PrometheusURL, "Manual Prometheus/VictoriaMetrics URL (skips auto-discovery)")
 	flag.Parse()
 
 	if *showVersion {
@@ -70,7 +74,7 @@ func main() {
 		Kubeconfig:       *kubeconfig,
 		KubeconfigDirs:   app.ParseKubeconfigDirs(*kubeconfigDir),
 		Namespace:        *namespace,
-		Port:             0, // Random port — no conflicts with CLI
+		Port:             fileCfg.PortOr(0), // Configured port, or random to avoid conflicts with CLI
 		DevMode:          false,
 		HistoryLimit:     *historyLimit,
 		DebugEvents:      *debugEvents,
@@ -80,6 +84,7 @@ func main() {
 		TimelineDBPath:   *timelineDBPath,
 		PrometheusURL:    *prometheusURL,
 		Version:          version,
+		MCPEnabled:       fileCfg.MCPEnabledOr(true),
 	}
 
 	app.SetGlobals(cfg)
@@ -95,7 +100,7 @@ func main() {
 	timelineStoreCfg := app.BuildTimelineStoreConfig(cfg)
 	app.RegisterCallbacks(cfg, timelineStoreCfg)
 
-	// Create server on random port and attach desktop updater
+	// Create server and attach desktop updater
 	srv := app.CreateServer(cfg)
 	desktopUpdater := updater.New()
 	srv.SetUpdater(desktopUpdater)
@@ -108,6 +113,9 @@ func main() {
 		}
 	}()
 	<-ready
+
+	// Write port file so MCP clients can discover the running server
+	app.WriteMCPPortFile(srv.ActualPort())
 
 	// Initialize cluster in background (browser will see progress via SSE)
 	go app.InitializeCluster()
@@ -136,7 +144,7 @@ func main() {
 		WindowStartState: options.Maximised,
 
 		AssetServer: &assetserver.Options{
-			Handler: NewRedirectHandler(srv.ActualAddr()),
+			Handler: NewRedirectHandler(srv.ActualAddr(), cfg.Namespace),
 		},
 
 		Menu: createMenu(desktopApp),

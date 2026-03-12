@@ -11,6 +11,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/skyhook-io/radar/internal/config"
 	"github.com/skyhook-io/radar/internal/helm"
 	"github.com/skyhook-io/radar/internal/k8s"
 	mcppkg "github.com/skyhook-io/radar/internal/mcp"
@@ -136,11 +137,25 @@ func RegisterCallbacks(cfg AppConfig, timelineStoreCfg timeline.StoreConfig) {
 
 // CreateServer creates the HTTP server with the given configuration.
 func CreateServer(cfg AppConfig) *server.Server {
+	effectiveCfg := &config.Config{
+		Kubeconfig:      cfg.Kubeconfig,
+		KubeconfigDirs:  cfg.KubeconfigDirs,
+		Namespace:       cfg.Namespace,
+		Port:            cfg.Port,
+		NoBrowser:       cfg.NoBrowser,
+		TimelineStorage: cfg.TimelineStorage,
+		TimelineDBPath:  cfg.TimelineDBPath,
+		HistoryLimit:    cfg.HistoryLimit,
+		PrometheusURL:   cfg.PrometheusURL,
+		MCP:             &cfg.MCPEnabled,
+	}
+
 	serverCfg := server.Config{
-		Port:       cfg.Port,
-		DevMode:    cfg.DevMode,
-		StaticFS:   static.FS,
-		StaticRoot: "dist",
+		Port:            cfg.Port,
+		DevMode:         cfg.DevMode,
+		StaticFS:        static.FS,
+		StaticRoot:      "dist",
+		EffectiveConfig: effectiveCfg,
 		DiagConfig: &server.DiagConfig{
 			Port:             cfg.Port,
 			DevMode:          cfg.DevMode,
@@ -155,7 +170,11 @@ func CreateServer(cfg AppConfig) *server.Server {
 
 	if cfg.MCPEnabled {
 		serverCfg.MCPHandler = mcppkg.NewHandler()
-		log.Printf("MCP server enabled at http://localhost:%d/mcp", cfg.Port)
+		if cfg.Port != 0 {
+			log.Printf("MCP server enabled at http://localhost:%d/mcp", cfg.Port)
+		} else {
+			log.Printf("MCP server enabled (port will be assigned at startup)")
+		}
 	}
 
 	return server.New(serverCfg)
@@ -293,9 +312,45 @@ func InitializeCluster() {
 	}()
 }
 
+// WriteMCPPortFile writes the actual server port to ~/.radar/mcp-port so MCP
+// clients can discover the running instance without hardcoding a port.
+func WriteMCPPortFile(port int) {
+	path := mcpPortFilePath()
+	if path == "" {
+		return
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		log.Printf("[mcp] Failed to create directory for port file: %v", err)
+		return
+	}
+	if err := os.WriteFile(path, fmt.Appendf(nil, "%d\n", port), 0o644); err != nil {
+		log.Printf("[mcp] Failed to write port file: %v", err)
+		return
+	}
+	log.Printf("[mcp] Port file written: %s (port %d)", path, port)
+}
+
+// RemoveMCPPortFile removes the port discovery file on shutdown.
+func RemoveMCPPortFile() {
+	path := mcpPortFilePath()
+	if path == "" {
+		return
+	}
+	os.Remove(path)
+}
+
+func mcpPortFilePath() string {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(homeDir, ".radar", "mcp-port")
+}
+
 // Shutdown performs graceful teardown of all subsystems and the HTTP server.
 func Shutdown(srv *server.Server) {
 	log.Println("Shutting down...")
+	RemoveMCPPortFile()
 	srv.Stop()
 	k8s.ResetAllSubsystems()
 }

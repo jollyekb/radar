@@ -33,10 +33,11 @@ import { useNamespaces, useSwitchContext } from './api/client'
 import { KeyboardShortcutProvider, useRegisterShortcut, useRegisterShortcuts } from './hooks/useKeyboardShortcuts'
 import { useAnimatedUnmount } from './hooks/useAnimatedUnmount'
 import { Loader2 } from 'lucide-react'
-import { RefreshCw, Network, List, Clock, Package, Sun, Moon, Activity, Home, Star, Search, Bug } from 'lucide-react'
+import { RefreshCw, Network, List, Clock, Package, Sun, Moon, Activity, Home, Star, Search, Bug, Settings } from 'lucide-react'
 import { useTheme } from './context/ThemeContext'
 import { Tooltip } from './components/ui/Tooltip'
 import { LargeClusterNamespacePicker } from './components/shared/LargeClusterNamespacePicker'
+import { SettingsDialog } from './components/settings/SettingsDialog'
 import type { TopologyNode, GroupingMode, MainView, SelectedResource, SelectedHelmRelease, NodeKind, Topology } from './types'
 import { kindToPlural, openExternal } from './utils/navigation'
 
@@ -168,6 +169,25 @@ function AppInner() {
 
   // Command palette state
   const [showCommandPalette, setShowCommandPalette] = useState(false)
+
+  // Settings dialog state
+  const [showSettings, setShowSettings] = useState(false)
+
+  // Listen for desktop "open-settings" event from native menu
+  useEffect(() => {
+    const wailsRuntime = (window as unknown as Record<string, unknown>).runtime as
+      | { EventsOn?: (event: string, callback: () => void) => () => void }
+      | undefined
+    if (!wailsRuntime?.EventsOn) return
+    return wailsRuntime.EventsOn('open-settings', () => setShowSettings(true))
+  }, [])
+
+  // Listen for "open-settings" DOM event (used by MCPSetupDialog etc.)
+  useEffect(() => {
+    const handler = () => setShowSettings(true)
+    window.addEventListener('radar:open-settings', handler)
+    return () => window.removeEventListener('radar:open-settings', handler)
+  }, [])
 
   // Diagnostics overlay state
   const [showDiagnostics, setShowDiagnostics] = useState(false)
@@ -640,6 +660,15 @@ function AppInner() {
           <div className="hidden md:block">
             <ThemeToggle />
           </div>
+
+          {/* Settings */}
+          <button
+            onClick={() => setShowSettings(true)}
+            className="p-1.5 rounded-md bg-theme-elevated hover:bg-theme-hover text-theme-text-secondary hover:text-theme-text-primary transition-colors"
+            title="Settings"
+          >
+            <Settings className="w-4 h-4" />
+          </button>
         </div>
       </header>
 
@@ -988,6 +1017,9 @@ function AppInner() {
 
       {/* Diagnostics overlay */}
       {diagnosticsOverlay.shouldRender && <DiagnosticsOverlay isOpen={diagnosticsOverlay.isOpen} onClose={() => setShowDiagnostics(false)} />}
+
+      {/* Settings dialog */}
+      <SettingsDialog open={showSettings} onClose={() => setShowSettings(false)} />
 
       {/* Namespace filter confirmation for command palette navigation */}
       {pendingKindNav && (
