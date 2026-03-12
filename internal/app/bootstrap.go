@@ -336,12 +336,15 @@ func RemoveMCPPortFile() {
 	if path == "" {
 		return
 	}
-	os.Remove(path)
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		log.Printf("[mcp] Failed to remove port file %s: %v", path, err)
+	}
 }
 
 func mcpPortFilePath() string {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
+		log.Printf("[mcp] Cannot determine home directory: %v (port file will not be written)", err)
 		return ""
 	}
 	return filepath.Join(homeDir, ".radar", "mcp-port")

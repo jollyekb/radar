@@ -21,7 +21,7 @@ type Settings struct {
 	PinnedKinds []PinnedKind `json:"pinnedKinds,omitempty"`
 }
 
-// mu serializes Load-Decode-Save cycles to prevent concurrent PUTs from
+// mu serializes Load-mutate-Save cycles to prevent concurrent PUTs from
 // overwriting each other's changes.
 var mu sync.Mutex
 

@@ -44,10 +44,12 @@ export function MCPSetupDialog({ open, onClose, mcpUrl }: MCPSetupDialogProps) {
   const [portPinned, setPortPinned] = useState(false)
   const [pinning, setPinning] = useState(false)
   const [pinSuccess, setPinSuccess] = useState(false)
+  const [pinError, setPinError] = useState('')
 
   useEffect(() => {
     if (!open) return
     setPinSuccess(false)
+    setPinError('')
     fetch('/api/config')
       .then((res) => res.ok ? res.json() : null)
       .then((data) => {
@@ -56,15 +58,19 @@ export function MCPSetupDialog({ open, onClose, mcpUrl }: MCPSetupDialogProps) {
           setPortPinned(data.file?.port != null && data.file.port > 0)
         }
       })
-      .catch(() => {})
+      .catch((err) => console.warn('[mcp-setup] Failed to load config:', err))
   }, [open])
 
   const handlePinPort = useCallback(async () => {
     const currentPort = Number(window.location.port) || 80
     setPinning(true)
+    setPinError('')
     try {
       const configRes = await fetch('/api/config')
-      if (!configRes.ok) return
+      if (!configRes.ok) {
+        setPinError('Failed to load current config')
+        return
+      }
       const configData = await configRes.json()
       const updated = { ...configData.file, port: currentPort }
       const res = await fetch('/api/config', {
@@ -75,8 +81,12 @@ export function MCPSetupDialog({ open, onClose, mcpUrl }: MCPSetupDialogProps) {
       if (res.ok) {
         setPortPinned(true)
         setPinSuccess(true)
+      } else {
+        setPinError('Failed to save port configuration')
       }
-    } catch {} finally {
+    } catch {
+      setPinError('Failed to pin port — check server connection')
+    } finally {
       setPinning(false)
     }
   }, [])
@@ -231,6 +241,12 @@ export function MCPSetupDialog({ open, onClose, mcpUrl }: MCPSetupDialogProps) {
             {isDesktop && pinSuccess && (
               <p className="text-xs text-green-700 dark:text-green-400/80 px-0.5">
                 Port {currentPort} pinned. MCP endpoint will remain stable across restarts.
+              </p>
+            )}
+
+            {isDesktop && pinError && (
+              <p className="text-xs text-red-600 dark:text-red-400 px-0.5">
+                {pinError}
               </p>
             )}
 

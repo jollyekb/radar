@@ -10,7 +10,7 @@ import (
 )
 
 // Config holds startup configuration persisted across restarts.
-// CLI flags override these values when explicitly provided.
+// Values are used as flag defaults; explicit CLI flags always take precedence.
 type Config struct {
 	Kubeconfig      string   `json:"kubeconfig,omitempty"`
 	KubeconfigDirs  []string `json:"kubeconfigDirs,omitempty"`

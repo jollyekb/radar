@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"net/http"
+	"net/url"
 )
 
 // RedirectHandler serves a minimal HTML page that redirects the Wails webview
@@ -21,7 +22,7 @@ func NewRedirectHandler(serverAddr, namespace string) *RedirectHandler {
 func (h *RedirectHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	target := "http://" + h.serverAddr
 	if h.namespace != "" {
-		target += "?namespace=" + h.namespace
+		target += "?namespace=" + url.QueryEscape(h.namespace)
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
