@@ -12,6 +12,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/gorilla/websocket"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/client-go/tools/remotecommand"
 
 	"github.com/skyhook-io/radar/internal/k8s"
@@ -326,6 +327,98 @@ func isShellNotFoundError(errMsg string) bool {
 		}
 	}
 	return false
+}
+
+// NodeDebugRequest is the request body for creating a node debug pod
+type NodeDebugRequest struct {
+	Image string `json:"image,omitempty"`
+}
+
+// NodeDebugResponse extends the pod result with a status field.
+type NodeDebugResponse struct {
+	k8score.NodeDebugPodResult
+	Status string `json:"status"`
+}
+
+// handleNodeDebug creates a privileged debug pod on a node
+func (s *Server) handleNodeDebug(w http.ResponseWriter, r *http.Request) {
+	if !s.requireConnected(w) {
+		return
+	}
+
+	nodeName := chi.URLParam(r, "name")
+	if nodeName == "" {
+		s.writeError(w, http.StatusBadRequest, "node name is required")
+		return
+	}
+
+	var req NodeDebugRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil && err != io.EOF {
+		s.writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	client := k8s.GetClient()
+	if client == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "K8s client not initialized")
+		return
+	}
+
+	// Create the debug pod
+	result, err := k8score.CreateNodeDebugPod(r.Context(), client, nodeName, req.Image)
+	if err != nil {
+		if apierrors.IsForbidden(err) {
+			s.writeError(w, http.StatusForbidden, err.Error())
+			return
+		}
+		if apierrors.IsNotFound(err) {
+			s.writeError(w, http.StatusNotFound, err.Error())
+			return
+		}
+		log.Printf("[exec] Failed to create node debug pod for %s: %v", nodeName, err)
+		s.writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	// Wait for the pod to be running
+	status := "running"
+	err = k8score.WaitForPodRunning(r.Context(), client, result.Namespace, result.PodName, 60*time.Second)
+	if err != nil {
+		status = "pending"
+		log.Printf("[exec] Node debug pod %s created but not running: %v", result.PodName, err)
+	}
+
+	s.writeJSON(w, NodeDebugResponse{
+		NodeDebugPodResult: *result,
+		Status:             status,
+	})
+}
+
+// handleNodeDebugCleanup deletes debug pods for a node
+func (s *Server) handleNodeDebugCleanup(w http.ResponseWriter, r *http.Request) {
+	if !s.requireConnected(w) {
+		return
+	}
+
+	nodeName := chi.URLParam(r, "name")
+	if nodeName == "" {
+		s.writeError(w, http.StatusBadRequest, "node name is required")
+		return
+	}
+
+	client := k8s.GetClient()
+	if client == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "K8s client not initialized")
+		return
+	}
+
+	if err := k8score.DeleteNodeDebugPods(r.Context(), client, nodeName); err != nil {
+		log.Printf("[exec] Failed to cleanup node debug pods for %s: %v", nodeName, err)
+		s.writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	s.writeJSON(w, map[string]string{"status": "ok"})
 }
 
 // DebugContainerRequest is the request body for creating a debug container
