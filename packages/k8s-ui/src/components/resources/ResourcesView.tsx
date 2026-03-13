@@ -32,9 +32,9 @@ import type { NavigateToResource } from '../../utils/navigation'
 import { categorizeResources, CORE_RESOURCES } from '../../utils/api-resources'
 import {
   getPodStatus,
-  getPodReadiness,
   getPodRestarts,
   getPodProblems,
+  getContainerSquareStates,
   getWorkloadImages,
   getWorkloadConditions,
   getReplicaSetOwner,
@@ -242,7 +242,7 @@ const KNOWN_COLUMNS: Record<string, Column[]> = {
   pods: [
     { key: 'name', label: 'Name' },
     { key: 'namespace', label: 'Namespace', width: 'w-48' },
-    { key: 'ready', label: 'Ready', width: 'w-16' },
+    { key: 'containers', label: 'Containers', width: 'w-28' },
     { key: 'status', label: 'Status', width: 'w-40' },
     { key: 'cpu', label: 'CPU', width: 'w-40', tooltip: 'CPU usage / limit (marker = request)' },
     { key: 'memory', label: 'Memory', width: 'w-40', tooltip: 'Memory usage / limit (marker = request)' },
@@ -2441,13 +2441,15 @@ export function ResourcesView({
         return meta.creationTimestamp ? new Date(meta.creationTimestamp).getTime() : 0
       case 'status':
         return status.phase || ''
-      case 'ready':
-        // For pods, use ready/total ratio
+      case 'containers':
+        // Pod containers column — sort by readiness ratio
         if (status.containerStatuses) {
           const ready = status.containerStatuses.filter((c: any) => c.ready).length
           const total = status.containerStatuses.length
           return total > 0 ? ready / total : 0
         }
+        return 0
+      case 'ready':
         // For DaemonSets, use numberReady/desiredNumberScheduled
         if (kindLower === 'daemonsets') {
           const desired = status.desiredNumberScheduled ?? 0
@@ -4277,27 +4279,36 @@ function GenericCell({ resource, column }: { resource: any; column: string }) {
 // ============================================================================
 
 function PodCell({ resource, column }: { resource: any; column: string }) {
-  const phase = resource.status?.phase
-  const isCompleted = phase === 'Succeeded'
   const metrics = useContext(MetricsContext)
   const { onNavigate: navigate } = useContext(ResourcesViewDataContext)
 
   switch (column) {
-    case 'ready': {
-      const { ready, total } = getPodReadiness(resource)
-      const allReady = ready === total && total > 0
-      // Completed pods (Succeeded) show neutral color, not red
-      const color = isCompleted
-        ? 'text-theme-text-secondary'
-        : allReady
-          ? 'text-green-400'
-          : ready > 0
-            ? 'text-yellow-400'
-            : 'text-red-400'
+    case 'containers': {
+      const squares = getContainerSquareStates(resource)
+      const hasInit = squares.some(s => s.isInit)
       return (
-        <span className={clsx('text-sm font-medium', color)}>
-          {ready}/{total}
-        </span>
+        <div className="flex items-center gap-1">
+          {squares.map((sq, i) => {
+            const showSeparator = hasInit && i > 0 && sq.isInit !== squares[i - 1].isInit
+            const bgClass =
+              sq.status === 'ready' ? 'bg-green-500' :
+              sq.status === 'completed' ? 'bg-theme-text-tertiary/30 border border-theme-text-tertiary' :
+              sq.status === 'running' ? 'bg-yellow-500' :
+              sq.status === 'waiting' ? 'bg-red-500' :
+              sq.status === 'terminated' ? 'bg-red-500' :
+              'bg-theme-text-tertiary/30 border border-dashed border-theme-text-tertiary'
+            const ringClass = sq.restarts > 0 ? 'ring-2 ring-orange-400' : ''
+            const label = `${sq.isInit ? '(init) ' : ''}${sq.name}: ${sq.reason || sq.status}${sq.restarts > 0 ? ` (${sq.restarts} restarts)` : ''}`
+            return (
+              <React.Fragment key={i}>
+                {showSeparator && <div className="w-px h-3 bg-theme-text-tertiary/40 mx-0.5" />}
+                <Tooltip content={label}>
+                  <div className={clsx('w-2.5 h-2.5 rounded-sm', bgClass, ringClass)} />
+                </Tooltip>
+              </React.Fragment>
+            )
+          })}
+        </div>
       )
     }
     case 'status': {

@@ -197,6 +197,72 @@ export function getPodRestarts(pod: any): number {
   return containerStatuses.reduce((sum: number, c: any) => sum + (c.restartCount || 0), 0)
 }
 
+export interface ContainerSquareState {
+  name: string
+  status: 'ready' | 'running' | 'waiting' | 'completed' | 'terminated' | 'unknown'
+  restarts: number
+  reason?: string
+  isInit?: boolean
+}
+
+export function getContainerSquareStates(pod: any): ContainerSquareState[] {
+  const result: ContainerSquareState[] = []
+  const initStatuses = pod.status?.initContainerStatuses || []
+  const containerStatuses = pod.status?.containerStatuses || []
+  const specContainers = pod.spec?.containers || []
+
+  for (const cs of initStatuses) {
+    const stateKey = cs.state ? Object.keys(cs.state)[0] : 'unknown'
+    let status: ContainerSquareState['status'] = 'unknown'
+    if (stateKey === 'terminated' && cs.state?.terminated?.exitCode === 0) {
+      status = 'completed'
+    } else if (stateKey === 'running') {
+      status = cs.ready ? 'ready' : 'running'
+    } else if (stateKey === 'waiting') {
+      status = 'waiting'
+    } else if (stateKey === 'terminated') {
+      status = 'terminated'
+    }
+    result.push({
+      name: cs.name,
+      status,
+      restarts: cs.restartCount || 0,
+      reason: cs.state?.[stateKey]?.reason,
+      isInit: true,
+    })
+  }
+
+  if (containerStatuses.length > 0) {
+    for (const cs of containerStatuses) {
+      const stateKey = cs.state ? Object.keys(cs.state)[0] : 'unknown'
+      let status: ContainerSquareState['status'] = 'unknown'
+      if (stateKey === 'running' && cs.ready) {
+        status = 'ready'
+      } else if (stateKey === 'running') {
+        status = 'running'
+      } else if (stateKey === 'terminated' && cs.state?.terminated?.exitCode === 0) {
+        status = 'completed'
+      } else if (stateKey === 'terminated') {
+        status = 'terminated'
+      } else if (stateKey === 'waiting') {
+        status = 'waiting'
+      }
+      result.push({
+        name: cs.name,
+        status,
+        restarts: cs.restartCount || 0,
+        reason: cs.state?.[stateKey]?.reason,
+      })
+    }
+  } else {
+    for (const c of specContainers) {
+      result.push({ name: c.name, status: 'unknown', restarts: 0 })
+    }
+  }
+
+  return result
+}
+
 // ============================================================================
 // WORKLOAD UTILITIES (Deployment, StatefulSet, DaemonSet, ReplicaSet)
 // ============================================================================
