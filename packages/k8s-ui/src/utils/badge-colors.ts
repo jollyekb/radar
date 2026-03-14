@@ -242,6 +242,7 @@ export const SEVERITY_BADGE_BORDERED = {
   warning: 'bg-amber-500/20 text-amber-700 dark:text-amber-400 border border-amber-500/30',
   error: 'bg-red-500/20 text-red-800 dark:text-red-400 border border-red-500/30',
   info: 'bg-blue-500/20 text-blue-700 dark:text-blue-400 border border-blue-500/30',
+  debug: 'bg-gray-500/15 text-gray-600 dark:text-gray-400 border border-gray-400/30 dark:border-gray-500/30',
   neutral: 'bg-theme-hover/50 text-theme-text-secondary border border-theme-border',
 } as const
 
@@ -402,4 +403,32 @@ export function getHealthBadgeColor(healthState: string): string {
 export function getHelmStatusColor(status: string): string {
   const statusLower = status.toLowerCase()
   return HELM_STATUS_COLORS[statusLower] || 'bg-theme-hover/50 text-theme-text-secondary'
+}
+
+// =============================================================================
+// VULNERABILITY SEVERITY COLORS - for Trivy and other security scanners
+// =============================================================================
+
+export const VULN_SEVERITY_BADGE: Record<string, string> = {
+  CRITICAL: 'bg-red-500/20 text-red-800 dark:text-red-400',
+  HIGH: 'bg-orange-500/20 text-orange-700 dark:text-orange-400',
+  MEDIUM: 'bg-yellow-500/20 text-yellow-700 dark:text-yellow-400',
+  LOW: 'bg-blue-500/20 text-blue-700 dark:text-blue-400',
+  UNKNOWN: 'bg-gray-500/20 text-gray-600 dark:text-gray-400',
+}
+
+export const VULN_SEVERITY_BAR: Record<string, string> = {
+  CRITICAL: 'bg-red-500',
+  HIGH: 'bg-orange-500',
+  MEDIUM: 'bg-yellow-500',
+  LOW: 'bg-blue-500',
+  UNKNOWN: 'bg-gray-500',
+}
+
+export const VULN_SEVERITY_TEXT: Record<string, string> = {
+  CRITICAL: 'text-red-800 dark:text-red-400',
+  HIGH: 'text-orange-700 dark:text-orange-400',
+  MEDIUM: 'text-yellow-700 dark:text-yellow-400',
+  LOW: 'text-blue-700 dark:text-blue-400',
+  UNKNOWN: 'text-gray-600 dark:text-gray-400',
 }
