@@ -91,6 +91,7 @@ type AggregatedFlow struct {
 	Connections int64     `json:"connections"`
 	LastSeen    time.Time `json:"lastSeen"`
 	// L7 stats (if available)
+	L7Protocol   string  `json:"l7Protocol,omitempty"` // HTTP, gRPC, DNS (from majority of flows)
 	RequestCount int64   `json:"requestCount,omitempty"`
 	ErrorCount   int64   `json:"errorCount,omitempty"`
 	AvgLatencyMs float64 `json:"avgLatencyMs,omitempty"`

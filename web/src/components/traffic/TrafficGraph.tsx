@@ -272,6 +272,12 @@ function TrafficLegend() {
         </div>
         <div className="flex items-center gap-2">
           <svg width="24" height="8" className="shrink-0">
+            <line x1="0" y1="4" x2="24" y2="4" stroke="#ef4444" strokeWidth="2" />
+          </svg>
+          <span className="text-theme-text-secondary">Errors (5xx)</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <svg width="24" height="8" className="shrink-0">
             <line x1="0" y1="4" x2="24" y2="4" stroke="#6b7280" strokeWidth="2" />
           </svg>
           <span className="text-theme-text-secondary">TCP</span>
@@ -360,6 +366,12 @@ function DetailsPanel({
       return !latest || f.lastSeen > latest ? f.lastSeen : latest
     }, null as string | null),
     flowCount: relatedFlows.reduce((sum, f) => sum + (f.flowCount || 1), 0),
+    totalRequests: relatedFlows.reduce((sum, f) => sum + (f.requestCount ?? 0), 0),
+    totalErrors: relatedFlows.reduce((sum, f) => sum + (f.errorCount ?? 0), 0),
+    l7Protocols: relatedFlows.reduce((acc, f) => {
+      if (f.l7Protocol) acc.add(f.l7Protocol)
+      return acc
+    }, new Set<string>()),
   } : null
 
   return (
@@ -436,7 +448,7 @@ function DetailsPanel({
             </div>
 
             {/* Stats grid */}
-            {nodeStats && (nodeStats.totalBytes > 0 || nodeStats.lastSeen) && (
+            {nodeStats && (nodeStats.totalBytes > 0 || nodeStats.lastSeen || nodeStats.totalRequests > 0) && (
               <div className="grid grid-cols-2 gap-2">
                 {nodeStats.totalBytes > 0 && (
                   <div className="p-2 rounded bg-theme-elevated text-xs">
@@ -450,10 +462,34 @@ function DetailsPanel({
                     <div className="text-theme-text-primary font-medium">{nodeStats.flowCount.toLocaleString()}</div>
                   </div>
                 )}
+                {nodeStats.totalRequests > 0 && (
+                  <div className="p-2 rounded bg-theme-elevated text-xs">
+                    <div className="text-theme-text-tertiary">Requests</div>
+                    <div className="text-theme-text-primary font-medium">{formatConnections(nodeStats.totalRequests)}/s</div>
+                  </div>
+                )}
+                {nodeStats.totalErrors > 0 && (
+                  <div className="p-2 rounded bg-red-500/10 border border-red-500/30 text-xs">
+                    <div className="text-red-400">Errors (5xx)</div>
+                    <div className="text-red-400 font-medium">
+                      {formatConnections(nodeStats.totalErrors)}/s
+                      {nodeStats.totalRequests > 0 && (
+                        <span className="text-red-300 ml-1">
+                          ({((nodeStats.totalErrors / nodeStats.totalRequests) * 100).toFixed(1)}%)
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                )}
                 {Object.keys(nodeStats.protocols).length > 0 && (
                   <div className="p-2 rounded bg-theme-elevated text-xs col-span-2">
                     <div className="text-theme-text-tertiary mb-1">Protocols</div>
                     <div className="flex flex-wrap gap-1.5">
+                      {nodeStats.l7Protocols.size > 0 && Array.from(nodeStats.l7Protocols).map(proto => (
+                        <span key={`l7-${proto}`} className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-300">
+                          <span className="font-medium">{proto}</span>
+                        </span>
+                      ))}
                       {Object.entries(nodeStats.protocols)
                         .sort((a, b) => b[1] - a[1])
                         .map(([proto, count]) => (
@@ -577,7 +613,11 @@ function DetailsPanel({
                 )}
                 <div className="p-2 rounded bg-theme-elevated">
                   <div className="text-theme-text-tertiary">Protocol</div>
-                  <div className="text-theme-text-primary font-medium uppercase">{edgeData.protocol}</div>
+                  <div className="text-theme-text-primary font-medium uppercase">
+                    {edgeData.flow?.l7Protocol
+                      ? `${edgeData.flow.l7Protocol} / ${edgeData.protocol}`
+                      : edgeData.protocol}
+                  </div>
                 </div>
                 <div className="p-2 rounded bg-theme-elevated">
                   <div className="text-theme-text-tertiary">{isIstio ? 'Request Rate' : 'Connections'}</div>
@@ -593,11 +633,24 @@ function DetailsPanel({
                     </div>
                   </div>
                 )}
+                {edgeData.flow?.requestCount && edgeData.flow.requestCount > 0 && (
+                  <div className="p-2 rounded bg-theme-elevated">
+                    <div className="text-theme-text-tertiary">Requests</div>
+                    <div className="text-theme-text-primary font-medium">
+                      {formatConnections(edgeData.flow.requestCount)}/s
+                    </div>
+                  </div>
+                )}
                 {edgeData.flow?.errorCount && edgeData.flow.errorCount > 0 && (
                   <div className="p-2 rounded bg-red-500/10 border border-red-500/30">
                     <div className="text-red-400">Errors (5xx)</div>
                     <div className="text-red-400 font-medium">
                       {formatConnections(edgeData.flow.errorCount)}/s
+                      {edgeData.flow.requestCount && edgeData.flow.requestCount > 0 && (
+                        <span className="text-red-300 ml-1">
+                          ({((edgeData.flow.errorCount / edgeData.flow.requestCount) * 100).toFixed(1)}%)
+                        </span>
+                      )}
                     </div>
                   </div>
                 )}
@@ -869,21 +922,29 @@ export function TrafficGraph({ flows, hotPathThreshold = 0, showNamespaceGroups 
       // Create edge with visual encoding (Phase 2.1, 2.2, 2.3)
       const edgeId = `${sourceId}->${destId}:${flow.port}`
       const isHotEdge = flow.connections >= hotPathThreshold && hotPathThreshold > 0
+      const hasErrors = (flow.errorCount ?? 0) > 0
 
-      // Phase 2.3: Hot path styling (orange for hot, blue for http/grpc, gray for others)
-      const strokeColor = isHotEdge
-        ? '#f97316'  // orange-500
-        : flow.protocol === 'http' || flow.protocol === 'grpc'
-          ? '#3b82f6'  // blue-500
-          : '#6b7280'  // gray-500
+      // Phase 2.3: Hot path styling (orange for hot, red for errors, blue for http/grpc, gray for others)
+      const strokeColor = hasErrors
+        ? '#ef4444'  // red-500 for error flows
+        : isHotEdge
+          ? '#f97316'  // orange-500
+          : flow.protocol === 'http' || flow.protocol === 'grpc'
+            ? '#3b82f6'  // blue-500
+            : '#6b7280'  // gray-500
 
       // Phase 2.1: Edge width based on connection count
       const strokeWidth = getEdgeWidth(flow.connections)
 
-      // Phase 2.2: Edge label - connection count with unit suffix
-      const edgeLabel = isIstio
+      // Phase 2.2: Edge label - connection count with unit suffix + L7 details
+      const connStr = isIstio
         ? `${formatConnections(flow.connections)}/s`
         : formatConnections(flow.connections)
+      const l7Label = flow.l7Protocol ? `${flow.l7Protocol} · ` : ''
+      const errorLabel = hasErrors
+        ? ` · ${formatConnections(flow.errorCount!)} err`
+        : ''
+      const edgeLabel = `${l7Label}${connStr}${errorLabel}`
 
       edgeList.push({
         id: edgeId,
@@ -893,13 +954,13 @@ export function TrafficGraph({ flows, hotPathThreshold = 0, showNamespaceGroups 
         animated: isHotEdge, // Animate hot paths
         label: edgeLabel,
         labelBgStyle: {
-          fill: isHotEdge ? '#7c2d12' : '#1f2937', // orange-900 for hot, gray-800 for normal
+          fill: hasErrors ? '#7f1d1d' : isHotEdge ? '#7c2d12' : '#1f2937', // red-900, orange-900, gray-800
           fillOpacity: 0.9,
         },
         labelStyle: {
           fontSize: 10,
-          fill: isHotEdge ? '#fed7aa' : '#d1d5db', // orange-200 for hot, gray-300 for normal
-          fontWeight: isHotEdge ? 600 : 400,
+          fill: hasErrors ? '#fecaca' : isHotEdge ? '#fed7aa' : '#d1d5db', // red-200, orange-200, gray-300
+          fontWeight: (isHotEdge || hasErrors) ? 600 : 400,
         },
         style: {
           strokeWidth,

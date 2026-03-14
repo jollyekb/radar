@@ -450,11 +450,22 @@ func AggregateFlows(flows []Flow) []AggregatedFlow {
 	// Key: source-ns/source-name|dest-ns/dest-name|port
 	aggregated := make(map[string]*AggregatedFlow)
 
+	// Track L7 protocol votes per aggregation key to pick the majority
+	l7Votes := make(map[string]map[string]int64)
+
 	for _, f := range flows {
 		key := fmt.Sprintf("%s/%s|%s/%s|%d",
 			f.Source.Namespace, f.Source.Name,
 			f.Destination.Namespace, f.Destination.Name,
 			f.Port)
+
+		// Track L7 protocol votes
+		if f.L7Protocol != "" {
+			if l7Votes[key] == nil {
+				l7Votes[key] = make(map[string]int64)
+			}
+			l7Votes[key][f.L7Protocol] += f.Connections
+		}
 
 		if agg, ok := aggregated[key]; ok {
 			agg.FlowCount++
@@ -480,6 +491,21 @@ func AggregateFlows(flows []Flow) []AggregatedFlow {
 				ErrorCount:   roundRate(f.ErrorRate),
 				LastSeen:     f.LastSeen,
 			}
+		}
+	}
+
+	// Apply L7 protocol majority vote
+	for key, agg := range aggregated {
+		if votes, ok := l7Votes[key]; ok {
+			var bestProto string
+			var bestCount int64
+			for proto, count := range votes {
+				if count > bestCount {
+					bestProto = proto
+					bestCount = count
+				}
+			}
+			agg.L7Protocol = bestProto
 		}
 	}
 

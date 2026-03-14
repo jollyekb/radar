@@ -726,6 +726,7 @@ export interface AggregatedFlow {
   bytesRecv: number
   connections: number
   lastSeen: string
+  l7Protocol?: string // HTTP, gRPC, DNS
   requestCount?: number
   errorCount?: number
   avgLatencyMs?: number
