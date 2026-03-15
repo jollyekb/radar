@@ -10,7 +10,9 @@ import (
 func TestLoadMissing(t *testing.T) {
 	// Override path to a non-existent file
 	orig := os.Getenv("HOME")
-	t.Setenv("HOME", t.TempDir())
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+	t.Setenv("USERPROFILE", tmpDir)
 	defer os.Setenv("HOME", orig)
 
 	c := Load()
@@ -22,6 +24,7 @@ func TestLoadMissing(t *testing.T) {
 func TestSaveAndLoad(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("HOME", dir)
+	t.Setenv("USERPROFILE", dir)
 
 	mcp := true
 	want := Config{
@@ -74,7 +77,9 @@ func TestSaveAndLoad(t *testing.T) {
 }
 
 func TestUpdate(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+	t.Setenv("USERPROFILE", tmpDir)
 
 	result, err := Update(func(c *Config) {
 		c.Port = 8080
@@ -146,6 +151,7 @@ func TestHelpers(t *testing.T) {
 func TestLoadInvalidJSON(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("HOME", dir)
+	t.Setenv("USERPROFILE", dir)
 
 	path := filepath.Join(dir, ".radar")
 	os.MkdirAll(path, 0o755)

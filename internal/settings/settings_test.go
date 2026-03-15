@@ -8,7 +8,9 @@ import (
 )
 
 func TestLoadMissing(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+	t.Setenv("USERPROFILE", tmpDir)
 
 	s := Load()
 	if s.Theme != "" || s.PinnedKinds != nil {
@@ -17,7 +19,9 @@ func TestLoadMissing(t *testing.T) {
 }
 
 func TestSaveAndLoad(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+	t.Setenv("USERPROFILE", tmpDir)
 
 	want := Settings{
 		Theme:       "dark",
@@ -38,7 +42,9 @@ func TestSaveAndLoad(t *testing.T) {
 }
 
 func TestUpdateMergesFields(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+	t.Setenv("USERPROFILE", tmpDir)
 
 	// Set initial state
 	Save(Settings{Theme: "light"})
@@ -79,6 +85,7 @@ func TestEmptySettingsProducesMinimalJSON(t *testing.T) {
 func TestLoadInvalidJSON(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("HOME", dir)
+	t.Setenv("USERPROFILE", dir)
 
 	os.MkdirAll(filepath.Join(dir, ".radar"), 0o755)
 	os.WriteFile(filepath.Join(dir, ".radar", "settings.json"), []byte("{bad"), 0o644)
@@ -92,6 +99,7 @@ func TestLoadInvalidJSON(t *testing.T) {
 func TestSaveCreatesDirectory(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("HOME", dir)
+	t.Setenv("USERPROFILE", dir)
 
 	// .radar/ doesn't exist yet
 	if err := Save(Settings{Theme: "light"}); err != nil {

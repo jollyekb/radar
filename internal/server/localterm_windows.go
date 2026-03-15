@@ -12,24 +12,41 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-// conPty wraps a Windows ConPTY pseudo-console
+// conPty wraps a Windows ConPTY pseudo-console.
+// Uses raw Windows handles + ReadFile/WriteFile directly to avoid Go's os.File
+// wrapper, which is incompatible with ConPTY's synchronous anonymous pipes.
 type conPty struct {
 	console windows.Handle
-	inWrite *os.File // our write end → ConPTY input
-	outRead *os.File // our read end ← ConPTY output
+	inWrite windows.Handle // our write end → ConPTY input
+	outRead windows.Handle // our read end ← ConPTY output
 }
 
-func (p *conPty) Read(b []byte) (int, error)  { return p.outRead.Read(b) }
-func (p *conPty) Write(b []byte) (int, error) { return p.inWrite.Write(b) }
+func (p *conPty) Read(b []byte) (int, error) {
+	var n uint32
+	err := windows.ReadFile(p.outRead, b, &n, nil)
+	if err != nil {
+		if err == windows.ERROR_BROKEN_PIPE {
+			return int(n), io.EOF
+		}
+		return int(n), err
+	}
+	return int(n), nil
+}
+
+func (p *conPty) Write(b []byte) (int, error) {
+	var n uint32
+	err := windows.WriteFile(p.inWrite, b, &n, nil)
+	if err != nil {
+		return int(n), err
+	}
+	return int(n), nil
+}
 
 func (p *conPty) Close() error {
 	windows.ClosePseudoConsole(p.console)
-	err1 := p.inWrite.Close()
-	err2 := p.outRead.Close()
-	if err1 != nil {
-		return err1
-	}
-	return err2
+	windows.CloseHandle(p.inWrite)
+	windows.CloseHandle(p.outRead)
+	return nil
 }
 
 func (p *conPty) Resize(cols, rows uint16) error {
@@ -47,60 +64,58 @@ func getDefaultShell() string {
 }
 
 func startShell(shell string, env []string, dir string) (*shellProcess, error) {
-	// Create pipes: ConPTY reads from inRead, writes to outWrite.
+	// Create pipes using raw Windows API to avoid Go's os.File wrapper,
+	// which is incompatible with ConPTY's synchronous anonymous pipes.
+	// ConPTY reads from inRead, writes to outWrite.
 	// We write to inWrite, read from outRead.
-	inRead, inWrite, err := os.Pipe()
-	if err != nil {
+	var inRead, inWrite windows.Handle
+	if err := windows.CreatePipe(&inRead, &inWrite, nil, 0); err != nil {
 		return nil, fmt.Errorf("create input pipe: %w", err)
 	}
-	outRead, outWrite, err := os.Pipe()
-	if err != nil {
-		inRead.Close()
-		inWrite.Close()
+	var outRead, outWrite windows.Handle
+	if err := windows.CreatePipe(&outRead, &outWrite, nil, 0); err != nil {
+		windows.CloseHandle(inRead)
+		windows.CloseHandle(inWrite)
 		return nil, fmt.Errorf("create output pipe: %w", err)
 	}
 
 	// Create the pseudo console
 	var hPC windows.Handle
 	size := windows.Coord{X: 80, Y: 24}
-	err = windows.CreatePseudoConsole(
-		size,
-		windows.Handle(inRead.Fd()),
-		windows.Handle(outWrite.Fd()),
-		0,
-		&hPC,
-	)
+	err := windows.CreatePseudoConsole(size, inRead, outWrite, 0, &hPC)
 	if err != nil {
-		inRead.Close()
-		inWrite.Close()
-		outRead.Close()
-		outWrite.Close()
+		windows.CloseHandle(inRead)
+		windows.CloseHandle(inWrite)
+		windows.CloseHandle(outRead)
+		windows.CloseHandle(outWrite)
 		return nil, fmt.Errorf("CreatePseudoConsole: %w", err)
 	}
 
-	// Close the pipe ends we gave to the console — they're now owned by ConPTY
-	inRead.Close()
-	outWrite.Close()
+	// Close the pipe ends we gave to the console — ConPTY duplicates them internally
+	windows.CloseHandle(inRead)
+	windows.CloseHandle(outWrite)
 
 	// Set up process creation with the pseudo console attribute
 	attrs, err := windows.NewProcThreadAttributeList(1)
 	if err != nil {
 		windows.ClosePseudoConsole(hPC)
-		inWrite.Close()
-		outRead.Close()
+		windows.CloseHandle(inWrite)
+		windows.CloseHandle(outRead)
 		return nil, fmt.Errorf("NewProcThreadAttributeList: %w", err)
 	}
 	defer attrs.Delete()
 
+	// Pass the pseudo console handle value directly (not a pointer to it).
+	// HPCON is a void* in C — lpValue expects the handle value itself.
 	err = attrs.Update(
 		windows.PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE,
-		unsafe.Pointer(&hPC),
+		unsafe.Pointer(hPC),
 		unsafe.Sizeof(hPC),
 	)
 	if err != nil {
 		windows.ClosePseudoConsole(hPC)
-		inWrite.Close()
-		outRead.Close()
+		windows.CloseHandle(inWrite)
+		windows.CloseHandle(outRead)
 		return nil, fmt.Errorf("UpdateProcThreadAttribute: %w", err)
 	}
 
@@ -108,8 +123,8 @@ func startShell(shell string, env []string, dir string) (*shellProcess, error) {
 	cmdLine, err := windows.UTF16PtrFromString(shell)
 	if err != nil {
 		windows.ClosePseudoConsole(hPC)
-		inWrite.Close()
-		outRead.Close()
+		windows.CloseHandle(inWrite)
+		windows.CloseHandle(outRead)
 		return nil, err
 	}
 
@@ -149,8 +164,8 @@ func startShell(shell string, env []string, dir string) (*shellProcess, error) {
 	)
 	if err != nil {
 		windows.ClosePseudoConsole(hPC)
-		inWrite.Close()
-		outRead.Close()
+		windows.CloseHandle(inWrite)
+		windows.CloseHandle(outRead)
 		return nil, fmt.Errorf("CreateProcess: %w", err)
 	}
 
@@ -160,8 +175,8 @@ func startShell(shell string, env []string, dir string) (*shellProcess, error) {
 	proc, err := os.FindProcess(int(pi.ProcessId))
 	if err != nil {
 		windows.ClosePseudoConsole(hPC)
-		inWrite.Close()
-		outRead.Close()
+		windows.CloseHandle(inWrite)
+		windows.CloseHandle(outRead)
 		windows.CloseHandle(pi.Process)
 		return nil, fmt.Errorf("FindProcess: %w", err)
 	}
