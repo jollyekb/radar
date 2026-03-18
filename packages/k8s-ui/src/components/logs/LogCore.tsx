@@ -28,6 +28,8 @@ interface LogCoreProps {
   showPodName?: boolean
   emptyMessage?: string
   errorMessage?: string | null
+  /** Force dark mode on the logs container (default: true). Logs are typically dark-themed. */
+  forceDark?: boolean
 }
 
 const LEVEL_OPTIONS: { level: LogLevel; label: string; color: string; activeColor: string }[] = [
@@ -52,6 +54,7 @@ export function LogCore({
   showPodName = false,
   emptyMessage = 'No logs available',
   errorMessage,
+  forceDark = true,
 }: LogCoreProps) {
   const virtuosoRef = useRef<VirtuosoHandle>(null)
   const [atBottom, setAtBottom] = useState(true)
@@ -171,7 +174,7 @@ export function LogCore({
     : -1
 
   return (
-    <div className="flex flex-col h-full bg-theme-base">
+    <div className={`flex flex-col h-full bg-theme-base${forceDark ? ' dark' : ''}`} style={{ fontFamily: "'SF Mono', 'Cascadia Code', 'Fira Code', Menlo, Consolas, 'DejaVu Sans Mono', monospace" }}>
       {/* Toolbar */}
       <div className="flex items-center gap-2 px-3 py-2 border-b border-theme-border bg-theme-surface">
         {toolbarExtra}

@@ -25,6 +25,8 @@ export interface LogsViewerProps {
   fetchLogs: (params: LogsFetchParams) => Promise<{ [container: string]: string }>
   /** If provided, the stream button is enabled. Called to open an SSE connection. */
   createStream?: (params: Omit<LogsFetchParams, 'previous'>) => EventSource
+  /** Force dark mode on the logs container (default: true) */
+  forceDark?: boolean
 }
 
 export function LogsViewer({
@@ -34,6 +36,7 @@ export function LogsViewer({
   initialContainer,
   fetchLogs,
   createStream,
+  forceDark,
 }: LogsViewerProps) {
   const [selectedContainer, setSelectedContainer] = useState(initialContainer || containers[0] || '')
   const [isLoading, setIsLoading] = useState(false)
@@ -141,6 +144,7 @@ export function LogsViewer({
       onDownload={downloadLogs}
       onClear={clear}
       toolbarExtra={toolbarExtra}
+      forceDark={forceDark}
     />
   )
 }
