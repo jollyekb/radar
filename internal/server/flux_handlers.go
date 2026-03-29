@@ -6,8 +6,8 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/skyhook-io/radar/internal/auth"
 	"github.com/skyhook-io/radar/pkg/gitops"
-	"github.com/skyhook-io/radar/internal/k8s"
 )
 
 // handleFluxReconcile triggers a reconciliation by setting the reconcile annotation
@@ -22,7 +22,8 @@ func (s *Server) handleFluxReconcile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	client := k8s.GetDynamicClient()
+	auth.AuditLog(r, namespace, name)
+	client := s.getDynamicClientForRequest(r)
 	if client == nil {
 		log.Printf("[flux] Dynamic client unavailable for %s %s/%s", kind, namespace, name)
 		s.writeError(w, http.StatusServiceUnavailable, "dynamic client not available")
@@ -65,7 +66,8 @@ func (s *Server) fluxSetSuspend(w http.ResponseWriter, r *http.Request, suspend 
 		action = "resume"
 	}
 
-	client := k8s.GetDynamicClient()
+	auth.AuditLog(r, namespace, name)
+	client := s.getDynamicClientForRequest(r)
 	if client == nil {
 		log.Printf("[flux] Dynamic client unavailable for %s %s/%s", kind, namespace, name)
 		s.writeError(w, http.StatusServiceUnavailable, "dynamic client not available")
@@ -93,7 +95,8 @@ func (s *Server) handleFluxSyncWithSource(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	client := k8s.GetDynamicClient()
+	auth.AuditLog(r, namespace, name)
+	client := s.getDynamicClientForRequest(r)
 	if client == nil {
 		log.Printf("[flux] Dynamic client unavailable for %s %s/%s", kind, namespace, name)
 		s.writeError(w, http.StatusServiceUnavailable, "dynamic client not available")

@@ -9,8 +9,8 @@ import (
 	"github.com/go-chi/chi/v5"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 
+	"github.com/skyhook-io/radar/internal/auth"
 	"github.com/skyhook-io/radar/pkg/gitops"
-	"github.com/skyhook-io/radar/internal/k8s"
 )
 
 // handleArgoSync triggers a sync operation on an ArgoCD Application
@@ -18,13 +18,13 @@ func (s *Server) handleArgoSync(w http.ResponseWriter, r *http.Request) {
 	namespace := chi.URLParam(r, "namespace")
 	name := chi.URLParam(r, "name")
 
-	client := k8s.GetDynamicClient()
+	auth.AuditLog(r, namespace, name)
+	client := s.getDynamicClientForRequest(r)
 	if client == nil {
 		log.Printf("[argo] Dynamic client unavailable for sync Application %s/%s", namespace, name)
 		s.writeError(w, http.StatusServiceUnavailable, "dynamic client not available")
 		return
 	}
-
 	result, err := gitops.SyncArgoApp(r.Context(), client, namespace, name)
 	if err != nil {
 		s.writeGitOpsError(w, err, "argo", "sync", namespace, name)
@@ -47,7 +47,8 @@ func (s *Server) handleArgoRefresh(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	client := k8s.GetDynamicClient()
+	auth.AuditLog(r, namespace, name)
+	client := s.getDynamicClientForRequest(r)
 	if client == nil {
 		log.Printf("[argo] Dynamic client unavailable for refresh Application %s/%s", namespace, name)
 		s.writeError(w, http.StatusServiceUnavailable, "dynamic client not available")
@@ -68,7 +69,8 @@ func (s *Server) handleArgoTerminate(w http.ResponseWriter, r *http.Request) {
 	namespace := chi.URLParam(r, "namespace")
 	name := chi.URLParam(r, "name")
 
-	client := k8s.GetDynamicClient()
+	auth.AuditLog(r, namespace, name)
+	client := s.getDynamicClientForRequest(r)
 	if client == nil {
 		log.Printf("[argo] Dynamic client unavailable for terminate Application %s/%s", namespace, name)
 		s.writeError(w, http.StatusServiceUnavailable, "dynamic client not available")
@@ -89,7 +91,8 @@ func (s *Server) handleArgoSuspend(w http.ResponseWriter, r *http.Request) {
 	namespace := chi.URLParam(r, "namespace")
 	name := chi.URLParam(r, "name")
 
-	client := k8s.GetDynamicClient()
+	auth.AuditLog(r, namespace, name)
+	client := s.getDynamicClientForRequest(r)
 	if client == nil {
 		log.Printf("[argo] Dynamic client unavailable for suspend Application %s/%s", namespace, name)
 		s.writeError(w, http.StatusServiceUnavailable, "dynamic client not available")
@@ -110,7 +113,8 @@ func (s *Server) handleArgoResume(w http.ResponseWriter, r *http.Request) {
 	namespace := chi.URLParam(r, "namespace")
 	name := chi.URLParam(r, "name")
 
-	client := k8s.GetDynamicClient()
+	auth.AuditLog(r, namespace, name)
+	client := s.getDynamicClientForRequest(r)
 	if client == nil {
 		log.Printf("[argo] Dynamic client unavailable for resume Application %s/%s", namespace, name)
 		s.writeError(w, http.StatusServiceUnavailable, "dynamic client not available")
