@@ -1,6 +1,10 @@
 import { memo } from 'react'
 import { NodeProps, Handle, Position } from '@xyflow/react'
-import { ChevronDown, ChevronRight, Box, Tag } from 'lucide-react'
+import { Box, LayoutGrid, Maximize2, Minus, Tag, Workflow } from 'lucide-react'
+import { healthToSeverity, SEVERITY_DOT } from '../../utils/badge-colors'
+import type { HealthStatus } from '../../types'
+import { Tooltip } from '../ui/Tooltip'
+import type { WorkloadCard, GroupDisplayLevel } from './layout'
 
 interface GroupNodeData {
   type: 'namespace' | 'app' | 'label'
@@ -8,8 +12,16 @@ interface GroupNodeData {
   label?: string
   nodeCount: number
   collapsed: boolean
-  onToggleCollapse: (groupId: string) => void
+  displayLevel: GroupDisplayLevel
+  onSetLevel: (groupId: string, level: GroupDisplayLevel) => void
+  onCardClick?: (nodeId: string) => void
+  onMaximizeNamespace?: (namespace: string) => void
   hideHeader?: boolean
+  worstStatus?: HealthStatus
+  unhealthyCount?: number
+  kindCounts?: Record<string, number>
+  workloadCards?: WorkloadCard[]
+  gridColumns?: number
 }
 
 export const GroupNode = memo(function GroupNode({
@@ -18,7 +30,14 @@ export const GroupNode = memo(function GroupNode({
   width,
   height,
 }: NodeProps & { data: GroupNodeData }) {
-  const { type, name, label, nodeCount, collapsed, onToggleCollapse, hideHeader } = data
+  const {
+    type, name, label, nodeCount, displayLevel,
+    onSetLevel, onCardClick, onMaximizeNamespace, hideHeader,
+    worstStatus, unhealthyCount, kindCounts,
+    workloadCards, gridColumns,
+  } = data
+  const hasProblems = (unhealthyCount ?? 0) > 0
+  const statusDotColor = hasProblems && worstStatus ? SEVERITY_DOT[healthToSeverity(worstStatus)] : null
 
   const getIcon = () => {
     switch (type) {
@@ -33,7 +52,6 @@ export const GroupNode = memo(function GroupNode({
   }
 
   const getBorderStyle = (): React.CSSProperties => {
-    // Must set full 'border' property to override ReactFlow's --xy-node-border
     switch (type) {
       case 'namespace':
         return { border: '2px solid var(--group-border-namespace)' }
@@ -87,112 +105,204 @@ export const GroupNode = memo(function GroupNode({
 
   const Icon = getIcon()
 
-  // When collapsed, render as a compact card
-  if (collapsed) {
+  // Invisible handles (shared across all levels)
+  const handles = (
+    <>
+      <Handle type="target" position={Position.Left} className="!bg-transparent !border-0 !w-0 !h-0" />
+      <Handle type="source" position={Position.Right} className="!bg-transparent !border-0 !w-0 !h-0" />
+    </>
+  )
+
+  // Level control buttons — shared across all headers
+  const TIP_DELAY = 100
+  const levelControls = (
+    <div className="flex items-center gap-0.5 shrink-0" onClick={(e) => e.stopPropagation()}>
+      <Tooltip content="Collapse" delay={TIP_DELAY} position="bottom">
+        <button
+          className={`p-1 rounded transition-colors ${displayLevel === 'chip' ? 'opacity-40' : 'hover:bg-white/10'}`}
+          onClick={() => displayLevel !== 'chip' && onSetLevel(id, 'chip')}
+          disabled={displayLevel === 'chip'}
+        >
+          <Minus className="w-4 h-4" style={getIconStyle()} />
+        </button>
+      </Tooltip>
+      <Tooltip content="Workload cards" delay={TIP_DELAY} position="bottom">
+        <button
+          className={`p-1 rounded transition-colors ${displayLevel === 'cardGrid' ? 'opacity-40' : 'hover:bg-white/10'}`}
+          onClick={() => displayLevel !== 'cardGrid' && onSetLevel(id, 'cardGrid')}
+          disabled={displayLevel === 'cardGrid'}
+        >
+          <LayoutGrid className="w-4 h-4" style={getIconStyle()} />
+        </button>
+      </Tooltip>
+      <Tooltip content="Full topology" delay={TIP_DELAY} position="bottom">
+        <button
+          className={`p-1 rounded transition-colors ${displayLevel === 'topology' ? 'opacity-40' : 'hover:bg-white/10'}`}
+          onClick={() => displayLevel !== 'topology' && onSetLevel(id, 'topology')}
+          disabled={displayLevel === 'topology'}
+        >
+          <Workflow className="w-4 h-4" style={getIconStyle()} />
+        </button>
+      </Tooltip>
+      {onMaximizeNamespace && type === 'namespace' && (
+        <Tooltip content="Focus namespace" delay={TIP_DELAY} position="bottom">
+          <button
+            className="p-1 rounded hover:bg-white/10 transition-colors"
+            onClick={() => onMaximizeNamespace(name)}
+          >
+            <Maximize2 className="w-4 h-4" style={getIconStyle()} />
+          </button>
+        </Tooltip>
+      )}
+    </div>
+  )
+
+  // ── Level 1: Chip (compact collapsed card) ──
+  if (displayLevel === 'chip') {
+    // Size tier: 0-9 → 0, 10-99 → 1, 100-999 → 2, 1000+ → 3
+    const tier = nodeCount === 0 ? 0 : Math.min(3, Math.floor(Math.log10(nodeCount)))
+    const nameSize = ['text-sm', 'text-xl', 'text-4xl', 'text-6xl'][tier]
+    const iconSize = ['w-3.5 h-3.5', 'w-5 h-5', 'w-9 h-9', 'w-12 h-12'][tier]
+    const maxPills = [2, 5, 8, 12][tier]
+    const chipPadding = ['8px 10px', '10px 12px', '14px 16px', '16px 20px'][tier]
+
+    const kindPills = kindCounts
+      ? Object.entries(kindCounts)
+          .sort(([, a], [, b]) => b - a)
+          .slice(0, maxPills)
+      : []
+
     return (
       <>
-        <Handle
-          type="target"
-          position={Position.Left}
-          className="!bg-transparent !border-0 !w-0 !h-0"
-        />
-
+        {handles}
         <div
-          className="rounded-xl p-4 cursor-pointer group-header-scaled"
-          onClick={() => onToggleCollapse(id)}
-          style={{ ...getBorderStyle(), ...getHeaderBgStyle() }}
+          className="rounded-xl group-header-scaled overflow-hidden"
+          style={{ ...getBorderStyle(), ...getHeaderBgStyle(), padding: chipPadding, width: width || '100%', height: height || '100%' }}
         >
-          <div className="flex items-center gap-4">
-            <ChevronRight className="w-8 h-8" style={getIconStyle()} />
-            <Icon className="w-9 h-9" style={getIconStyle()} />
-            <span className="text-4xl font-bold" style={getLabelStyle()}>{name}</span>
-            {label && (
-              <span className="text-sm text-theme-text-secondary">({label})</span>
+          {/* Header row: icon + name + count + status + controls */}
+          <div className="flex items-center gap-2 min-w-0">
+            <Icon className={`${iconSize} shrink-0`} style={getIconStyle()} />
+            <span className={`${nameSize} font-bold truncate`} style={getLabelStyle()}>{name}</span>
+            <span className="text-[10px] text-theme-text-secondary shrink-0 bg-theme-surface/50 rounded px-1.5 py-0.5">{nodeCount}</span>
+            {statusDotColor && (
+              <span className={`w-2 h-2 rounded-full shrink-0 ${statusDotColor}`} />
             )}
+            <div className="ml-auto shrink-0">{levelControls}</div>
           </div>
-          <div className="mt-3 text-xl text-theme-text-secondary">
-            {nodeCount} {nodeCount === 1 ? 'resource' : 'resources'}
-          </div>
+          {/* Kind pills row: colored icons with counts */}
+          {kindPills.length > 0 && (
+            <div className="flex flex-wrap gap-1 mt-1.5">
+              {kindPills.map(([kind, count]) => (
+                <div key={kind} className="flex items-center gap-1 bg-theme-surface/50 rounded px-1.5 py-0.5">
+                  <span className={`topology-icon topology-icon-${kind.toLowerCase()}`} style={{ width: 10, height: 10, fontSize: 6, borderRadius: 2 }} />
+                  <span className="text-[10px] text-theme-text-secondary">{count} {kind}{count > 1 ? 's' : ''}</span>
+                </div>
+              ))}
+              {kindCounts && Object.keys(kindCounts).length > maxPills && (
+                <span className="text-[10px] text-theme-text-tertiary self-center">+{Object.keys(kindCounts).length - maxPills}</span>
+              )}
+            </div>
+          )}
         </div>
-
-        <Handle
-          type="source"
-          position={Position.Right}
-          className="!bg-transparent !border-0 !w-0 !h-0"
-        />
       </>
     )
   }
 
-  // When expanded, render as a container with header
-  // Children are rendered automatically by ReactFlow via parentId
+  // ── Level 2: Card Grid (workload cards inside namespace) ──
+  if (displayLevel === 'cardGrid' && workloadCards) {
+    const cols = gridColumns || Math.min(4, workloadCards.length || 1)
+    return (
+      <>
+        {handles}
+        <div
+          className="rounded-xl overflow-hidden group-header-scaled"
+          style={{ ...getBorderStyle(), width: width || '100%', height: height || '100%' }}
+        >
+          {/* Header bar with level controls */}
+          <div
+            className="w-full relative flex items-center"
+            style={{ ...getHeaderBgStyle(), padding: '8px 12px' }}
+          >
+            <div className="flex items-center gap-2 min-w-0 flex-1">
+              <Icon className="shrink-0 w-5 h-5" style={getIconStyle()} />
+              <span className="font-bold truncate text-base" style={getLabelStyle()}>{name}</span>
+              <span className="shrink-0 text-xs text-theme-text-secondary bg-theme-surface/50 rounded px-1.5 py-0.5">
+                {workloadCards.length}
+              </span>
+            </div>
+            <div className="shrink-0 ml-2">{levelControls}</div>
+          </div>
+
+          {/* Workload card grid */}
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: `repeat(${cols}, 200px)`,
+              gap: '6px',
+              padding: '8px 14px 14px',
+            }}
+          >
+            {workloadCards.map(card => {
+              const statusClass = card.status === 'unhealthy' ? 'grid-card-unhealthy'
+                : card.status === 'degraded' ? 'grid-card-degraded'
+                : card.status === 'unknown' ? 'grid-card-unknown' : ''
+              return (
+                <div
+                  key={card.id}
+                  className={`grid-card ${statusClass}`}
+                  onClick={(e) => { e.stopPropagation(); onCardClick?.(card.id) }}
+                >
+                  <div className="grid-card-header">
+                    <span className={`topology-icon topology-icon-${card.kind.toLowerCase()}`} />
+                    <span className="grid-card-kind">{card.kind}</span>
+                    <span className="grid-card-count">{card.resourceCount}</span>
+                  </div>
+                  <div className="grid-card-name">{card.name}</div>
+                  {card.subtitle && (
+                    <div className="grid-card-subtitle">{card.subtitle}</div>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      </>
+    )
+  }
+
+  // ── Level 3: Topology (full expanded container) ──
   return (
     <>
-      <Handle
-        type="target"
-        position={Position.Left}
-        className="!bg-transparent !border-0 !w-0 !h-0"
-      />
-
-      {/* Container with border - use explicit dimensions from props */}
-      {/* Top position adjusts based on CSS variable set by ViewportController */}
+      {handles}
       <div
-        className="absolute left-0 rounded-xl box-border isolate overflow-hidden bg-theme-surface/40 group-container-adjusted"
+        className={`absolute left-0 box-border isolate overflow-hidden group-container-adjusted ${hideHeader ? '' : 'rounded-xl bg-theme-surface/40'}`}
         style={{
           width: width || '100%',
           height: height || '100%',
-          ...getBorderStyle()
+          ...(hideHeader ? {} : getBorderStyle())
         }}
       >
-        {/* Header bar - background extends full width, content scales, count fixed right */}
-        {/* Hidden when hideHeader is true (single namespace view) */}
         {!hideHeader && (
           <div
-            className="w-full cursor-pointer relative flex items-center"
-            onClick={() => onToggleCollapse(id)}
-            style={getHeaderBgStyle()}
+            className="w-full relative flex items-center"
+            style={{ ...getHeaderBgStyle(), padding: '12px 16px' }}
           >
-            {/* Scaled content */}
             <div
-              className="flex items-center group-header-scaled"
-              style={{
-                padding: '20px 24px',
-                gap: '16px',
-              }}
+              className="flex items-center gap-3 min-w-0 flex-1 group-header-scaled"
             >
-              <ChevronDown
-                className="shrink-0 w-8 h-8"
-                style={getIconStyle()}
-              />
-              <Icon
-                className="shrink-0 w-9 h-9"
-                style={getIconStyle()}
-              />
-              <span
-                className="font-bold truncate text-4xl"
-                style={getLabelStyle()}
-              >
-                {name}
-              </span>
+              <Icon className="shrink-0 w-7 h-7" style={getIconStyle()} />
+              <span className="font-bold truncate text-2xl" style={getLabelStyle()}>{name}</span>
               {label && (
-                <span className="text-sm text-theme-text-secondary truncate">
-                  ({label})
-                </span>
+                <span className="text-sm text-theme-text-secondary truncate">({label})</span>
               )}
+              <span className="shrink-0 text-xs text-theme-text-secondary bg-theme-surface/50 rounded px-1.5 py-0.5">
+                {nodeCount}
+              </span>
             </div>
-            {/* Count badge - fixed size, anchored top-right */}
-            <span className="absolute right-4 top-4 shrink-0 font-medium text-sm text-theme-text-secondary bg-theme-surface/70 rounded-lg px-3 py-1">
-              {nodeCount}
-            </span>
+            <div className="shrink-0 ml-2">{levelControls}</div>
           </div>
         )}
       </div>
-
-      <Handle
-        type="source"
-        position={Position.Right}
-        className="!bg-transparent !border-0 !w-0 !h-0"
-      />
     </>
   )
 })

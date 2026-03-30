@@ -1,6 +1,24 @@
 import type { Node } from '@xyflow/react'
-import type { TopologyNode, GroupingMode, NodeKind } from '../../types'
+import type { TopologyNode, GroupingMode, NodeKind, HealthStatus } from '../../types'
 import { NODE_DIMENSIONS } from './K8sResourceNode'
+
+// --- 3-level display system types ---
+export type GroupDisplayLevel = 'chip' | 'cardGrid' | 'topology'
+
+export interface WorkloadCard {
+  id: string             // Node ID of primary resource (for click handling)
+  kind: NodeKind         // Kind of primary resource (Deployment, StatefulSet, etc.)
+  name: string           // Name of primary resource
+  status: HealthStatus   // Worst health status in the connected subgraph
+  subtitle: string       // Status info (e.g., "3/3 ready", "ClusterIP", "*/5 * * * *")
+  resourceCount: number  // Total connected resources in this workload
+}
+
+// Card grid layout constants — must match CSS in GroupNode.tsx cardGrid rendering
+const GRID_CARD_W = 200
+const GRID_CARD_H = 68
+const GRID_GAP = 6
+const GRID_PAD = { top: 48, left: 14, bottom: 14, right: 14 }
 
 // Group padding - space for header + internal spacing (must account for border)
 // Top padding accommodates the header at its largest (when zoomed out)
@@ -190,7 +208,7 @@ async function runLayoutOnMainThread(
       groupLayouts.push({
         groupId: child.id, groupKey,
         width: Math.max(child.width || 280, minWidth),
-        height: child.height || 90,
+        height: child.height || 82,
         children: [], isCollapsed: true,
       })
     } else {
@@ -399,61 +417,11 @@ function propagateAppLabels(
   return nodeGroupLabels
 }
 
-// Pick a representative name for a connected component group
+// Pick a representative name for a connected component group (uses shared KIND_PRIORITY)
 function pickGroupName(nodes: TopologyNode[]): string {
-  // Priority order for picking the group name
-  const kindPriority: Record<string, number> = {
-    'Deployment': 1,
-    'Rollout': 1,
-    'StatefulSet': 2,
-    'DaemonSet': 3,
-    'CronJob': 4,
-    'Job': 5,
-    'Service': 6,
-    'Gateway': 7,
-    'HTTPRoute': 6,
-    'GRPCRoute': 6,
-    'TCPRoute': 6,
-    'TLSRoute': 6,
-    'Ingress': 7,
-    'ReplicaSet': 8,
-    'Pod': 9,
-    'PodGroup': 9,
-    'ConfigMap': 10,
-    'Secret': 10,
-    'PersistentVolumeClaim': 10,
-    'HorizontalPodAutoscaler': 10,
-    'KnativeService': 1,
-    'KnativeConfiguration': 3,
-    'KnativeRevision': 4,
-    'KnativeRoute': 2,
-    'Broker': 2,
-    'Channel': 2,
-    'Trigger': 3,
-    'PingSource': 3,
-    'ApiServerSource': 3,
-    'ContainerSource': 3,
-    'SinkBinding': 3,
-    'IngressRoute': 1,
-    'IngressRouteTCP': 1,
-    'IngressRouteUDP': 1,
-    'TraefikService': 2,
-    'Middleware': 3,
-    'MiddlewareTCP': 3,
-    'ServersTransport': 4,
-    'ServersTransportTCP': 4,
-    'TLSOption': 4,
-    'TLSStore': 4,
-    'HTTPProxy': 1, // Contour
-  }
-
-  // Sort by priority and pick the first
   const sorted = [...nodes].sort((a, b) => {
-    const priorityA = kindPriority[a.kind] || 99
-    const priorityB = kindPriority[b.kind] || 99
-    return priorityA - priorityB
+    return (KIND_PRIORITY[a.kind] || 99) - (KIND_PRIORITY[b.kind] || 99)
   })
-
   return sorted[0].name
 }
 
@@ -462,7 +430,8 @@ export function buildHierarchicalElkGraph(
   topologyNodes: TopologyNode[],
   edges: Array<{ id: string; source: string; target: string; type: string }>,
   groupingMode: GroupingMode,
-  collapsedGroups: Set<string>
+  collapsedGroups: Set<string>,
+  groupLevels?: Map<string, GroupDisplayLevel>
 ): { elkGraph: ElkGraph; groupMap: Map<string, string[]>; nodeToGroup: Map<string, string> } {
   const groupMap = new Map<string, string[]>()
   const nodeToGroup = new Map<string, string>()
@@ -508,25 +477,67 @@ export function buildHierarchicalElkGraph(
       })
     }
   } else {
+    // Build node lookup once for O(1) access in dimension/card computation
+    const nodeMapForGroups = new Map(topologyNodes.map(n => [n.id, n]))
     // Create group nodes with children
     for (const [groupKey, memberIds] of groupMap) {
       const groupId = `group-${groupingMode}-${groupKey}`
-      const isCollapsed = collapsedGroups.has(groupId)
+      // When groupLevels has entries for the CURRENT grouping mode, any group without
+      // an explicit 'topology' level is collapsed. This prevents late-arriving namespaces
+      // from defaulting to expanded and overlapping with collapsed chips.
+      // Only apply when levels exist for the same grouping prefix — don't let namespace
+      // levels leak into app/label grouping contexts.
+      const groupPrefix = `group-${groupingMode}-`
+      const hasLevelsForCurrentMode = groupLevels && groupLevels.size > 0 &&
+        [...groupLevels.keys()].some(k => k.startsWith(groupPrefix))
+      const isCollapsed = collapsedGroups.has(groupId) ||
+        (hasLevelsForCurrentMode && groupLevels!.get(groupId) !== 'topology')
 
       if (isCollapsed) {
-        // Collapsed group is a single node - width based on label length
-        const collapsedWidth = Math.max(400, groupKey.length * 16 + 180)
-        children.push({
-          id: groupId,
-          width: collapsedWidth,
-          height: 90,
-          labels: [{ text: groupKey }],
-        })
+        const displayLevel = groupLevels?.get(groupId) || 'chip'
+
+        if (displayLevel === 'cardGrid') {
+          // Card grid: compute dimensions from workload card count
+          const cards = computeWorkloadCards(memberIds, edges, nodeMapForGroups)
+          const { width, height } = computeGridDimensions(cards.length, groupKey)
+          children.push({
+            id: groupId,
+            width,
+            height,
+            labels: [{ text: groupKey }],
+          })
+        } else {
+          // Chip size scales with resource count (log10 tiers)
+          const count = memberIds.length
+          const tier = count === 0 ? 0 : Math.min(3, Math.floor(Math.log10(count)))
+          const tierWidthBonus = [0, 120, 300, 500][tier]
+          const collapsedWidth = Math.max(240 + tierWidthBonus, groupKey.length * 16 + 160)
+
+          // Count unique kinds for pill row height calculation
+          const uniqueKinds = new Set<string>()
+          for (const nId of memberIds) {
+            const n = nodeMapForGroups.get(nId)
+            if (n && n.kind !== 'PodGroup') uniqueKinds.add(n.kind)
+          }
+          const maxPills = [2, 5, 8, 12][tier]
+          const pillCount = Math.min(maxPills, uniqueKinds.size)
+          const pillWidth = 90
+          const pillCols = Math.max(1, Math.floor((collapsedWidth - 24) / (pillWidth + 6)))
+          const pillRows = pillCount > 0 ? Math.ceil(pillCount / pillCols) : 0
+          const headerHeight = [20, 28, 40, 56][tier]
+          const tierHeight = 20 + headerHeight + (pillRows > 0 ? 8 + pillRows * 24 : 0)
+          children.push({
+            id: groupId,
+            width: collapsedWidth,
+            height: tierHeight,
+            labels: [{ text: groupKey }],
+          })
+        }
       } else {
         // Expanded group contains its children
         const groupChildren: ElkNode[] = []
         for (const nodeId of memberIds) {
-          const node = topologyNodes.find(n => n.id === nodeId)
+          const node = nodeMapForGroups.get(nodeId)
           if (node) {
             const kind = node.kind as NodeKind
             const dims = NODE_DIMENSIONS[kind] || { width: 200, height: 56 }
@@ -624,16 +635,164 @@ export function buildHierarchicalElkGraph(
   }
 }
 
+// Lower number = higher severity
+const HEALTH_PRIORITY: Record<HealthStatus, number> = { unhealthy: 0, degraded: 1, unknown: 2, healthy: 3 }
+
+function computeGroupHealth(memberIds: string[], nodeMap: Map<string, TopologyNode>): { worstStatus: HealthStatus; unhealthyCount: number } {
+  let worstPriority = 3
+  let worstStatus: HealthStatus = 'healthy'
+  let unhealthyCount = 0
+  for (const id of memberIds) {
+    const node = nodeMap.get(id)
+    if (!node) continue
+    const priority = HEALTH_PRIORITY[node.status] ?? 2
+    if (priority < worstPriority) {
+      worstPriority = priority
+      worstStatus = node.status
+    }
+    if (node.status === 'unhealthy' || node.status === 'degraded') {
+      unhealthyCount++
+    }
+  }
+  return { worstStatus, unhealthyCount }
+}
+
+// Compute workload cards for a card-grid group by finding connected subgraphs.
+// Each connected component becomes one card, named after its highest-priority resource.
+function computeWorkloadCards(
+  memberIds: string[],
+  edges: Array<{ id: string; source: string; target: string; type: string }>,
+  nodeMap: Map<string, TopologyNode>
+): WorkloadCard[] {
+  const memberSet = new Set(memberIds)
+
+  // Build adjacency list restricted to this group's members
+  const adj = new Map<string, Set<string>>()
+  for (const id of memberIds) adj.set(id, new Set())
+  for (const edge of edges) {
+    if (memberSet.has(edge.source) && memberSet.has(edge.target)) {
+      adj.get(edge.source)?.add(edge.target)
+      adj.get(edge.target)?.add(edge.source)
+    }
+  }
+
+  // BFS to find connected components
+  const visited = new Set<string>()
+  const components: TopologyNode[][] = []
+  for (const id of memberIds) {
+    if (visited.has(id)) continue
+    const component: TopologyNode[] = []
+    const queue = [id]
+    visited.add(id)
+    while (queue.length > 0) {
+      const nodeId = queue.shift()!
+      const node = nodeMap.get(nodeId)
+      if (node) component.push(node)
+      for (const neighbor of adj.get(nodeId) || []) {
+        if (!visited.has(neighbor)) {
+          visited.add(neighbor)
+          queue.push(neighbor)
+        }
+      }
+    }
+    if (component.length > 0) components.push(component)
+  }
+
+  // Convert each component to a workload card
+  const cards: WorkloadCard[] = components.map(comp => {
+    // Pick primary resource using kindPriority (reuse the same map from pickGroupName)
+    const sorted = [...comp].sort((a, b) => {
+      const pa = KIND_PRIORITY[a.kind] || 99
+      const pb = KIND_PRIORITY[b.kind] || 99
+      return pa - pb
+    })
+    const primary = sorted[0]
+
+    // Compute worst health
+    let worstPriority = 3
+    let worstStatus: HealthStatus = 'healthy'
+    for (const node of comp) {
+      const p = HEALTH_PRIORITY[node.status] ?? 2
+      if (p < worstPriority) { worstPriority = p; worstStatus = node.status }
+    }
+
+    // Extract subtitle from primary resource's data
+    const d = primary.data as Record<string, unknown>
+    let subtitle = ''
+    if (['Deployment', 'StatefulSet', 'DaemonSet', 'Rollout', 'ReplicaSet'].includes(primary.kind)) {
+      subtitle = (d.statusSummary as string) || `${d.readyReplicas ?? '?'}/${d.totalReplicas ?? '?'} ready`
+    } else if (primary.kind === 'Service') {
+      subtitle = (d.type as string) || 'ClusterIP'
+    } else if (primary.kind === 'CronJob') {
+      subtitle = (d.schedule as string) || ''
+    } else if (primary.kind === 'Job') {
+      subtitle = (d.phase as string) || ''
+    } else if (primary.kind === 'Application') {
+      const sync = d.syncStatus as string
+      const health = d.healthStatus as string
+      subtitle = [sync, health].filter(Boolean).join(' · ')
+    } else if (primary.kind === 'KnativeService' || primary.kind === 'Kustomization' || primary.kind === 'HelmRelease') {
+      subtitle = d.ready ? 'Ready' : 'Not Ready'
+    }
+
+    return {
+      id: primary.id,
+      kind: primary.kind,
+      name: primary.name,
+      status: worstStatus,
+      subtitle,
+      resourceCount: comp.length,
+    }
+  })
+
+  // Sort by resource count descending (biggest workloads first)
+  cards.sort((a, b) => b.resourceCount - a.resourceCount)
+  return cards
+}
+
+// Shared kind priority map — used by both pickGroupName and computeWorkloadCards
+const KIND_PRIORITY: Record<string, number> = {
+  'Deployment': 1, 'Rollout': 1, 'StatefulSet': 2, 'DaemonSet': 3,
+  'CronJob': 4, 'Job': 5, 'Service': 6, 'Gateway': 7,
+  'HTTPRoute': 6, 'GRPCRoute': 6, 'TCPRoute': 6, 'TLSRoute': 6, 'Ingress': 7,
+  'ReplicaSet': 8, 'Pod': 9, 'PodGroup': 9,
+  'ConfigMap': 10, 'Secret': 10, 'PersistentVolumeClaim': 10, 'HorizontalPodAutoscaler': 10,
+  'KnativeService': 1, 'KnativeConfiguration': 3, 'KnativeRevision': 4, 'KnativeRoute': 2,
+  'Broker': 2, 'Channel': 2, 'Trigger': 3, 'PingSource': 3, 'ApiServerSource': 3,
+  'ContainerSource': 3, 'SinkBinding': 3,
+  'IngressRoute': 1, 'IngressRouteTCP': 1, 'IngressRouteUDP': 1, 'TraefikService': 2,
+  'Middleware': 3, 'MiddlewareTCP': 3, 'ServersTransport': 4, 'ServersTransportTCP': 4,
+  'TLSOption': 4, 'TLSStore': 4, 'HTTPProxy': 1,
+  'Application': 1, 'Kustomization': 1, 'HelmRelease': 1, 'GitRepository': 2,
+}
+
+// Compute grid dimensions from workload card count
+function computeGridDimensions(cardCount: number, groupKey: string): { width: number; height: number; columns: number } {
+  if (cardCount === 0) return { width: 400, height: 130, columns: 1 }
+  const columns = Math.min(4, cardCount)
+  const rows = Math.ceil(cardCount / columns)
+  const minWidth = Math.max(400, groupKey.length * 16 + 180)
+  const width = Math.max(minWidth, columns * (GRID_CARD_W + GRID_GAP) - GRID_GAP + GRID_PAD.left + GRID_PAD.right)
+  const height = GRID_PAD.top + rows * (GRID_CARD_H + GRID_GAP) - GRID_GAP + GRID_PAD.bottom
+  return { width, height, columns }
+}
+
 // Two-phase layout: first layout groups internally, then position groups based on connections
 // Layout is performed in a Web Worker to avoid blocking the main thread
 export async function applyHierarchicalLayout(
   elkGraph: ElkGraph,
   topologyNodes: TopologyNode[],
+  topologyEdges: Array<{ id: string; source: string; target: string; type: string }>,
   groupMap: Map<string, string[]>,
   groupingMode: GroupingMode,
   _collapsedGroups: Set<string>,
-  onToggleCollapse: (groupId: string) => void,
-  hideGroupHeader: boolean = false
+  callbacks: {
+    onSetLevel: (groupId: string, level: GroupDisplayLevel) => void
+    onCardClick: (nodeId: string) => void
+    onMaximizeNamespace?: (namespace: string) => void
+  },
+  hideGroupHeader: boolean = false,
+  groupLevels?: Map<string, GroupDisplayLevel>
 ): Promise<{ nodes: Node[]; positions: Map<string, { x: number; y: number }>; error?: string }> {
   try {
     const padding = hideGroupHeader ? GROUP_PADDING_NO_HEADER : GROUP_PADDING
@@ -651,6 +810,8 @@ export async function applyHierarchicalLayout(
     // Build ReactFlow nodes using positions from worker
     const nodes: Node[] = []
     const positions = new Map<string, { x: number; y: number }>()
+    // Build node lookup once for O(1) health aggregation across all groups
+    const nodeMap = new Map(topologyNodes.map(n => [n.id, n]))
 
     for (const group of workerResult.groupLayouts) {
       const pos = groupPositions.get(group.groupId) || { x: 0, y: 0 }
@@ -658,29 +819,65 @@ export async function applyHierarchicalLayout(
 
       positions.set(group.groupId, pos)
 
-      // Add group node
-      nodes.push({
-        id: group.groupId,
-        type: 'group',
-        position: pos,
-        data: {
-          type: groupingMode,
-          name: group.groupKey,
-          nodeCount: memberIds.length,
-          collapsed: group.isCollapsed,
-          onToggleCollapse,
-          hideHeader: hideGroupHeader,
-        },
-        style: {
-          width: group.width,
-          height: group.height,
-        },
-        zIndex: -1,
-      })
+      const { worstStatus, unhealthyCount } = computeGroupHealth(memberIds, nodeMap)
+      // Default to 'chip' when groupLevels has entries for the current grouping mode,
+      // so late-arriving namespaces don't render as expanded topology and overlap with chips.
+      const hasLevelsForMode = groupLevels && groupLevels.size > 0 &&
+        [...groupLevels.keys()].some(k => k.startsWith(`group-${groupingMode}-`))
+      const defaultLevel: GroupDisplayLevel = hasLevelsForMode ? 'chip' : 'topology'
+      const displayLevel: GroupDisplayLevel = groupLevels?.get(group.groupId) || (group.isCollapsed ? 'chip' : defaultLevel)
 
-      // Add child nodes with positions relative to group
+      // Compute kind breakdown for collapsed chips
+      const kindCounts: Record<string, number> = {}
+      for (const id of memberIds) {
+        const node = nodeMap.get(id)
+        if (!node || node.kind === 'PodGroup') continue
+        kindCounts[node.kind] = (kindCounts[node.kind] || 0) + 1
+      }
+
+      // Compute workload cards for card-grid groups
+      const workloadCards = displayLevel === 'cardGrid'
+        ? computeWorkloadCards(memberIds, topologyEdges, nodeMap)
+        : undefined
+      const gridColumns = workloadCards ? Math.min(4, workloadCards.length || 1) : undefined
+
+      // Skip the group container node entirely in single-namespace topology view —
+      // it creates an invisible bounding box that constrains child node movement
+      const skipGroupNode = hideGroupHeader && displayLevel === 'topology'
+
+      if (!skipGroupNode) {
+        nodes.push({
+          id: group.groupId,
+          type: 'group',
+          position: pos,
+          data: {
+            type: groupingMode,
+            name: group.groupKey,
+            nodeCount: memberIds.length,
+            collapsed: group.isCollapsed,
+            displayLevel,
+            onSetLevel: callbacks.onSetLevel,
+            onCardClick: callbacks.onCardClick,
+            onMaximizeNamespace: callbacks.onMaximizeNamespace,
+            hideHeader: hideGroupHeader,
+            worstStatus,
+            unhealthyCount,
+            kindCounts,
+            workloadCards,
+            gridColumns,
+          },
+          style: {
+            width: group.width,
+            height: group.height,
+          },
+          zIndex: -1,
+        })
+      }
+
+      // Add child nodes — use absolute positions (no parent) when header is hidden
+      // (single namespace view), otherwise relative positions inside the group container
       for (const child of group.children) {
-        const topoNode = topologyNodes.find(n => n.id === child.id)
+        const topoNode = nodeMap.get(child.id)
         if (topoNode) {
           const absX = pos.x + child.x
           const absY = pos.y + child.y
@@ -689,9 +886,8 @@ export async function applyHierarchicalLayout(
           nodes.push({
             id: child.id,
             type: 'k8sResource',
-            position: { x: child.x, y: child.y },
-            parentId: group.groupId,
-            extent: 'parent',
+            position: hideGroupHeader ? { x: absX, y: absY } : { x: child.x, y: child.y },
+            ...(hideGroupHeader ? {} : { parentId: group.groupId, extent: 'parent' as const }),
             data: {
               kind: topoNode.kind,
               name: topoNode.name,
@@ -707,7 +903,7 @@ export async function applyHierarchicalLayout(
     // Add ungrouped nodes
     for (const node of workerResult.ungroupedNodes) {
       const pos = groupPositions.get(node.id) || { x: 0, y: 0 }
-      const topoNode = topologyNodes.find(n => n.id === node.id)
+      const topoNode = nodeMap.get(node.id)
       if (topoNode) {
         positions.set(node.id, pos)
 

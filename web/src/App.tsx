@@ -59,6 +59,10 @@ const ALL_NODE_KINDS: NodeKind[] = [
 // Default visible kinds (ReplicaSet hidden by default - noisy intermediate object)
 const DEFAULT_VISIBLE_KINDS = ALL_NODE_KINDS.filter(k => k !== 'ReplicaSet')
 
+// CRD kinds hidden by default in the topology (infrastructure plumbing).
+// Users can re-enable via the filter sidebar.
+const CRD_HIDDEN_BY_DEFAULT = new Set(['GatewayClass', 'IngressClass', 'NodePool', 'NodeClaim', 'NodeClass'])
+
 // Convert API resource name back to topology node ID prefix
 function apiResourceToNodeIdPrefix(apiResource: string): string {
   const prefixMap: Record<string, string> = {
@@ -204,6 +208,8 @@ function AppInner() {
   }, [navigate, searchParams])
 
   const [namespaces, setNamespaces] = useState<string[]>(getInitialState().namespaces)
+  // For large clusters: force SSE to reconnect with namespace filter
+  const [forceNamespaceFilter, setForceNamespaceFilter] = useState<string[] | undefined>(undefined)
   const [selectedResource, setSelectedResource] = useState<SelectedResource | null>(null)
   const [drawerInitialTab, setDrawerInitialTab] = useState<'detail' | 'yaml'>('detail')
   const [selectedHelmRelease, setSelectedHelmRelease] = useState<SelectedHelmRelease | null>(null)
@@ -369,9 +375,10 @@ function AppInner() {
     return groupingMode
   }, [hasNamespaceFilter, groupingMode])
 
-  // Hide group header when viewing a single namespace with "no grouping" selected
-  // (grouping header is meaningless with only one namespace, but needed for multi-namespace)
-  const hideGroupHeader = namespaces.length === 1 && groupingMode === 'none'
+  // Hide group header when viewing a single namespace with namespace grouping —
+  // the namespace name is already shown in the breadcrumb/picker. Preserve headers
+  // for app/label grouping so those group boundaries remain visible.
+  const hideGroupHeader = namespaces.length === 1 && effectiveGroupingMode === 'namespace'
 
   // Fetch available namespaces
   const { data: availableNamespaces, error: namespacesError } = useNamespaces()
@@ -427,7 +434,8 @@ function AppInner() {
     }, 3000)
   }, [queryClient])
 
-  // SSE connection for real-time updates
+  // SSE connection for real-time updates — no namespace filter for small/medium clusters (frontend filters).
+  // forceNamespaceFilter is only set for large clusters that require server-side filtering.
   const { topology, connected, reconnect: reconnectSSE } = useEventSource(namespaces, topologyMode, {
     onContextSwitchComplete: endSwitch,
     onContextSwitchProgress: updateProgress,
@@ -464,7 +472,7 @@ function AppInner() {
       queryClient.invalidateQueries({ queryKey: ['dashboard'] })
     },
     onK8sEvent: handleK8sEvent,
-  })
+  }, forceNamespaceFilter)
   const [reconnect, isReconnecting] = useRefreshAnimation(reconnectSSE)
 
   // Apply live topology updates only when not paused. While paused, buffer the
@@ -509,7 +517,9 @@ function AppInner() {
       const k = node.kind as string
       if (!allNodeKindsSet.has(k) && !seededCRDKindsRef.current.has(k)) {
         seededCRDKindsRef.current.add(k)
-        newKinds.push(node.kind)
+        if (!CRD_HIDDEN_BY_DEFAULT.has(k)) {
+          newKinds.push(node.kind)
+        }
       }
     }
     if (newKinds.length > 0) {
@@ -646,7 +656,12 @@ function AppInner() {
   const filteredTopology = useMemo((): Topology | null => {
     if (!displayedTopology) return null
 
-    const filteredNodes = displayedTopology.nodes.filter(node => visibleKinds.has(node.kind))
+    // Filter by namespace (frontend-side) and by visible kinds
+    const nsSet = namespaces.length > 0 ? new Set(namespaces) : null
+    const filteredNodes = displayedTopology.nodes.filter(node =>
+      visibleKinds.has(node.kind) &&
+      (!nsSet || nsSet.has(node.data.namespace as string) || !(node.data.namespace as string))
+    )
     const filteredNodeIds = new Set(filteredNodes.map(n => n.id))
 
     // Keep edges where both source and target are visible
@@ -667,7 +682,7 @@ function AppInner() {
       nodes: filteredNodes,
       edges: filteredEdges,
     }
-  }, [displayedTopology, visibleKinds])
+  }, [displayedTopology, visibleKinds, namespaces])
 
   // Filter handlers
   const handleToggleKind = useCallback((kind: NodeKind) => {
@@ -971,7 +986,7 @@ function AppInner() {
         {/* Topology view */}
         {mainView === 'topology' && (
           <>
-            {topology?.requiresNamespaceFilter ? (
+            {topology?.requiresNamespaceFilter && namespaces.length === 0 ? (
               /* Large cluster: prompt user to select a namespace */
               <div className="flex-1 flex items-center justify-center">
                 <div className="max-w-md w-full mx-4 text-center">
@@ -989,7 +1004,11 @@ function AppInner() {
                     <div className="relative">
                       <LargeClusterNamespacePicker
                         namespaces={availableNamespaces}
-                        onSelect={(ns) => setNamespaces([ns])}
+                        onSelect={(ns) => {
+                          setNamespaces([ns])
+                          // Large clusters need server-side filtering — reconnect SSE with namespace
+                          setForceNamespaceFilter([ns])
+                        }}
                       />
                     </div>
                   </div>
@@ -1023,6 +1042,10 @@ function AppInner() {
                     selectedNodeId={selectedResource ? `${apiResourceToNodeIdPrefix(selectedResource.kind)}-${selectedResource.namespace}-${selectedResource.name}` : undefined}
                     paused={topologyPaused}
                     onTogglePause={handleTogglePause}
+                    onMaximizeNamespace={(ns) => setNamespaces([ns])}
+                    namespaceBreadcrumb={namespaces.length === 1 ? namespaces[0] : undefined}
+                    onClearNamespace={namespaces.length === 1 ? () => setNamespaces([]) : undefined}
+                    namespacesKey={namespaces.join(',')}
                   />
 
                   {/* Topology controls overlay - top right */}
