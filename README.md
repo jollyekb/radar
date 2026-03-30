@@ -84,8 +84,6 @@ Native desktop app — no terminal needed.
 brew install --cask skyhook-io/tap/radar-desktop
 ```
 
-> Radar Desktop is not yet code-signed. Install with `--no-quarantine` or right-click → Open on first launch.
-
 **Debian/Ubuntu:**
 ```bash
 sudo apt install ./radar-desktop_*.deb
