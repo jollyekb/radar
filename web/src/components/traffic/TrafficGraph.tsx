@@ -59,6 +59,55 @@ function formatConnections(count: number): string {
   return count.toString()
 }
 
+function formatLatency(ms: number): string {
+  if (ms >= 1000) return `${(ms / 1000).toFixed(1)}s`
+  if (ms >= 1) return `${ms.toFixed(1)}ms`
+  return `${(ms * 1000).toFixed(0)}µs`
+}
+
+function latencyColor(ms: number): string {
+  if (ms > 500) return 'text-red-400'
+  if (ms > 200) return 'text-orange-400'
+  if (ms > 50) return 'text-yellow-400'
+  return 'text-green-400'
+}
+
+const STATUS_COLORS: Record<string, { bg: string; text: string }> = {
+  '2xx': { bg: 'bg-green-500', text: 'text-green-300' },
+  '3xx': { bg: 'bg-yellow-500', text: 'text-yellow-300' },
+  '4xx': { bg: 'bg-orange-500', text: 'text-orange-300' },
+  '5xx': { bg: 'bg-red-500', text: 'text-red-300' },
+}
+
+function StatusDistributionBar({ counts }: { counts: Record<string, number> }) {
+  const total = Object.values(counts).reduce((a, b) => a + b, 0)
+  if (total === 0) return null
+  const order = ['2xx', '3xx', '4xx', '5xx']
+  return (
+    <div className="space-y-1">
+      <div className="flex h-2 rounded overflow-hidden gap-px">
+        {order.map(key => {
+          const count = counts[key] ?? 0
+          if (count === 0) return null
+          const pct = (count / total) * 100
+          return <div key={key} className={clsx('h-full', STATUS_COLORS[key]?.bg ?? 'bg-gray-500')} style={{ width: `${pct}%` }} />
+        })}
+      </div>
+      <div className="flex flex-wrap gap-2 text-[10px]">
+        {order.map(key => {
+          const count = counts[key] ?? 0
+          if (count === 0) return null
+          return (
+            <span key={key} className={STATUS_COLORS[key]?.text ?? 'text-gray-400'}>
+              {key}: {count}
+            </span>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
 // Port info with connection count
 interface PortInfo {
   port: number
@@ -272,9 +321,21 @@ function TrafficLegend() {
         </div>
         <div className="flex items-center gap-2">
           <svg width="24" height="8" className="shrink-0">
+            <line x1="0" y1="4" x2="24" y2="4" stroke="#06b6d4" strokeWidth="2" />
+          </svg>
+          <span className="text-theme-text-secondary">DNS</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <svg width="24" height="8" className="shrink-0">
             <line x1="0" y1="4" x2="24" y2="4" stroke="#ef4444" strokeWidth="2" />
           </svg>
           <span className="text-theme-text-secondary">Errors (5xx)</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <svg width="24" height="8" className="shrink-0">
+            <line x1="0" y1="4" x2="24" y2="4" stroke="#ef4444" strokeWidth="2" strokeDasharray="6 3" />
+          </svg>
+          <span className="text-theme-text-secondary">Dropped</span>
         </div>
         <div className="flex items-center gap-2">
           <svg width="24" height="8" className="shrink-0">
@@ -372,6 +433,35 @@ function DetailsPanel({
       if (f.l7Protocol) acc.add(f.l7Protocol)
       return acc
     }, new Set<string>()),
+    // Aggregate latency across edges (median of P50s, max of P95s)
+    latencyP50Ms: (() => {
+      const p50s = relatedFlows.map(f => f.latencyP50Ms).filter((v): v is number => v != null && v > 0)
+      if (p50s.length === 0) return undefined
+      p50s.sort((a, b) => a - b)
+      return p50s[Math.floor(p50s.length / 2)]
+    })(),
+    latencyP95Ms: (() => {
+      const p95s = relatedFlows.map(f => f.latencyP95Ms).filter((v): v is number => v != null && v > 0)
+      return p95s.length > 0 ? Math.max(...p95s) : undefined
+    })(),
+    // Aggregate HTTP status distribution
+    httpStatusCounts: relatedFlows.reduce((acc, f) => {
+      if (f.httpStatusCounts) {
+        for (const [k, v] of Object.entries(f.httpStatusCounts)) {
+          acc[k] = (acc[k] || 0) + v
+        }
+      }
+      return acc
+    }, {} as Record<string, number>),
+    // Aggregate verdict counts
+    verdictCounts: relatedFlows.reduce((acc, f) => {
+      if (f.verdictCounts) {
+        for (const [k, v] of Object.entries(f.verdictCounts)) {
+          acc[k] = (acc[k] || 0) + v
+        }
+      }
+      return acc
+    }, {} as Record<string, number>),
   } : null
 
   return (
@@ -501,6 +591,51 @@ function DetailsPanel({
                     </div>
                   </div>
                 )}
+              </div>
+            )}
+
+            {/* Node latency */}
+            {nodeStats?.latencyP50Ms && (
+              <div className="pt-1">
+                <div className="text-[10px] text-theme-text-tertiary mb-1">Latency</div>
+                <div className="flex gap-2 text-xs">
+                  <span className={clsx('font-medium', latencyColor(nodeStats.latencyP50Ms))}>
+                    P50: {formatLatency(nodeStats.latencyP50Ms)}
+                  </span>
+                  {nodeStats.latencyP95Ms && (
+                    <span className={clsx('font-medium', latencyColor(nodeStats.latencyP95Ms))}>
+                      P95: {formatLatency(nodeStats.latencyP95Ms)}
+                    </span>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Node HTTP status distribution */}
+            {nodeStats?.httpStatusCounts && Object.keys(nodeStats.httpStatusCounts).length > 0 && (
+              <div className="pt-1">
+                <div className="text-[10px] text-theme-text-tertiary mb-1">HTTP Status</div>
+                <StatusDistributionBar counts={nodeStats.httpStatusCounts} />
+              </div>
+            )}
+
+            {/* Node verdict summary */}
+            {nodeStats?.verdictCounts && (nodeStats.verdictCounts.dropped ?? 0) > 0 && (
+              <div className="pt-1">
+                <div className="flex flex-wrap gap-1">
+                  {Object.entries(nodeStats.verdictCounts).map(([verdict, count]) => (
+                    <span
+                      key={verdict}
+                      className={clsx('inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium',
+                        verdict === 'forwarded' ? 'bg-green-500/20 text-green-300' :
+                        verdict === 'dropped' ? 'bg-red-500/20 text-red-300' :
+                        'bg-orange-500/20 text-orange-300'
+                      )}
+                    >
+                      {verdict}: {count}
+                    </span>
+                  ))}
+                </div>
               </div>
             )}
 
@@ -655,6 +790,100 @@ function DetailsPanel({
                   </div>
                 )}
               </div>
+
+              {/* Latency percentiles */}
+              {edgeData.flow && (edgeData.flow.latencyP50Ms || edgeData.flow.latencyP95Ms || edgeData.flow.latencyP99Ms) ? (
+                <div className="pt-2 border-t border-theme-border">
+                  <div className="text-[10px] text-theme-text-tertiary mb-1.5">Latency</div>
+                  <div className="grid grid-cols-3 gap-1.5 text-xs">
+                    {[
+                      { label: 'P50', value: edgeData.flow.latencyP50Ms },
+                      { label: 'P95', value: edgeData.flow.latencyP95Ms },
+                      { label: 'P99', value: edgeData.flow.latencyP99Ms },
+                    ].map(({ label, value }) => (
+                      <div key={label} className="p-1.5 rounded bg-theme-elevated text-center">
+                        <div className="text-theme-text-tertiary text-[9px]">{label}</div>
+                        <div className={clsx('font-medium', latencyColor(value ?? 0))}>
+                          {value ? formatLatency(value) : '—'}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+
+              {/* HTTP status distribution */}
+              {edgeData.flow?.httpStatusCounts && Object.keys(edgeData.flow.httpStatusCounts).length > 0 && (
+                <div className="pt-2 border-t border-theme-border">
+                  <div className="text-[10px] text-theme-text-tertiary mb-1.5">HTTP Status</div>
+                  <StatusDistributionBar counts={edgeData.flow.httpStatusCounts} />
+                </div>
+              )}
+
+              {/* Top HTTP paths */}
+              {edgeData.flow?.topHTTPPaths && edgeData.flow.topHTTPPaths.length > 0 && (
+                <div className="pt-2 border-t border-theme-border">
+                  <div className="text-[10px] text-theme-text-tertiary mb-1.5">Top Paths</div>
+                  <div className="space-y-1 max-h-40 overflow-y-auto">
+                    {edgeData.flow.topHTTPPaths.map((p, i) => (
+                      <div key={i} className="flex items-center gap-1.5 text-[10px]">
+                        <span className="shrink-0 px-1 py-0.5 rounded bg-blue-500/20 text-blue-300 font-medium">{p.method}</span>
+                        <span className="text-theme-text-primary truncate flex-1" title={p.path}>{p.path || '/'}</span>
+                        <span className="shrink-0 text-theme-text-secondary">{p.count}</span>
+                        {p.avgMs ? <span className="shrink-0 text-theme-text-tertiary">{formatLatency(p.avgMs)}</span> : null}
+                        {p.errorPct ? <span className={clsx('shrink-0', p.errorPct > 10 ? 'text-red-400' : 'text-yellow-400')}>{p.errorPct.toFixed(0)}%err</span> : null}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Top DNS queries */}
+              {edgeData.flow?.topDNSQueries && edgeData.flow.topDNSQueries.length > 0 && (
+                <div className="pt-2 border-t border-theme-border">
+                  <div className="text-[10px] text-theme-text-tertiary mb-1.5">DNS Queries</div>
+                  <div className="space-y-1 max-h-40 overflow-y-auto">
+                    {edgeData.flow.topDNSQueries.map((q, i) => (
+                      <div key={i} className="flex items-center gap-1.5 text-[10px]">
+                        <span className="text-theme-text-primary truncate flex-1" title={q.query}>{q.query}</span>
+                        <span className="shrink-0 text-theme-text-secondary">{q.count}</span>
+                        {q.nxCount ? <span className="shrink-0 text-orange-400">NX:{q.nxCount}</span> : null}
+                        {q.avgTTL ? <span className="shrink-0 text-theme-text-tertiary">TTL:{q.avgTTL}s</span> : null}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Verdict breakdown */}
+              {edgeData.flow?.verdictCounts && Object.keys(edgeData.flow.verdictCounts).length > 1 && (
+                <div className="pt-2 border-t border-theme-border">
+                  <div className="text-[10px] text-theme-text-tertiary mb-1.5">Verdicts</div>
+                  <div className="flex flex-wrap gap-1">
+                    {Object.entries(edgeData.flow.verdictCounts).map(([verdict, count]) => (
+                      <span
+                        key={verdict}
+                        className={clsx('inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium',
+                          verdict === 'forwarded' ? 'bg-green-500/20 text-green-300' :
+                          verdict === 'dropped' ? 'bg-red-500/20 text-red-300' :
+                          'bg-orange-500/20 text-orange-300'
+                        )}
+                      >
+                        {verdict}: {count}
+                      </span>
+                    ))}
+                  </div>
+                  {edgeData.flow.dropReasons && Object.keys(edgeData.flow.dropReasons).length > 0 && (
+                    <div className="mt-1 space-y-0.5">
+                      {Object.entries(edgeData.flow.dropReasons).map(([reason, count]) => (
+                        <div key={reason} className="text-[9px] text-red-400 pl-1">
+                          {reason}: {count}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
 
               {edgeData.flow && (
                 <div className="space-y-1 pt-2 border-t border-theme-border">
@@ -924,14 +1153,17 @@ export function TrafficGraph({ flows, hotPathThreshold = 0, showNamespaceGroups 
       const isHotEdge = flow.connections >= hotPathThreshold && hotPathThreshold > 0
       const hasErrors = (flow.errorCount ?? 0) > 0
 
-      // Phase 2.3: Hot path styling (orange for hot, red for errors, blue for http/grpc, gray for others)
+      // Phase 2.3: Hot path styling (orange for hot, red for errors, blue for http/grpc, cyan for dns, gray for others)
+      const hasDrops = (flow.verdictCounts?.dropped ?? 0) > 0
       const strokeColor = hasErrors
         ? '#ef4444'  // red-500 for error flows
         : isHotEdge
           ? '#f97316'  // orange-500
-          : flow.protocol === 'http' || flow.protocol === 'grpc'
+          : flow.l7Protocol === 'HTTP' || flow.l7Protocol === 'gRPC'
             ? '#3b82f6'  // blue-500
-            : '#6b7280'  // gray-500
+            : flow.l7Protocol === 'DNS'
+              ? '#06b6d4'  // cyan-500
+              : '#6b7280'  // gray-500
 
       // Phase 2.1: Edge width based on connection count
       const strokeWidth = getEdgeWidth(flow.connections)
@@ -941,10 +1173,11 @@ export function TrafficGraph({ flows, hotPathThreshold = 0, showNamespaceGroups 
         ? `${formatConnections(flow.connections)}/s`
         : formatConnections(flow.connections)
       const l7Label = flow.l7Protocol ? `${flow.l7Protocol} · ` : ''
+      const latencyLabel = flow.latencyP50Ms ? ` · ${formatLatency(flow.latencyP50Ms)}` : ''
       const errorLabel = hasErrors
         ? ` · ${formatConnections(flow.errorCount!)} err`
         : ''
-      const edgeLabel = `${l7Label}${connStr}${errorLabel}`
+      const edgeLabel = `${l7Label}${connStr}${latencyLabel}${errorLabel}`
 
       edgeList.push({
         id: edgeId,
@@ -965,6 +1198,7 @@ export function TrafficGraph({ flows, hotPathThreshold = 0, showNamespaceGroups 
         style: {
           strokeWidth,
           stroke: strokeColor,
+          ...(hasDrops && { strokeDasharray: '6 3' }),
         },
         markerEnd: {
           type: MarkerType.ArrowClosed,

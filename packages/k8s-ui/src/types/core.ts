@@ -708,11 +708,41 @@ export interface TrafficFlow {
   httpMethod?: string
   httpPath?: string
   httpStatus?: number
+  latencyNs?: number
+  l7Type?: string // REQUEST, RESPONSE, SAMPLE
+  httpProtocol?: string // HTTP/1.1, HTTP/2
+  httpHeaders?: string[] // allowlisted headers as "key: value"
+  dnsQuery?: string
+  dnsIPs?: string[]
+  dnsTTL?: number
+  dnsRCode?: number
+  dnsQTypes?: string[]
+  trafficDirection?: string // ingress, egress
+  dropReasonDesc?: string
+  sourceService?: string
+  destService?: string
   bytesSent: number
   bytesRecv: number
   connections: number
   verdict: string // forwarded, dropped, error
   lastSeen: string // ISO date string
+}
+
+// HTTP path statistics for aggregated flows
+export interface HTTPPathStat {
+  method: string
+  path: string
+  count: number
+  avgMs?: number
+  errorPct?: number // 4xx+5xx percentage
+}
+
+// DNS query statistics for aggregated flows
+export interface DNSQueryStat {
+  query: string
+  count: number
+  nxCount?: number // NXDOMAIN responses
+  avgTTL?: number
 }
 
 // Aggregated flow by service pair
@@ -730,6 +760,14 @@ export interface AggregatedFlow {
   requestCount?: number
   errorCount?: number
   avgLatencyMs?: number
+  latencyP50Ms?: number
+  latencyP95Ms?: number
+  latencyP99Ms?: number
+  httpStatusCounts?: Record<string, number> // "2xx": 150, "5xx": 3
+  topHTTPPaths?: HTTPPathStat[]
+  topDNSQueries?: DNSQueryStat[]
+  verdictCounts?: Record<string, number> // "forwarded": 500, "dropped": 3
+  dropReasons?: Record<string, number>
 }
 
 // Cluster info for traffic detection

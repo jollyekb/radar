@@ -4,10 +4,8 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"math"
 	"strings"
 	"sync"
-	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
@@ -445,89 +443,7 @@ func (m *Manager) GetActiveSourceName() string {
 	return m.activeSource.Name()
 }
 
-// AggregateFlows aggregates flows by service pair
-func AggregateFlows(flows []Flow) []AggregatedFlow {
-	// Key: source-ns/source-name|dest-ns/dest-name|port
-	aggregated := make(map[string]*AggregatedFlow)
 
-	// Track L7 protocol votes per aggregation key to pick the majority
-	l7Votes := make(map[string]map[string]int64)
-
-	for _, f := range flows {
-		key := fmt.Sprintf("%s/%s|%s/%s|%d",
-			f.Source.Namespace, f.Source.Name,
-			f.Destination.Namespace, f.Destination.Name,
-			f.Port)
-
-		// Track L7 protocol votes
-		if f.L7Protocol != "" {
-			if l7Votes[key] == nil {
-				l7Votes[key] = make(map[string]int64)
-			}
-			l7Votes[key][f.L7Protocol] += f.Connections
-		}
-
-		if agg, ok := aggregated[key]; ok {
-			agg.FlowCount++
-			agg.BytesSent += f.BytesSent
-			agg.BytesRecv += f.BytesRecv
-			agg.Connections += f.Connections
-			agg.RequestCount += roundRate(f.RequestRate)
-			agg.ErrorCount += roundRate(f.ErrorRate)
-			if f.LastSeen.After(agg.LastSeen) {
-				agg.LastSeen = f.LastSeen
-			}
-		} else {
-			aggregated[key] = &AggregatedFlow{
-				Source:       f.Source,
-				Destination:  f.Destination,
-				Protocol:     f.Protocol,
-				Port:         f.Port,
-				FlowCount:    1,
-				BytesSent:    f.BytesSent,
-				BytesRecv:    f.BytesRecv,
-				Connections:  f.Connections,
-				RequestCount: roundRate(f.RequestRate),
-				ErrorCount:   roundRate(f.ErrorRate),
-				LastSeen:     f.LastSeen,
-			}
-		}
-	}
-
-	// Apply L7 protocol majority vote
-	for key, agg := range aggregated {
-		if votes, ok := l7Votes[key]; ok {
-			var bestProto string
-			var bestCount int64
-			for proto, count := range votes {
-				if count > bestCount {
-					bestProto = proto
-					bestCount = count
-				}
-			}
-			agg.L7Protocol = bestProto
-		}
-	}
-
-	result := make([]AggregatedFlow, 0, len(aggregated))
-	for _, agg := range aggregated {
-		result = append(result, *agg)
-	}
-	return result
-}
-
-// roundRate converts a per-second rate to an int64 count, ensuring that any
-// positive rate maps to at least 1 (so low-traffic services aren't invisible).
-func roundRate(rate float64) int64 {
-	if rate <= 0 {
-		return 0
-	}
-	r := int64(math.Round(rate))
-	if r == 0 {
-		return 1
-	}
-	return r
-}
 
 // Close cleans up all traffic sources
 func (m *Manager) Close() error {
@@ -634,12 +550,6 @@ func (m *Manager) SetContextName(name string) {
 }
 
 // DefaultFlowOptions returns sensible defaults
-func DefaultFlowOptions() FlowOptions {
-	return FlowOptions{
-		Since: 5 * time.Minute,
-		Limit: 1000,
-	}
-}
 
 // carettaHelmChart returns the Helm chart info for Caretta
 func carettaHelmChart() *HelmChartInfo {
