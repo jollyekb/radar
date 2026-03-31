@@ -1,4 +1,4 @@
-import { useState, useMemo, useRef } from 'react'
+import { useState, useMemo, useRef, useEffect } from 'react'
 import { useRefreshAnimation } from '../../hooks/useRefreshAnimation'
 import {
   AlertCircle,
@@ -15,13 +15,11 @@ import {
   Shield,
 } from 'lucide-react'
 import { clsx } from 'clsx'
-import { useHasLimitedAccess } from '../../contexts/CapabilitiesContext'
-import { useChanges } from '../../api/client'
 import { DiffViewer, DiffBadge } from './DiffViewer'
 import type { TimelineEvent, TimeRange } from '../../types'
 import { isChangeEvent, isK8sEvent, isHistoricalEvent, isOperation } from '../../types'
 import { getOperationColor, getHealthBadgeColor, SEVERITY_BADGE } from '../../utils/badge-colors'
-import { ResourceRefBadge } from '../resources/drawer-components'
+import { ResourceRefBadge } from '../ui/drawer-components'
 import type { NavigateToResource } from '../../utils/navigation'
 import { kindToPlural, refToSelectedResource } from '../../utils/navigation'
 import { useRegisterShortcut } from '../../hooks/useKeyboardShortcuts'
@@ -42,8 +40,13 @@ function formatResourceAge(createdAt: string): string {
 
 export type ActivityTypeFilter = 'all' | 'changes' | 'k8s_events' | 'warnings' | 'unhealthy'
 
-interface TimelineListProps {
-  namespaces: string[]
+export interface TimelineListProps {
+  events: TimelineEvent[]
+  isLoading: boolean
+  onRefresh?: () => void
+  onQueryChange?: (params: { timeRange: TimeRange; kind?: string }) => void
+  hasLimitedAccess?: boolean
+  namespaces?: string[]
   onViewChange?: (view: 'list' | 'swimlane') => void
   currentView?: 'list' | 'swimlane'
   onResourceClick?: NavigateToResource
@@ -76,14 +79,17 @@ const RESOURCE_KINDS = [
   'StatefulSet',
 ]
 
-export function TimelineList({ namespaces, onViewChange, currentView = 'list', onResourceClick, initialFilter, initialTimeRange }: TimelineListProps) {
-  const hasLimitedAccess = useHasLimitedAccess()
+export function TimelineList({ events, isLoading, onRefresh, onQueryChange, hasLimitedAccess, namespaces, onViewChange, currentView = 'list', onResourceClick, initialFilter, initialTimeRange }: TimelineListProps) {
   const [searchTerm, setSearchTerm] = useState('')
   const [activityTypeFilter, setActivityTypeFilter] = useState<ActivityTypeFilter>(initialFilter ?? 'all')
   const [timeRange, setTimeRange] = useState<TimeRange>(initialTimeRange ?? '1h')
   const [kindFilter, setKindFilter] = useState<string>('')
   const [expandedItem, setExpandedItem] = useState<string | null>(null)
   const searchInputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    onQueryChange?.({ timeRange, kind: kindFilter || undefined })
+  }, [timeRange, kindFilter, onQueryChange])
 
   // Keyboard shortcut: / to focus search
   useRegisterShortcut({
@@ -103,21 +109,13 @@ export function TimelineList({ namespaces, onViewChange, currentView = 'list', o
     handler: () => searchInputRef.current?.blur(),
   })
 
-  // Fetch unified timeline - always include all events, filter client-side
-  const { data: activity, isLoading, refetch: refetchChanges } = useChanges({
-    namespaces,
-    kind: kindFilter || undefined,
-    timeRange,
-    includeK8sEvents: true, // Always fetch all, filter client-side for stable counts
-    limit: 500,
-  })
-  const [handleRefresh, isRefreshAnimating] = useRefreshAnimation(refetchChanges)
+  const [handleRefresh, isRefreshAnimating] = useRefreshAnimation(onRefresh ?? (() => {}))
 
   // Filter activity
   const filteredActivity = useMemo(() => {
-    if (!activity) return []
+    if (!events) return []
 
-    return activity.filter((item) => {
+    return events.filter((item) => {
       // Filter by activity type
       if (activityTypeFilter === 'changes' && !isChangeEvent(item)) return false
       if (activityTypeFilter === 'k8s_events' && !isK8sEvent(item)) return false
@@ -148,7 +146,7 @@ export function TimelineList({ namespaces, onViewChange, currentView = 'list', o
 
       return true
     })
-  }, [activity, activityTypeFilter, searchTerm])
+  }, [events, activityTypeFilter, searchTerm])
 
   // Aggregated event group type
   type AggregatedItem = {
@@ -264,14 +262,14 @@ export function TimelineList({ namespaces, onViewChange, currentView = 'list', o
 
   // Count stats
   const stats = useMemo(() => {
-    if (!activity) return { total: 0, changes: 0, warnings: 0, unhealthy: 0 }
+    if (!events) return { total: 0, changes: 0, warnings: 0, unhealthy: 0 }
     return {
-      total: activity.length,
-      changes: activity.filter((e) => isChangeEvent(e)).length,
-      warnings: activity.filter((e) => e.eventType === 'Warning').length,
-      unhealthy: activity.filter((e) => isChangeEvent(e) && (e.healthState === 'unhealthy' || e.healthState === 'degraded')).length,
+      total: events.length,
+      changes: events.filter((e) => isChangeEvent(e)).length,
+      warnings: events.filter((e) => e.eventType === 'Warning').length,
+      unhealthy: events.filter((e) => isChangeEvent(e) && (e.healthState === 'unhealthy' || e.healthState === 'degraded')).length,
     }
-  }, [activity])
+  }, [events])
 
   return (
     <div className="flex flex-col h-full w-full">
@@ -389,14 +387,16 @@ export function TimelineList({ namespaces, onViewChange, currentView = 'list', o
         )}
 
         {/* Refresh */}
-        <button
-          onClick={handleRefresh}
-          disabled={isRefreshAnimating}
-          className="p-2 text-theme-text-secondary hover:text-theme-text-primary hover:bg-theme-elevated rounded-lg disabled:opacity-50"
-          title="Refresh"
-        >
-          <RefreshCw className={clsx('w-4 h-4', isRefreshAnimating && 'animate-spin')} />
-        </button>
+        {onRefresh && (
+          <button
+            onClick={handleRefresh}
+            disabled={isRefreshAnimating}
+            className="p-2 text-theme-text-secondary hover:text-theme-text-primary hover:bg-theme-elevated rounded-lg disabled:opacity-50"
+            title="Refresh"
+          >
+            <RefreshCw className={clsx('w-4 h-4', isRefreshAnimating && 'animate-spin')} />
+          </button>
+        )}
       </div>
 
       {/* Timeline content */}
