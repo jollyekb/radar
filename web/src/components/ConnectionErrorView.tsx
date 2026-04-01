@@ -75,6 +75,14 @@ function getAuthHints(context: string): AuthHints {
 }
 
 const errorHints: Record<string, { title: string; hints: string[] }> = {
+  config: {
+    title: 'No Kubeconfig Found',
+    hints: [
+      'Radar could not find a kubeconfig file at ~/.kube/config',
+      'If your kubeconfig is at a custom path, set the KUBECONFIG environment variable in your shell profile (~/.zshrc or ~/.bashrc)',
+      'You can also pass --kubeconfig <path> when launching from the terminal',
+    ],
+  },
   rbac: {
     title: 'Insufficient Permissions',
     hints: [
@@ -161,7 +169,7 @@ export function ConnectionErrorView({ connection, onRetry, isRetrying }: Connect
           </div>
 
           <h2 className="text-xl font-semibold text-theme-text-primary mb-2">
-            Cannot Connect to Cluster
+            {connection.errorType === 'config' ? 'No Cluster Configuration' : 'Cannot Connect to Cluster'}
           </h2>
 
           <p className="text-sm text-theme-text-secondary mb-1">
@@ -221,7 +229,7 @@ export function ConnectionErrorView({ connection, onRetry, isRetrying }: Connect
               )}
             </button>
 
-            <ContextSwitcher />
+            {connection.errorType !== 'config' && <ContextSwitcher />}
           </div>
         </div>
       </div>

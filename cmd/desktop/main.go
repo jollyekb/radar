@@ -61,14 +61,15 @@ func main() {
 	// GUI apps (macOS .app, Linux .desktop) get a minimal PATH that
 	// doesn't include user-installed tools like gke-gcloud-auth-plugin,
 	// gcloud, aws CLI, etc. Enrich PATH from the user's login shell.
-	enrichPath()
+	enrichEnv()
 
 	// On Linux, detect system dark mode via xdg-desktop-portal D-Bus and
 	// set GTK_THEME so WebKitGTK's prefers-color-scheme media query works.
 	applySystemTheme()
 
 	if *kubeconfig != "" && *kubeconfigDir != "" {
-		log.Fatalf("--kubeconfig and --kubeconfig-dir are mutually exclusive")
+		log.Printf("ERROR: --kubeconfig and --kubeconfig-dir are mutually exclusive")
+		os.Exit(1)
 	}
 
 	cfg := app.AppConfig{
@@ -95,8 +96,16 @@ func main() {
 	// Clean up leftover files from previous update
 	updater.CleanupOldUpdate()
 
-	if err := app.InitializeK8s(cfg); err != nil {
-		log.Fatalf("%v", err)
+	// Initialize K8s client — if this fails (e.g., no kubeconfig found),
+	// still start the UI so the user sees the error instead of a silent exit.
+	k8sInitErr := app.InitializeK8s(cfg)
+	if k8sInitErr != nil {
+		log.Printf("K8s init failed (will show in UI): %v", k8sInitErr)
+		k8s.SetConnectionStatus(k8s.ConnectionStatus{
+			State:     k8s.StateDisconnected,
+			Error:     k8sInitErr.Error(),
+			ErrorType: "config",
+		})
 	}
 
 	timelineStoreCfg := app.BuildTimelineStoreConfig(cfg)
@@ -111,7 +120,8 @@ func main() {
 	ready := make(chan struct{})
 	go func() {
 		if err := srv.StartWithReady(ready); err != nil {
-			log.Fatalf("Server error: %v", err)
+			log.Printf("Server error: %v", err)
+			os.Exit(1)
 		}
 	}()
 	<-ready
@@ -120,7 +130,9 @@ func main() {
 	app.WriteMCPPortFile(srv.ActualPort())
 
 	// Initialize cluster in background (browser will see progress via SSE)
-	go app.InitializeCluster()
+	if k8sInitErr == nil {
+		go app.InitializeCluster()
+	}
 
 	// Track opens and maybe prompt to star (non-blocking)
 	app.MaybePromptGitHubStar()
