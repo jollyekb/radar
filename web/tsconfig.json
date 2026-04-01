@@ -15,7 +15,6 @@
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true,
-    "baseUrl": ".",
     "paths": {
       "@/*": ["./src/*"],
       "@skyhook-io/k8s-ui": ["../packages/k8s-ui/src/index.ts"],
