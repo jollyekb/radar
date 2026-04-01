@@ -334,6 +334,8 @@ func (s *Server) setupRoutes() {
 
 			// Desktop routes
 			r.Post("/desktop/open-url", s.handleDesktopOpenURL)
+			r.Post("/desktop/open-file", s.handleDesktopOpenFile)
+			r.Post("/desktop/open-folder", s.handleDesktopOpenFolder)
 			r.Post("/desktop/save-file", s.handleDesktopSaveFile)
 			r.Post("/desktop/update", s.handleDesktopUpdateStart)
 			r.Get("/desktop/update/status", s.handleDesktopUpdateStatus)

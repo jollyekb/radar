@@ -2,8 +2,11 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/skyhook-io/radar/internal/app"
 	"github.com/skyhook-io/radar/internal/k8s"
@@ -33,18 +36,28 @@ func (a *DesktopApp) startup(ctx context.Context) {
 	a.srv.SetSaveFileFunc(a.saveFile)
 }
 
-// saveFile shows the native OS save dialog and writes the file.
+// saveFile writes a file to the user's Downloads folder.
+// We write directly to ~/Downloads instead of showing a native save dialog
+// because Wails' SaveFileDialog is immediately dismissed by the webview on macOS.
 func (a *DesktopApp) saveFile(defaultFilename string, data []byte) (string, error) {
-	path, err := wailsRuntime.SaveFileDialog(a.ctx, wailsRuntime.SaveDialogOptions{
-		DefaultFilename: defaultFilename,
-		Title:           "Save File",
-	})
+	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", err
 	}
-	if path == "" {
-		return "", server.ErrSaveCancelled
+	dir := filepath.Join(home, "Downloads")
+
+	// Collision handling: file.txt → file (1).txt → file (2).txt
+	base := defaultFilename
+	ext := filepath.Ext(base)
+	name := strings.TrimSuffix(base, ext)
+	path := filepath.Join(dir, base)
+	for i := 1; ; i++ {
+		if _, err := os.Stat(path); os.IsNotExist(err) {
+			break
+		}
+		path = filepath.Join(dir, fmt.Sprintf("%s (%d)%s", name, i, ext))
 	}
+
 	if err := os.WriteFile(path, data, 0600); err != nil {
 		return "", err
 	}

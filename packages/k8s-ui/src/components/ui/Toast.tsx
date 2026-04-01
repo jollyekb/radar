@@ -11,13 +11,22 @@ interface Toast {
   type?: 'success' | 'info' | 'warning' | 'error'
   position?: { x: number; y: number }
   dismissing?: boolean
+  action?: { label: string; icon?: ReactNode; onClick: () => void }
+  onDetailClick?: () => void
 }
 
 interface ToastContextType {
-  showToast: (message: string, options?: { detail?: string; command?: string; type?: Toast['type']; position?: { x: number; y: number } }) => void
+  showToast: (message: string, options?: {
+    detail?: string
+    command?: string
+    type?: Toast['type']
+    position?: { x: number; y: number }
+    action?: Toast['action']
+    onDetailClick?: () => void
+  }) => void
   showCopied: (command: string, label?: string, event?: React.MouseEvent) => void
   showError: (message: string, detail?: string) => void
-  showSuccess: (message: string, detail?: string) => void
+  showSuccess: (message: string, detail?: string, action?: Toast['action'], onDetailClick?: () => void) => void
 }
 
 const ToastContext = createContext<ToastContextType | null>(null)
@@ -26,7 +35,7 @@ const ToastContext = createContext<ToastContextType | null>(null)
 class ToastManager {
   private static instance: ToastManager
   private showErrorFn: ((message: string, detail?: string) => void) | null = null
-  private showSuccessFn: ((message: string, detail?: string) => void) | null = null
+  private showSuccessFn: ((message: string, detail?: string, action?: Toast['action'], onDetailClick?: () => void) => void) | null = null
 
   static getInstance(): ToastManager {
     if (!ToastManager.instance) {
@@ -49,8 +58,8 @@ class ToastManager {
     this.showErrorFn ? this.showErrorFn(message, detail) : console.error('[Toast]', message, detail)
   }
 
-  showSuccess(message: string, detail?: string) {
-    this.showSuccessFn ? this.showSuccessFn(message, detail) : console.log('[Toast]', message, detail)
+  showSuccess(message: string, detail?: string, action?: Toast['action'], onDetailClick?: () => void) {
+    this.showSuccessFn ? this.showSuccessFn(message, detail, action, onDetailClick) : console.log('[Toast]', message, detail)
   }
 }
 
@@ -60,8 +69,8 @@ export function showApiError(message: string, detail?: string) {
   toastManager.showError(message, detail)
 }
 
-export function showApiSuccess(message: string, detail?: string) {
-  toastManager.showSuccess(message, detail)
+export function showApiSuccess(message: string, detail?: string, action?: Toast['action'], onDetailClick?: () => void) {
+  toastManager.showSuccess(message, detail, action, onDetailClick)
 }
 
 export function useToast() {
@@ -82,14 +91,21 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     }, DURATION_TOAST_EXIT)
   }, [])
 
-  const showToast = useCallback((message: string, options?: { detail?: string; command?: string; type?: Toast['type']; position?: { x: number; y: number } }) => {
+  const showToast = useCallback((message: string, options?: {
+    detail?: string
+    command?: string
+    type?: Toast['type']
+    position?: { x: number; y: number }
+    action?: Toast['action']
+    onDetailClick?: () => void
+  }) => {
     const id = Math.random().toString(36).slice(2)
     const toast: Toast = { id, message, ...options }
 
     setToasts(prev => [...prev, toast])
 
-    // Auto-dismiss: errors stay longer (8s), others 5s
-    const dismissTime = options?.type === 'error' ? 8000 : 5000
+    // Auto-dismiss: errors stay longer (10s), others 7s
+    const dismissTime = options?.type === 'error' ? 10000 : 7000
     setTimeout(() => {
       animateDismiss(id)
     }, dismissTime)
@@ -112,8 +128,8 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     showToast(message, { detail, type: 'error' })
   }, [showToast])
 
-  const showSuccess = useCallback((message: string, detail?: string) => {
-    showToast(message, { detail, type: 'success' })
+  const showSuccess = useCallback((message: string, detail?: string, action?: Toast['action'], onDetailClick?: () => void) => {
+    showToast(message, { detail, type: 'success', action, onDetailClick })
   }, [showToast])
 
   const dismissToast = useCallback((id: string) => {
@@ -143,7 +159,7 @@ function ToastItem({ toast, onDismiss }: { toast: Toast; onDismiss: () => void }
   const style: React.CSSProperties = toast.position
     ? {
         position: 'fixed',
-        left: Math.min(toast.position.x, window.innerWidth - 420),
+        left: Math.min(toast.position.x, window.innerWidth - 520),
         top: toast.position.y,
         zIndex: 50,
       }
@@ -160,13 +176,13 @@ function ToastItem({ toast, onDismiss }: { toast: Toast; onDismiss: () => void }
   return (
     <div
       className={clsx(
-        'flex items-start gap-3 p-3 rounded-lg shadow-2xl border',
-        'w-[400px] max-w-[calc(100vw-32px)]',
+        'flex items-start gap-3 p-4 rounded-lg shadow-2xl border backdrop-blur-sm',
+        'w-[480px] max-w-[calc(100vw-32px)]',
         toast.dismissing ? 'animate-out' : 'animate-in',
         isError
-          ? 'bg-red-950/90 border-red-800/50'
+          ? 'bg-red-950 border-red-800/60'
           : isSuccess
-            ? 'bg-green-950/90 border-green-700/50'
+            ? 'bg-emerald-950 border-emerald-800/50'
             : 'bg-theme-surface border-theme-border'
       )}
       style={style}
@@ -175,34 +191,65 @@ function ToastItem({ toast, onDismiss }: { toast: Toast; onDismiss: () => void }
       <div className={clsx(
         'w-8 h-8 rounded-full flex items-center justify-center shrink-0',
         isError ? 'bg-red-500/20' :
-        isSuccess ? 'bg-green-500/20' : 'bg-blue-500/20'
+        isSuccess ? 'bg-emerald-500/20' : 'bg-blue-500/20'
       )}>
         {isError ? (
           <AlertTriangle className="w-4 h-4 text-red-400" />
         ) : toast.command ? (
-          <Terminal className={clsx('w-4 h-4', isSuccess ? 'text-green-400' : 'text-blue-400')} />
+          <Terminal className={clsx('w-4 h-4', isSuccess ? 'text-emerald-400' : 'text-blue-400')} />
         ) : (
-          <Check className="w-4 h-4 text-green-400" />
+          <Check className="w-4 h-4 text-emerald-400" />
         )}
       </div>
 
       {/* Content */}
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2">
-          <span className={clsx('text-sm font-medium', isError ? 'text-red-200' : isSuccess ? 'text-green-100' : 'text-theme-text-primary')}>
+          <span className={clsx('text-sm font-medium', isError ? 'text-red-200' : isSuccess ? 'text-emerald-50' : 'text-theme-text-primary')}>
             {toast.message}
           </span>
-          {!isError && <Check className={clsx('w-3.5 h-3.5 shrink-0', isSuccess ? 'text-green-300' : 'text-green-400')} />}
+          {!isError && !toast.action && <Check className={clsx('w-3.5 h-3.5 shrink-0', isSuccess ? 'text-emerald-400' : 'text-green-400')} />}
         </div>
         {toast.detail && (
-          <p className={clsx('mt-1 text-xs', isError ? 'text-red-300/80' : isSuccess ? 'text-green-300/80' : 'text-theme-text-secondary')}>
-            {toast.detail}
-          </p>
+          toast.onDetailClick ? (
+            <button
+              onClick={toast.onDetailClick}
+              className={clsx(
+                'mt-1.5 block text-xs font-mono break-all text-left rounded px-1.5 py-1 -ml-1.5 transition-colors',
+                isError
+                  ? 'text-red-300 hover:bg-red-900/50'
+                  : isSuccess
+                    ? 'text-emerald-300/90 hover:text-emerald-200 hover:bg-emerald-900/50'
+                    : 'text-theme-text-secondary hover:bg-theme-elevated'
+              )}
+              title="Click to open file"
+            >
+              {toast.detail}
+            </button>
+          ) : (
+            <p className={clsx('mt-1 text-xs break-all', isError ? 'text-red-300/80' : isSuccess ? 'text-emerald-300/80' : 'text-theme-text-secondary')}>
+              {toast.detail}
+            </p>
+          )
         )}
         {toast.command && (
           <code className="block mt-1.5 text-xs text-theme-text-secondary font-mono bg-theme-base rounded px-2 py-1.5 whitespace-pre-wrap break-all">
             {toast.command}
           </code>
+        )}
+        {toast.action && (
+          <button
+            onClick={toast.action.onClick}
+            className={clsx(
+              'mt-2.5 inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded transition-colors',
+              isSuccess
+                ? 'text-emerald-100 bg-emerald-800/50 hover:bg-emerald-700/50 border border-emerald-700/40'
+                : 'text-theme-text-secondary bg-theme-elevated hover:bg-theme-surface border border-theme-border'
+            )}
+          >
+            {toast.action.icon}
+            {toast.action.label}
+          </button>
         )}
       </div>
 
@@ -210,11 +257,11 @@ function ToastItem({ toast, onDismiss }: { toast: Toast; onDismiss: () => void }
       <button
         onClick={onDismiss}
         className={clsx(
-          'p-1 rounded shrink-0',
+          'p-1 rounded shrink-0 transition-colors',
           isError
             ? 'text-red-400 hover:text-red-300 hover:bg-red-900/50'
             : isSuccess
-              ? 'text-green-400 hover:text-green-300 hover:bg-green-900/50'
+              ? 'text-emerald-500 hover:text-emerald-300 hover:bg-emerald-900/50'
               : 'text-theme-text-tertiary hover:text-theme-text-primary hover:bg-theme-elevated'
         )}
       >
