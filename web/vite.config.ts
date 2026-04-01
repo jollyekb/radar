@@ -28,11 +28,18 @@ export default defineConfig({
     rolldownOptions: {
       output: {
         manualChunks(id: string) {
-          if (id.includes('node_modules/react-dom/') || id.includes('node_modules/react/') || id.includes('node_modules/react-router')) {
-            return 'vendor'
+          if (!id.includes('node_modules/')) return
+
+          // Trailing slashes on react/ and react-dom/ prevent matching react-router, react-resizable, etc.
+          const chunks: Record<string, string[]> = {
+            vendor: ['react/', 'react-dom/', 'react-router'],
+            ui: ['@xyflow/', '@monaco-editor/', '@xterm/'],
           }
-          if (id.includes('node_modules/@xyflow/') || id.includes('node_modules/@monaco-editor/') || id.includes('node_modules/@xterm/')) {
-            return 'ui'
+
+          for (const [chunk, prefixes] of Object.entries(chunks)) {
+            if (prefixes.some((p) => id.includes(`node_modules/${p}`))) {
+              return chunk
+            }
           }
         },
       },
