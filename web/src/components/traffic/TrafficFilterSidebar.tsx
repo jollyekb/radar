@@ -407,7 +407,7 @@ export const TrafficFilterSidebar = memo(function TrafficFilterSidebar({
 
         {/* L7 Filters (Hubble only) */}
         {isHubble && (
-          <div className="space-y-2 pt-3 border-t border-theme-border">
+          <div className="space-y-2 px-3 py-2 border-t border-theme-border">
             <div className="flex items-center gap-1.5">
               <Filter className="w-3 h-3 text-theme-text-tertiary" />
               <span className="text-[10px] font-medium text-theme-text-tertiary uppercase tracking-wider">L7 Filters</span>
