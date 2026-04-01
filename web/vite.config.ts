@@ -25,11 +25,15 @@ export default defineConfig({
     outDir: 'dist',
     emptyOutDir: true,
     // Split large vendor chunk to avoid Vite build-import-analysis parse failures
-    rollupOptions: {
+    rolldownOptions: {
       output: {
-        manualChunks: {
-          vendor: ['react', 'react-dom', 'react-router-dom'],
-          ui: ['@xyflow/react', '@monaco-editor/react', '@xterm/xterm'],
+        manualChunks(id: string) {
+          if (id.includes('node_modules/react-dom/') || id.includes('node_modules/react/') || id.includes('node_modules/react-router')) {
+            return 'vendor'
+          }
+          if (id.includes('node_modules/@xyflow/') || id.includes('node_modules/@monaco-editor/') || id.includes('node_modules/@xterm/')) {
+            return 'ui'
+          }
         },
       },
     },
