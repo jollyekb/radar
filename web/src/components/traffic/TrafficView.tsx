@@ -498,6 +498,12 @@ export function TrafficView({ namespaces }: TrafficViewProps) {
     })
   }, [flowsData?.aggregated, hideSystem, hideExternal, minConnections, hiddenNamespaces, addonMode, l7Methods, l7StatusRanges, l7Verdicts, dnsPattern])
 
+  // Show L7 filters only when flows actually contain L7 data
+  const hasL7Data = useMemo(() => {
+    if (!flowsData?.aggregated) return false
+    return flowsData.aggregated.some(f => f.l7Protocol || f.topHTTPPaths || f.topDNSQueries)
+  }, [flowsData?.aggregated])
+
   // Toggle L7 filter helpers
   const toggleL7Method = useCallback((method: string) => {
     setL7Methods(prev => { const next = new Set(prev); next.has(method) ? next.delete(method) : next.add(method); return next })
@@ -895,7 +901,7 @@ export function TrafficView({ namespaces }: TrafficViewProps) {
         setDetectServices={setDetectServices}
         timeRange={timeRange}
         setTimeRange={setTimeRange}
-        isHubble={sourcesData?.active === 'hubble'}
+        isHubble={sourcesData?.active === 'hubble' && hasL7Data}
         l7Methods={l7Methods}
         onToggleL7Method={toggleL7Method}
         l7StatusRanges={l7StatusRanges}
