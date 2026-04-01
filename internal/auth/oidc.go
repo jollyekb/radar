@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"net/url"
 	"time"
 
 	"github.com/coreos/go-oidc/v3/oidc"
@@ -14,13 +15,15 @@ import (
 )
 
 const oidcStateCookieName = "radar_oidc_state"
+const oidcForceLoginCookieName = "radar_force_login"
 
 // OIDCHandler handles the OIDC login flow
 type OIDCHandler struct {
-	cfg      Config
-	provider *oidc.Provider
-	oauth    oauth2.Config
-	verifier *oidc.IDTokenVerifier
+	cfg                Config
+	provider           *oidc.Provider
+	oauth              oauth2.Config
+	verifier           *oidc.IDTokenVerifier
+	endSessionEndpoint string // from OIDC discovery; empty if IdP doesn't support RP-Initiated Logout
 }
 
 // NewOIDCHandler creates a new OIDC handler. Returns an error if the provider
@@ -41,11 +44,24 @@ func NewOIDCHandler(ctx context.Context, cfg Config) (*OIDCHandler, error) {
 
 	verifier := provider.Verifier(&oidc.Config{ClientID: cfg.OIDCClientID})
 
+	// Extract end_session_endpoint from OIDC discovery document for RP-Initiated Logout
+	var providerClaims struct {
+		EndSessionEndpoint string `json:"end_session_endpoint"`
+	}
+	if err := provider.Claims(&providerClaims); err != nil {
+		log.Printf("[oidc] Warning: failed to parse end_session_endpoint from discovery document: %v", err)
+	} else if providerClaims.EndSessionEndpoint != "" {
+		log.Printf("[oidc] RP-Initiated Logout enabled (end_session_endpoint discovered)")
+	} else {
+		log.Printf("[oidc] IdP does not advertise end_session_endpoint — will use prompt=login on next auth after logout")
+	}
+
 	return &OIDCHandler{
-		cfg:      cfg,
-		provider: provider,
-		oauth:    oauthCfg,
-		verifier: verifier,
+		cfg:                cfg,
+		provider:           provider,
+		oauth:              oauthCfg,
+		verifier:           verifier,
+		endSessionEndpoint: providerClaims.EndSessionEndpoint,
 	}, nil
 }
 
@@ -70,7 +86,20 @@ func (h *OIDCHandler) HandleLogin(w http.ResponseWriter, r *http.Request) {
 		SameSite: http.SameSiteLaxMode,
 	})
 
-	http.Redirect(w, r, h.oauth.AuthCodeURL(state), http.StatusFound)
+	// If the user just logged out, force the IdP to show a login prompt instead
+	// of silently re-authenticating with an existing SSO session.
+	var authOpts []oauth2.AuthCodeOption
+	if cookie, err := r.Cookie(oidcForceLoginCookieName); err == nil && cookie.Value == "1" {
+		authOpts = append(authOpts, oauth2.SetAuthURLParam("prompt", "login"))
+		// Clear the cookie — only force login once
+		http.SetCookie(w, &http.Cookie{
+			Name:   oidcForceLoginCookieName,
+			Path:   "/",
+			MaxAge: -1,
+		})
+	}
+
+	http.Redirect(w, r, h.oauth.AuthCodeURL(state, authOpts...), http.StatusFound)
 }
 
 // HandleCallback processes the OIDC callback after authentication
@@ -163,9 +192,9 @@ func (h *OIDCHandler) HandleCallback(w http.ResponseWriter, r *http.Request) {
 
 	user := &User{Username: username, Groups: groups}
 
-	// Create session cookie
+	// Create session cookie (include raw ID token for RP-Initiated Logout)
 	secure := true // OIDC typically behind TLS
-	http.SetCookie(w, CreateSessionCookie(user, h.cfg.Secret, h.cfg.CookieTTL, secure))
+	http.SetCookie(w, CreateSessionCookieWithIDToken(user, rawIDToken, h.cfg.Secret, h.cfg.CookieTTL, secure))
 
 	log.Printf("[oidc] User %s authenticated (groups: %v)", username, groups)
 
@@ -173,9 +202,53 @@ func (h *OIDCHandler) HandleCallback(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/", http.StatusFound)
 }
 
-// HandleLogout clears the session cookie
+// HandleLogout clears the local session and, when the IdP supports RP-Initiated
+// Logout, returns a JSON response with a "redirectTo" field containing the IdP's
+// end_session_endpoint URL so the frontend can redirect the browser to terminate
+// the SSO session.
 func (h *OIDCHandler) HandleLogout(w http.ResponseWriter, r *http.Request) {
+	// Extract ID token before clearing the cookie (needed as id_token_hint)
+	idToken := IDTokenFromCookie(r, h.cfg.Secret)
+
 	http.SetCookie(w, ClearSessionCookie())
+
+	// Set force-login cookie so the next auth request uses prompt=login,
+	// preventing silent re-authentication with an existing IdP session.
+	// This is especially important for providers like Google that don't
+	// support end_session_endpoint.
+	secure := r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https"
+	http.SetCookie(w, &http.Cookie{
+		Name:     oidcForceLoginCookieName,
+		Value:    "1",
+		Path:     "/",
+		MaxAge:   300, // 5 minutes — enough time for the redirect chain
+		HttpOnly: true,
+		Secure:   secure,
+		SameSite: http.SameSiteLaxMode,
+	})
+
+	resp := map[string]string{"status": "logged out"}
+
+	if h.endSessionEndpoint != "" {
+		logoutURL, err := url.Parse(h.endSessionEndpoint)
+		if err != nil {
+			log.Printf("[oidc] Failed to parse end_session_endpoint %q: %v", h.endSessionEndpoint, err)
+		} else {
+			q := logoutURL.Query()
+			if idToken != "" {
+				q.Set("id_token_hint", idToken)
+			} else {
+				// Fallback for old sessions without stored ID token
+				q.Set("client_id", h.cfg.OIDCClientID)
+			}
+			if h.cfg.OIDCPostLogoutRedirectURL != "" {
+				q.Set("post_logout_redirect_uri", h.cfg.OIDCPostLogoutRedirectURL)
+			}
+			logoutURL.RawQuery = q.Encode()
+			resp["redirectTo"] = logoutURL.String()
+		}
+	}
+
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"status": "logged out"})
+	json.NewEncoder(w).Encode(resp)
 }

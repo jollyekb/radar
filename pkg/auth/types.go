@@ -25,8 +25,9 @@ type Config struct {
 	OIDCIssuer       string
 	OIDCClientID     string
 	OIDCClientSecret string
-	OIDCRedirectURL  string
-	OIDCGroupsClaim  string // default "groups"
+	OIDCRedirectURL           string
+	OIDCGroupsClaim           string // default "groups"
+	OIDCPostLogoutRedirectURL string // optional, URL to redirect after IdP logout
 }
 
 // User represents an authenticated user

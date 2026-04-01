@@ -173,3 +173,76 @@ func TestSignData_DifferentSecrets(t *testing.T) {
 		t.Error("signData should produce different signatures for different secrets")
 	}
 }
+
+func TestCreateSessionCookieWithIDToken(t *testing.T) {
+	secret := "test-secret"
+	user := &User{Username: "alice", Groups: []string{"devs"}}
+	idToken := "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.test-payload.test-sig"
+
+	cookie := CreateSessionCookieWithIDToken(user, idToken, secret, 1*time.Hour, false)
+
+	// Should still parse as a valid session cookie
+	req := httptest.NewRequest("GET", "/", nil)
+	req.AddCookie(cookie)
+
+	parsed := ParseSessionCookie(req, secret)
+	if parsed == nil {
+		t.Fatal("ParseSessionCookie returned nil for cookie with ID token")
+	}
+	if parsed.Username != "alice" {
+		t.Errorf("username = %q, want %q", parsed.Username, "alice")
+	}
+
+	// Should be able to extract ID token
+	got := IDTokenFromCookie(req, secret)
+	if got != idToken {
+		t.Errorf("IDTokenFromCookie = %q, want %q", got, idToken)
+	}
+}
+
+func TestIDTokenFromCookie_NoIDToken(t *testing.T) {
+	secret := "test-secret"
+	user := &User{Username: "alice"}
+
+	// Cookie created without ID token (e.g., proxy mode or pre-upgrade session)
+	cookie := CreateSessionCookie(user, secret, 1*time.Hour, false)
+	req := httptest.NewRequest("GET", "/", nil)
+	req.AddCookie(cookie)
+
+	got := IDTokenFromCookie(req, secret)
+	if got != "" {
+		t.Errorf("IDTokenFromCookie = %q, want empty string", got)
+	}
+}
+
+func TestIDTokenFromCookie_NoCookie(t *testing.T) {
+	req := httptest.NewRequest("GET", "/", nil)
+	got := IDTokenFromCookie(req, "secret")
+	if got != "" {
+		t.Errorf("IDTokenFromCookie = %q, want empty string", got)
+	}
+}
+
+func TestIDTokenFromCookie_WrongSecret(t *testing.T) {
+	user := &User{Username: "alice"}
+	cookie := CreateSessionCookieWithIDToken(user, "some-token", "secret-1", 1*time.Hour, false)
+	req := httptest.NewRequest("GET", "/", nil)
+	req.AddCookie(cookie)
+
+	got := IDTokenFromCookie(req, "secret-2")
+	if got != "" {
+		t.Errorf("IDTokenFromCookie should return empty string for wrong secret")
+	}
+}
+
+func TestIDTokenFromCookie_Expired(t *testing.T) {
+	user := &User{Username: "alice"}
+	cookie := CreateSessionCookieWithIDToken(user, "some-token", "secret", -1*time.Second, false)
+	req := httptest.NewRequest("GET", "/", nil)
+	req.AddCookie(cookie)
+
+	got := IDTokenFromCookie(req, "secret")
+	if got != "" {
+		t.Errorf("IDTokenFromCookie should return empty string for expired cookie")
+	}
+}
