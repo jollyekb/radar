@@ -332,7 +332,7 @@ function PodFileTreeNode({ node, namespace, podName, container, onNavigate }: Po
       }
 
       const blob = await response.blob()
-      downloadBlob(blob, node.name)
+      await downloadBlob(blob, node.name)
     } catch (err) {
       console.error('Download failed:', err)
     } finally {

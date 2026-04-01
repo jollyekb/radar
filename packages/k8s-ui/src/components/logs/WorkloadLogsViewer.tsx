@@ -42,6 +42,8 @@ export interface WorkloadLogsViewerProps {
    * Called to open an SSE connection for the whole workload.
    */
   createStream?: (params: WorkloadLogsFetchParams) => EventSource
+  /** Override the download mechanism (e.g. for desktop apps where blob URLs fail). */
+  overrideDownload?: (content: string, mime: string, filename: string) => void
   /** Force dark mode on the logs container (default: true) */
   forceDark?: boolean
 }
@@ -51,7 +53,7 @@ const POD_COLORS = [
   'text-pink-400', 'text-cyan-400', 'text-orange-400', 'text-lime-400',
 ]
 
-export function WorkloadLogsViewer({ name, fetchAll, createStream, forceDark }: WorkloadLogsViewerProps) {
+export function WorkloadLogsViewer({ name, fetchAll, createStream, overrideDownload, forceDark }: WorkloadLogsViewerProps) {
   const [selectedContainer, setSelectedContainer] = useState<string>('')
   const [pods, setPods] = useState<WorkloadPodInfo[]>([])
   const [selectedPods, setSelectedPods] = useState<Set<string>>(new Set())
@@ -206,12 +208,14 @@ export function WorkloadLogsViewer({ name, fetchAll, createStream, forceDark }: 
         mime = 'text/plain'
     }
     try {
-      triggerDownload(content, mime, filename)
-      showSuccess('Log download started', `Saving ${filename}. Check your browser or desktop Downloads location.`)
+      triggerDownload(content, mime, filename, overrideDownload)
+      if (!overrideDownload) {
+        showSuccess('Log download started', `Saving ${filename}. Check your browser Downloads.`)
+      }
     } catch (err) {
       showError('Failed to download logs', err instanceof Error ? err.message : 'Unknown download error')
     }
-  }, [filteredEntries, name, showError, showSuccess])
+  }, [filteredEntries, name, overrideDownload, showError, showSuccess])
 
   const toolbarExtra = (
     <>
