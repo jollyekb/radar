@@ -68,15 +68,17 @@ export function TrafficFlowList({ flows }: TrafficFlowListProps) {
   // Deduplicate HTTP REQUEST/RESPONSE pairs: prefer RESPONSE (has status + latency).
   // REQUEST goes client→server, RESPONSE goes server→client (src/dst swapped).
   const deduped = useMemo(() => {
+    // RESPONSE goes server→client, REQUEST goes client→server (src/dst swapped).
+    // Normalize key: always client|server|method|path
     const responseKeys = new Set<string>()
     for (const f of flows) {
       if (f.l7Protocol === 'HTTP' && f.l7Type === 'RESPONSE') {
-        responseKeys.add(`${f.httpMethod}|${f.httpPath}`)
+        responseKeys.add(`${f.destination.name}|${f.source.name}|${f.httpMethod}|${f.httpPath}`)
       }
     }
     return flows.filter(f => {
       if (f.l7Protocol === 'HTTP' && f.l7Type === 'REQUEST') {
-        return !responseKeys.has(`${f.httpMethod}|${f.httpPath}`)
+        return !responseKeys.has(`${f.source.name}|${f.destination.name}|${f.httpMethod}|${f.httpPath}`)
       }
       return true
     })
@@ -105,7 +107,7 @@ export function TrafficFlowList({ flows }: TrafficFlowListProps) {
         case 'status': return mult * ((a.httpStatus ?? 0) - (b.httpStatus ?? 0))
         case 'method': return mult * ((a.httpMethod ?? '').localeCompare(b.httpMethod ?? ''))
         case 'source': return mult * (a.source.name.localeCompare(b.source.name))
-        case 'destination': return mult * (b.destination.name.localeCompare(a.destination.name))
+        case 'destination': return mult * (a.destination.name.localeCompare(b.destination.name))
         default: return 0
       }
     })

@@ -499,7 +499,7 @@ export function TrafficView({ namespaces }: TrafficViewProps) {
       }
 
       // Protocol filter
-      if (l7Protocol === 'HTTP' && !flow.l7Protocol) return false
+      if (l7Protocol === 'HTTP' && flow.l7Protocol !== 'HTTP') return false
       if (l7Protocol === 'DNS' && flow.l7Protocol !== 'DNS') return false
       if (l7Protocol === 'TCP' && flow.l7Protocol) return false // TCP = no L7
 

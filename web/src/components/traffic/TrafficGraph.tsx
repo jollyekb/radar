@@ -595,7 +595,7 @@ function DetailsPanel({
                     <div className="text-theme-text-tertiary mb-1">Protocols</div>
                     <div className="flex flex-wrap gap-1.5">
                       {nodeStats.l7Protocols.size > 0 && Array.from(nodeStats.l7Protocols).map(proto => (
-                        <span key={`l7-${proto}`} className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded badge ${SEVERITY_BADGE.info}">
+                        <span key={`l7-${proto}`} className={clsx('inline-flex items-center gap-1 px-1.5 py-0.5 rounded badge', SEVERITY_BADGE.info)}>
                           <span className="font-medium">{proto}</span>
                         </span>
                       ))}
@@ -844,7 +844,7 @@ function DetailsPanel({
                   <div className="space-y-1 max-h-40 overflow-y-auto">
                     {edgeData.flow.topHTTPPaths.map((p, i) => (
                       <div key={i} className="flex items-center gap-1.5 text-[10px]">
-                        <span className="shrink-0 px-1 py-0.5 rounded badge ${SEVERITY_BADGE.info} font-medium">{p.method}</span>
+                        <span className={clsx('shrink-0 px-1 py-0.5 rounded badge font-medium', SEVERITY_BADGE.info)}>{p.method}</span>
                         <span className="text-theme-text-primary truncate flex-1" title={p.path}>{p.path || '/'}</span>
                         <span className="shrink-0 text-theme-text-secondary">{p.count}</span>
                         {p.avgMs ? <span className="shrink-0 text-theme-text-tertiary">{formatLatency(p.avgMs)}</span> : null}
