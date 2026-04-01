@@ -347,6 +347,11 @@ export function TrafficView({ namespaces }: TrafficViewProps) {
   const [addonMode, setAddonMode] = useState<AddonMode>('show')
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [hiddenNamespaces, setHiddenNamespaces] = useState<Set<string>>(new Set())
+  // L7 filters (Hubble-only)
+  const [l7Methods, setL7Methods] = useState<Set<string>>(new Set())
+  const [l7StatusRanges, setL7StatusRanges] = useState<Set<string>>(new Set())
+  const [l7Verdicts, setL7Verdicts] = useState<Set<string>>(new Set())
+  const [dnsPattern, setDnsPattern] = useState('')
   const [isConnecting, setIsConnecting] = useState(false)
   const [connectionError, setConnectionError] = useState<string | null>(null)
   const queryClient = useQueryClient()
@@ -474,9 +479,41 @@ export function TrafficView({ namespaces }: TrafficViewProps) {
         if (destNs && hiddenNamespaces.has(destNs)) return false
       }
 
+      // L7 filters (only apply when any are active)
+      if (l7Methods.size > 0) {
+        if (!flow.topHTTPPaths?.some(p => l7Methods.has(p.method))) return false
+      }
+      if (l7StatusRanges.size > 0) {
+        if (!flow.httpStatusCounts || !Array.from(l7StatusRanges).some(r => (flow.httpStatusCounts?.[r] ?? 0) > 0)) return false
+      }
+      if (l7Verdicts.size > 0) {
+        if (!flow.verdictCounts || !Array.from(l7Verdicts).some(v => (flow.verdictCounts?.[v] ?? 0) > 0)) return false
+      }
+      if (dnsPattern) {
+        const pattern = dnsPattern.toLowerCase()
+        if (!flow.topDNSQueries?.some(q => q.query.toLowerCase().includes(pattern))) return false
+      }
+
       return true
     })
-  }, [flowsData?.aggregated, hideSystem, hideExternal, minConnections, hiddenNamespaces, addonMode])
+  }, [flowsData?.aggregated, hideSystem, hideExternal, minConnections, hiddenNamespaces, addonMode, l7Methods, l7StatusRanges, l7Verdicts, dnsPattern])
+
+  // Show L7 filters only when flows actually contain L7 data
+  const hasL7Data = useMemo(() => {
+    if (!flowsData?.aggregated) return false
+    return flowsData.aggregated.some(f => f.l7Protocol || f.topHTTPPaths || f.topDNSQueries)
+  }, [flowsData?.aggregated])
+
+  // Toggle L7 filter helpers
+  const toggleL7Method = useCallback((method: string) => {
+    setL7Methods(prev => { const next = new Set(prev); next.has(method) ? next.delete(method) : next.add(method); return next })
+  }, [])
+  const toggleL7StatusRange = useCallback((range: string) => {
+    setL7StatusRanges(prev => { const next = new Set(prev); next.has(range) ? next.delete(range) : next.add(range); return next })
+  }, [])
+  const toggleL7Verdict = useCallback((verdict: string) => {
+    setL7Verdicts(prev => { const next = new Set(prev); next.has(verdict) ? next.delete(verdict) : next.add(verdict); return next })
+  }, [])
 
   // Toggle namespace visibility
   const toggleNamespace = useCallback((ns: string) => {
@@ -864,6 +901,15 @@ export function TrafficView({ namespaces }: TrafficViewProps) {
         setDetectServices={setDetectServices}
         timeRange={timeRange}
         setTimeRange={setTimeRange}
+        isHubble={sourcesData?.active === 'hubble' && hasL7Data}
+        l7Methods={l7Methods}
+        onToggleL7Method={toggleL7Method}
+        l7StatusRanges={l7StatusRanges}
+        onToggleL7StatusRange={toggleL7StatusRange}
+        l7Verdicts={l7Verdicts}
+        onToggleL7Verdict={toggleL7Verdict}
+        dnsPattern={dnsPattern}
+        setDnsPattern={setDnsPattern}
         namespaces={namespacesWithCounts}
         hiddenNamespaces={hiddenNamespaces}
         onToggleNamespace={toggleNamespace}

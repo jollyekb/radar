@@ -99,6 +99,17 @@ interface TrafficFilterSidebarProps {
   timeRange: string
   setTimeRange: (v: string) => void
 
+  // L7 filters (Hubble-only)
+  isHubble?: boolean
+  l7Methods: Set<string>
+  onToggleL7Method: (method: string) => void
+  l7StatusRanges: Set<string>
+  onToggleL7StatusRange: (range: string) => void
+  l7Verdicts: Set<string>
+  onToggleL7Verdict: (verdict: string) => void
+  dnsPattern: string
+  setDnsPattern: (v: string) => void
+
   // Namespace filtering
   namespaces: Array<{ name: string; nodeCount: number }>
   hiddenNamespaces: Set<string>
@@ -181,6 +192,15 @@ export const TrafficFilterSidebar = memo(function TrafficFilterSidebar({
   setDetectServices,
   timeRange,
   setTimeRange,
+  isHubble,
+  l7Methods,
+  onToggleL7Method,
+  l7StatusRanges,
+  onToggleL7StatusRange,
+  l7Verdicts,
+  onToggleL7Verdict,
+  dnsPattern,
+  setDnsPattern,
   namespaces,
   hiddenNamespaces,
   onToggleNamespace,
@@ -384,6 +404,100 @@ export const TrafficFilterSidebar = memo(function TrafficFilterSidebar({
             />
           </div>
         </div>
+
+        {/* L7 Filters (Hubble only) */}
+        {isHubble && (
+          <div className="space-y-2 px-3 py-2 border-t border-theme-border">
+            <div className="flex items-center gap-1.5">
+              <Filter className="w-3 h-3 text-theme-text-tertiary" />
+              <span className="text-[10px] font-medium text-theme-text-tertiary uppercase tracking-wider">L7 Filters</span>
+            </div>
+
+            {/* HTTP Method */}
+            <div>
+              <div className="text-[10px] text-theme-text-tertiary mb-1">HTTP Method</div>
+              <div className="flex flex-wrap gap-1">
+                {['GET', 'POST', 'PUT', 'DELETE', 'PATCH'].map(method => (
+                  <button
+                    key={method}
+                    onClick={() => onToggleL7Method(method)}
+                    className={clsx(
+                      'px-1.5 py-0.5 rounded text-[10px] font-medium transition-colors',
+                      l7Methods.has(method)
+                        ? 'bg-blue-500/30 text-blue-300'
+                        : 'bg-theme-elevated text-theme-text-tertiary hover:text-theme-text-secondary'
+                    )}
+                  >
+                    {method}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Status Code Range */}
+            <div>
+              <div className="text-[10px] text-theme-text-tertiary mb-1">Status Code</div>
+              <div className="flex flex-wrap gap-1">
+                {([
+                  { label: '2xx', active: 'bg-green-500/30 text-green-300' },
+                  { label: '3xx', active: 'bg-yellow-500/30 text-yellow-300' },
+                  { label: '4xx', active: 'bg-orange-500/30 text-orange-300' },
+                  { label: '5xx', active: 'bg-red-500/30 text-red-300' },
+                ] as const).map(({ label, active }) => (
+                  <button
+                    key={label}
+                    onClick={() => onToggleL7StatusRange(label)}
+                    className={clsx(
+                      'px-1.5 py-0.5 rounded text-[10px] font-medium transition-colors',
+                      l7StatusRanges.has(label)
+                        ? active
+                        : 'bg-theme-elevated text-theme-text-tertiary hover:text-theme-text-secondary'
+                    )}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Verdict */}
+            <div>
+              <div className="text-[10px] text-theme-text-tertiary mb-1">Verdict</div>
+              <div className="flex flex-wrap gap-1">
+                {([
+                  { label: 'forwarded', active: 'bg-green-500/30 text-green-300' },
+                  { label: 'dropped', active: 'bg-red-500/30 text-red-300' },
+                  { label: 'error', active: 'bg-orange-500/30 text-orange-300' },
+                ] as const).map(({ label, active }) => (
+                  <button
+                    key={label}
+                    onClick={() => onToggleL7Verdict(label)}
+                    className={clsx(
+                      'px-1.5 py-0.5 rounded text-[10px] font-medium capitalize transition-colors',
+                      l7Verdicts.has(label)
+                        ? active
+                        : 'bg-theme-elevated text-theme-text-tertiary hover:text-theme-text-secondary'
+                    )}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* DNS Query Pattern */}
+            <div>
+              <div className="text-[10px] text-theme-text-tertiary mb-1">DNS Query</div>
+              <input
+                type="text"
+                value={dnsPattern}
+                onChange={(e) => setDnsPattern(e.target.value)}
+                placeholder="e.g. example.com"
+                className="w-full px-2 py-1 text-[11px] rounded bg-theme-elevated border border-theme-border text-theme-text-primary placeholder:text-theme-text-tertiary focus:outline-none focus:ring-1 focus:ring-blue-500/50"
+              />
+            </div>
+          </div>
+        )}
 
         {/* Namespaces */}
         {sortedNamespaces.length > 0 && (

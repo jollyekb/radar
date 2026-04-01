@@ -31,6 +31,14 @@ const (
 	hubbleRelayCertSecret = "hubble-relay-client-certs"
 )
 
+// allowedHTTPHeaders is the curated set of safe, useful HTTP headers to extract.
+var allowedHTTPHeaders = map[string]bool{
+	"content-type": true,
+	"x-request-id": true,
+	"user-agent":   true,
+	"grpc-status":  true,
+}
+
 // HubbleSource implements TrafficSource for Hubble/Cilium
 type HubbleSource struct {
 	k8sClient      kubernetes.Interface
@@ -661,14 +669,50 @@ func convertHubbleFlow(pbFlow *flowpb.Flow) Flow {
 	// Extract L7 info if available
 	l7 := pbFlow.GetL7()
 	if l7 != nil {
+		flow.LatencyNs = l7.GetLatencyNs()
+		flow.L7Type = l7.GetType().String()
+
 		if http := l7.GetHttp(); http != nil {
 			flow.L7Protocol = "HTTP"
 			flow.HTTPMethod = http.GetMethod()
 			flow.HTTPPath = http.GetUrl()
 			flow.HTTPStatus = int(http.GetCode())
+			flow.HTTPProtocol = http.GetProtocol()
+			// Extract allowlisted headers only
+			for _, h := range http.GetHeaders() {
+				key := strings.ToLower(h.GetKey())
+				if allowedHTTPHeaders[key] {
+					flow.HTTPHeaders = append(flow.HTTPHeaders, h.GetKey()+": "+h.GetValue())
+				}
+			}
 		} else if dns := l7.GetDns(); dns != nil {
 			flow.L7Protocol = "DNS"
+			flow.DNSQuery = dns.GetQuery()
+			if ips := dns.GetIps(); len(ips) > 0 {
+				flow.DNSIPs = ips
+			}
+			flow.DNSTTL = dns.GetTtl()
+			flow.DNSRCode = dns.GetRcode()
+			if qtypes := dns.GetQtypes(); len(qtypes) > 0 {
+				flow.DNSQTypes = qtypes
+			}
 		}
+	}
+
+	// Extract flow-level metadata
+	if dir := pbFlow.GetTrafficDirection(); dir != flowpb.TrafficDirection_TRAFFIC_DIRECTION_UNKNOWN {
+		flow.TrafficDirection = strings.ToLower(dir.String())
+	}
+	if flow.Verdict == "dropped" {
+		if reason := pbFlow.GetDropReasonDesc(); reason != flowpb.DropReason_DROP_REASON_UNKNOWN {
+			flow.DropReasonDesc = reason.String()
+		}
+	}
+	if svc := pbFlow.GetSourceService(); svc != nil && svc.GetName() != "" {
+		flow.SourceService = svc.GetName()
+	}
+	if svc := pbFlow.GetDestinationService(); svc != nil && svc.GetName() != "" {
+		flow.DestService = svc.GetName()
 	}
 
 	// Parse timestamp
