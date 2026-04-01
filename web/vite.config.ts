@@ -25,11 +25,22 @@ export default defineConfig({
     outDir: 'dist',
     emptyOutDir: true,
     // Split large vendor chunk to avoid Vite build-import-analysis parse failures
-    rollupOptions: {
+    rolldownOptions: {
       output: {
-        manualChunks: {
-          vendor: ['react', 'react-dom', 'react-router-dom'],
-          ui: ['@xyflow/react', '@monaco-editor/react', '@xterm/xterm'],
+        manualChunks(id: string) {
+          if (!id.includes('node_modules/')) return
+
+          // Trailing slashes on react/ and react-dom/ prevent matching react-router, react-resizable, etc.
+          const chunks: Record<string, string[]> = {
+            vendor: ['react/', 'react-dom/', 'react-router'],
+            ui: ['@xyflow/', '@monaco-editor/', '@xterm/'],
+          }
+
+          for (const [chunk, prefixes] of Object.entries(chunks)) {
+            if (prefixes.some((p) => id.includes(`node_modules/${p}`))) {
+              return chunk
+            }
+          }
         },
       },
     },
