@@ -79,6 +79,18 @@ auth:
     groupsClaim: groups                        # JWT claim containing group membership
 ```
 
+**Logout behavior:**
+
+When a user clicks logout, Radar clears the local session cookie and — if the identity provider supports it — redirects the browser to the provider's logout endpoint ([RP-Initiated Logout](https://openid.net/specs/openid-connect-rpinitiated-1_0.html)) to terminate the SSO session as well. This prevents the common issue where the user appears to log out but is silently re-authenticated on the next visit.
+
+Radar discovers the provider's `end_session_endpoint` automatically from the OIDC discovery document at startup. If the provider doesn't advertise one (e.g., Google), Radar falls back to a local-only logout. Check the startup logs for confirmation:
+
+```
+[oidc] RP-Initiated Logout enabled (end_session_endpoint discovered)
+```
+
+To redirect users back to Radar after IdP logout, set `--auth-oidc-post-logout-redirect-url` (or `auth.oidc.postLogoutRedirectURL` in Helm). This URL **must be registered** with your identity provider as a valid post-logout redirect URI.
+
 **Using a K8s Secret for the session signing key:**
 
 > `existingSecret` stores only the HMAC key used to sign session cookies — not OIDC client credentials. The OIDC client ID and secret are still passed as Helm values (visible in Helm release history). For production, consider injecting them via environment variables or a secrets manager.
@@ -304,8 +316,17 @@ Radar uses stateless HMAC-SHA256 signed cookies for sessions. The cookie contain
 | OIDC client secret | `--auth-oidc-client-secret` | `auth.oidc.clientSecret` | — |
 | OIDC redirect URL | `--auth-oidc-redirect-url` | `auth.oidc.redirectURL` | — |
 | OIDC groups claim | `--auth-oidc-groups-claim` | `auth.oidc.groupsClaim` | `groups` |
+| OIDC post-logout redirect | `--auth-oidc-post-logout-redirect-url` | `auth.oidc.postLogoutRedirectURL` | — |
 
 ## Troubleshooting
+
+### User is logged back in immediately after logout (OIDC)
+
+This happens when the identity provider's SSO session is not terminated during logout. Check:
+
+1. **Does your IdP support RP-Initiated Logout?** Look for `[oidc] RP-Initiated Logout enabled` in Radar's startup logs. If you see "not available" instead, your IdP doesn't advertise `end_session_endpoint` and Radar can only do local logout.
+2. **Is `post_logout_redirect_uri` registered?** If you set `--auth-oidc-post-logout-redirect-url`, it must be registered as a valid post-logout redirect URI with your identity provider. If not registered, the IdP may show an error instead of redirecting.
+3. **Browser extensions or aggressive caching?** Some browser extensions may interfere with the redirect to the IdP's logout endpoint.
 
 ### Users get 401 on every request
 

@@ -22,14 +22,18 @@ export function UserMenu() {
   }, [isOpen])
 
   const handleLogout = useCallback(async () => {
+    let redirectTo = '/'
     try {
-      await fetch('/auth/logout', { credentials: 'same-origin' })
-    } catch {
-      // Cookie may already be cleared
+      const res = await fetch('/auth/logout', { credentials: 'same-origin' })
+      const data = await res.json()
+      if (data.redirectTo) {
+        redirectTo = data.redirectTo
+      }
+    } catch (err) {
+      console.error('[logout] Failed to complete server-side logout:', err)
     }
-    // Clear all cached data and redirect — auth barrier will handle login redirect
     queryClient.clear()
-    window.location.href = '/'
+    window.location.href = redirectTo
   }, [queryClient])
 
   if (!authMe?.authEnabled || !authMe?.username) {

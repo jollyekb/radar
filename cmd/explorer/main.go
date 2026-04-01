@@ -62,6 +62,7 @@ func main() {
 	authOIDCClientSecret := flag.String("auth-oidc-client-secret", "", "OIDC client secret")
 	authOIDCRedirectURL := flag.String("auth-oidc-redirect-url", "", "OIDC redirect URL")
 	authOIDCGroupsClaim := flag.String("auth-oidc-groups-claim", "groups", "JWT claim for groups")
+	authOIDCPostLogoutRedirectURL := flag.String("auth-oidc-post-logout-redirect-url", "", "URL to redirect after OIDC provider logout (must be registered with IdP)")
 	flag.Parse()
 
 	if *showVersion {
@@ -116,8 +117,9 @@ func main() {
 			OIDCIssuer:      *authOIDCIssuer,
 			OIDCClientID:    *authOIDCClientID,
 			OIDCClientSecret: *authOIDCClientSecret,
-			OIDCRedirectURL: *authOIDCRedirectURL,
-			OIDCGroupsClaim: *authOIDCGroupsClaim,
+			OIDCRedirectURL:           *authOIDCRedirectURL,
+			OIDCGroupsClaim:           *authOIDCGroupsClaim,
+			OIDCPostLogoutRedirectURL: *authOIDCPostLogoutRedirectURL,
 		},
 	}
 

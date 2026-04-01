@@ -23,7 +23,9 @@ var (
 	DiscoverNamespaces   = pkgauth.DiscoverNamespaces
 	SubjectCanI          = pkgauth.SubjectCanI
 	FilterNamespacesForUser = pkgauth.FilterNamespacesForUser
-	CreateSessionCookie  = pkgauth.CreateSessionCookie
-	ParseSessionCookie   = pkgauth.ParseSessionCookie
-	ClearSessionCookie   = pkgauth.ClearSessionCookie
+	CreateSessionCookie          = pkgauth.CreateSessionCookie
+	CreateSessionCookieWithIDToken = pkgauth.CreateSessionCookieWithIDToken
+	ParseSessionCookie           = pkgauth.ParseSessionCookie
+	ClearSessionCookie           = pkgauth.ClearSessionCookie
+	IDTokenFromCookie            = pkgauth.IDTokenFromCookie
 )
