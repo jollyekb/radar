@@ -83,10 +83,12 @@ auth:
 
 When a user clicks logout, Radar clears the local session cookie and — if the identity provider supports it — redirects the browser to the provider's logout endpoint ([RP-Initiated Logout](https://openid.net/specs/openid-connect-rpinitiated-1_0.html)) to terminate the SSO session as well. This prevents the common issue where the user appears to log out but is silently re-authenticated on the next visit.
 
-Radar discovers the provider's `end_session_endpoint` automatically from the OIDC discovery document at startup. If the provider doesn't advertise one (e.g., Google), Radar falls back to a local-only logout. Check the startup logs for confirmation:
+Radar discovers the provider's `end_session_endpoint` automatically from the OIDC discovery document at startup. If the provider supports it (Okta, Keycloak, Azure AD), Radar redirects the browser there to terminate the SSO session. If the provider doesn't advertise `end_session_endpoint` (e.g., Google), Radar uses `prompt=login` on the next authorization request to force the IdP to show a login screen instead of silently re-authenticating. Check the startup logs for confirmation:
 
 ```
 [oidc] RP-Initiated Logout enabled (end_session_endpoint discovered)
+# or
+[oidc] IdP does not advertise end_session_endpoint — will use prompt=login on next auth after logout
 ```
 
 To redirect users back to Radar after IdP logout, set `--auth-oidc-post-logout-redirect-url` (or `auth.oidc.postLogoutRedirectURL` in Helm). This URL **must be registered** with your identity provider as a valid post-logout redirect URI.
@@ -324,7 +326,7 @@ Radar uses stateless HMAC-SHA256 signed cookies for sessions. The cookie contain
 
 This happens when the identity provider's SSO session is not terminated during logout. Check:
 
-1. **Does your IdP support RP-Initiated Logout?** Look for `[oidc] RP-Initiated Logout enabled` in Radar's startup logs. If you see "not available" instead, your IdP doesn't advertise `end_session_endpoint` and Radar can only do local logout.
+1. **Check the startup logs.** Look for `[oidc] RP-Initiated Logout enabled` or the `prompt=login` fallback message. Both approaches should prevent silent re-authentication.
 2. **Is `post_logout_redirect_uri` registered?** If you set `--auth-oidc-post-logout-redirect-url`, it must be registered as a valid post-logout redirect URI with your identity provider. If not registered, the IdP may show an error instead of redirecting.
 3. **Browser extensions or aggressive caching?** Some browser extensions may interfere with the redirect to the IdP's logout endpoint.
 

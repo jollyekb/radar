@@ -15,6 +15,7 @@ import (
 )
 
 const oidcStateCookieName = "radar_oidc_state"
+const oidcForceLoginCookieName = "radar_force_login"
 
 // OIDCHandler handles the OIDC login flow
 type OIDCHandler struct {
@@ -52,7 +53,7 @@ func NewOIDCHandler(ctx context.Context, cfg Config) (*OIDCHandler, error) {
 	} else if providerClaims.EndSessionEndpoint != "" {
 		log.Printf("[oidc] RP-Initiated Logout enabled (end_session_endpoint discovered)")
 	} else {
-		log.Printf("[oidc] RP-Initiated Logout not available (IdP does not advertise end_session_endpoint)")
+		log.Printf("[oidc] IdP does not advertise end_session_endpoint — will use prompt=login on next auth after logout")
 	}
 
 	return &OIDCHandler{
@@ -85,7 +86,20 @@ func (h *OIDCHandler) HandleLogin(w http.ResponseWriter, r *http.Request) {
 		SameSite: http.SameSiteLaxMode,
 	})
 
-	http.Redirect(w, r, h.oauth.AuthCodeURL(state), http.StatusFound)
+	// If the user just logged out, force the IdP to show a login prompt instead
+	// of silently re-authenticating with an existing SSO session.
+	var authOpts []oauth2.AuthCodeOption
+	if cookie, err := r.Cookie(oidcForceLoginCookieName); err == nil && cookie.Value == "1" {
+		authOpts = append(authOpts, oauth2.SetAuthURLParam("prompt", "login"))
+		// Clear the cookie — only force login once
+		http.SetCookie(w, &http.Cookie{
+			Name:   oidcForceLoginCookieName,
+			Path:   "/",
+			MaxAge: -1,
+		})
+	}
+
+	http.Redirect(w, r, h.oauth.AuthCodeURL(state, authOpts...), http.StatusFound)
 }
 
 // HandleCallback processes the OIDC callback after authentication
@@ -197,6 +211,21 @@ func (h *OIDCHandler) HandleLogout(w http.ResponseWriter, r *http.Request) {
 	idToken := IDTokenFromCookie(r, h.cfg.Secret)
 
 	http.SetCookie(w, ClearSessionCookie())
+
+	// Set force-login cookie so the next auth request uses prompt=login,
+	// preventing silent re-authentication with an existing IdP session.
+	// This is especially important for providers like Google that don't
+	// support end_session_endpoint.
+	secure := r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https"
+	http.SetCookie(w, &http.Cookie{
+		Name:     oidcForceLoginCookieName,
+		Value:    "1",
+		Path:     "/",
+		MaxAge:   300, // 5 minutes — enough time for the redirect chain
+		HttpOnly: true,
+		Secure:   secure,
+		SameSite: http.SameSiteLaxMode,
+	})
 
 	resp := map[string]string{"status": "logged out"}
 

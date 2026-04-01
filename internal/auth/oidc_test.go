@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"golang.org/x/oauth2"
 )
 
 // newTestOIDCHandler creates a minimal OIDCHandler for testing validation paths.
@@ -185,5 +187,94 @@ func TestHandleLogout_NoIDTokenInCookie(t *testing.T) {
 	}
 	if strings.Contains(redirectTo, "id_token_hint=") {
 		t.Errorf("redirectTo should not contain id_token_hint when cookie has no token")
+	}
+}
+
+func TestHandleLogout_SetsForceLoginCookie(t *testing.T) {
+	h := newTestOIDCHandler()
+	// No end_session_endpoint — simulates Google
+	r := httptest.NewRequest("GET", "/auth/logout", nil)
+	w := httptest.NewRecorder()
+
+	h.HandleLogout(w, r)
+
+	// Should set the force-login cookie
+	found := false
+	for _, c := range w.Result().Cookies() {
+		if c.Name == oidcForceLoginCookieName && c.Value == "1" {
+			found = true
+			if c.MaxAge != 300 {
+				t.Errorf("force-login cookie MaxAge = %d, want 300", c.MaxAge)
+			}
+		}
+	}
+	if !found {
+		t.Error("logout should set force-login cookie")
+	}
+}
+
+func TestHandleLogin_ForceLoginPrompt(t *testing.T) {
+	h := newTestOIDCHandler()
+	// Set up minimal oauth config so AuthCodeURL works
+	h.oauth = oauth2.Config{
+		ClientID: "test-client",
+		Endpoint: oauth2.Endpoint{
+			AuthURL: "https://accounts.google.com/o/oauth2/v2/auth",
+		},
+		RedirectURL: "http://localhost:9280/auth/callback",
+		Scopes:      []string{"openid"},
+	}
+
+	// Request with force-login cookie set
+	r := httptest.NewRequest("GET", "/auth/login", nil)
+	r.AddCookie(&http.Cookie{Name: oidcForceLoginCookieName, Value: "1"})
+	w := httptest.NewRecorder()
+
+	h.HandleLogin(w, r)
+
+	// Should redirect to IdP with prompt=login
+	if w.Code != http.StatusFound {
+		t.Fatalf("status = %d, want 302", w.Code)
+	}
+	location := w.Header().Get("Location")
+	if !strings.Contains(location, "prompt=login") {
+		t.Errorf("redirect URL should contain prompt=login, got %q", location)
+	}
+
+	// Should clear the force-login cookie
+	cleared := false
+	for _, c := range w.Result().Cookies() {
+		if c.Name == oidcForceLoginCookieName && c.MaxAge == -1 {
+			cleared = true
+		}
+	}
+	if !cleared {
+		t.Error("force-login cookie should be cleared after use")
+	}
+}
+
+func TestHandleLogin_NoForceLoginWithoutCookie(t *testing.T) {
+	h := newTestOIDCHandler()
+	h.oauth = oauth2.Config{
+		ClientID: "test-client",
+		Endpoint: oauth2.Endpoint{
+			AuthURL: "https://accounts.google.com/o/oauth2/v2/auth",
+		},
+		RedirectURL: "http://localhost:9280/auth/callback",
+		Scopes:      []string{"openid"},
+	}
+
+	// Request WITHOUT force-login cookie
+	r := httptest.NewRequest("GET", "/auth/login", nil)
+	w := httptest.NewRecorder()
+
+	h.HandleLogin(w, r)
+
+	if w.Code != http.StatusFound {
+		t.Fatalf("status = %d, want 302", w.Code)
+	}
+	location := w.Header().Get("Location")
+	if strings.Contains(location, "prompt=login") {
+		t.Errorf("redirect URL should NOT contain prompt=login on normal login, got %q", location)
 	}
 }
