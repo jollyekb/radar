@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef, useEffect, ReactNode } from 'react'
 import { DURATION_DOCK } from '../../utils/animation'
-import { X, ChevronDown, ChevronUp, Terminal, FileText, Trash2, Layers, Maximize2, Minimize2 } from 'lucide-react'
+import { X, ChevronDown, ChevronUp, Terminal, FileText, Trash2, Layers, Maximize2, Minimize2, Activity } from 'lucide-react'
 import { clsx } from 'clsx'
 import { useDock, DockTab } from './DockContext'
 import { useRegisterShortcut } from '../../hooks/useKeyboardShortcuts'
@@ -12,13 +12,25 @@ const MAXIMIZED_TOP_OFFSET = 48
 
 interface BottomDockProps {
   renderTabContent: (tab: DockTab, isActive: boolean) => ReactNode
+  /** Optional extra content rendered in the dock header bar (between tabs and action buttons) */
+  renderTabHeaderExtra?: (tab: DockTab) => ReactNode
   /** Offset from the left edge in px — use to avoid overlapping a fixed sidebar */
   leftOffset?: number
+  /** Override the default dock height in px */
+  defaultHeight?: number
 }
 
-export function BottomDock({ renderTabContent, leftOffset = 0 }: BottomDockProps) {
-  const { tabs, activeTabId, isExpanded, removeTab, setActiveTab, toggleExpanded, closeAll } = useDock()
-  const [height, setHeight] = useState(DEFAULT_HEIGHT)
+export function BottomDock({ renderTabContent, renderTabHeaderExtra, leftOffset: leftOffsetProp, defaultHeight }: BottomDockProps) {
+  const { tabs, activeTabId, isExpanded, leftOffset: leftOffsetCtx, removeTab, setActiveTab, toggleExpanded, closeAll } = useDock()
+  const leftOffset = leftOffsetProp ?? leftOffsetCtx
+  const [height, setHeight] = useState(defaultHeight ?? DEFAULT_HEIGHT)
+  const prevDefaultHeight = useRef(defaultHeight)
+  useEffect(() => {
+    if (defaultHeight != null && defaultHeight !== prevDefaultHeight.current) {
+      setHeight(defaultHeight)
+    }
+    prevDefaultHeight.current = defaultHeight
+  }, [defaultHeight])
   const [isMaximized, setIsMaximized] = useState(false)
   const isDragging = useRef(false)
   const startY = useRef(0)
@@ -112,6 +124,12 @@ export function BottomDock({ renderTabContent, leftOffset = 0 }: BottomDockProps
           ))}
         </div>
 
+        {/* Per-tab extra header content */}
+        {renderTabHeaderExtra && activeTabId && (() => {
+          const activeTab = tabs.find(t => t.id === activeTabId)
+          return activeTab ? renderTabHeaderExtra(activeTab) : null
+        })()}
+
         <div className="flex items-center gap-1 ml-2">
           {tabs.length > 1 && (
             <button
@@ -175,7 +193,7 @@ function TabButton({
   onClose: () => void
 }) {
   const Icon = tab.type === 'terminal' || tab.type === 'node-terminal' || tab.type === 'local-terminal'
-    ? Terminal : tab.type === 'workload-logs' ? Layers : FileText
+    ? Terminal : tab.type === 'workload-logs' ? Layers : tab.type === 'traffic-flows' ? Activity : FileText
 
   return (
     <div

@@ -1307,8 +1307,10 @@ function NamespaceFilterDialog({ namespaces, onConfirm, onKeep, onClose }: {
 // Spacer component that adds padding when dock is open
 function DockSpacer() {
   const { tabs, isExpanded } = useDock()
-  if (tabs.length === 0) return null
-  return <div style={{ height: isExpanded ? 300 : 36, transition: `height ${DURATION_DOCK}ms cubic-bezier(0.4, 0, 0.2, 1)` }} />
+  const location = useLocation()
+  // Traffic view manages its own layout — spacer would break its flex sizing
+  if (tabs.length === 0 || location.pathname === '/traffic') return null
+  return <div className="shrink-0" style={{ height: isExpanded ? 300 : 36, transition: `height ${DURATION_DOCK}ms cubic-bezier(0.4, 0, 0.2, 1)` }} />
 }
 
 // Floating action buttons that position themselves above the dock

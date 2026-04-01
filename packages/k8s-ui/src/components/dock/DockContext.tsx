@@ -1,6 +1,6 @@
 import { createContext, useContext, useState, useCallback, useRef, useEffect, ReactNode } from 'react'
 
-export type DockTabType = 'terminal' | 'logs' | 'workload-logs' | 'node-terminal' | 'local-terminal'
+export type DockTabType = 'terminal' | 'logs' | 'workload-logs' | 'node-terminal' | 'local-terminal' | 'traffic-flows'
 
 export interface DockTab {
   id: string
@@ -26,11 +26,13 @@ export interface DockContextValue {
   tabs: DockTab[]
   activeTabId: string | null
   isExpanded: boolean
+  leftOffset: number
   addTab: (tab: Omit<DockTab, 'id'>) => string
   removeTab: (id: string) => void
   setActiveTab: (id: string) => void
   toggleExpanded: () => void
   setExpanded: (expanded: boolean) => void
+  setLeftOffset: (offset: number) => void
   closeAll: () => void
 }
 
@@ -42,6 +44,7 @@ export function DockProvider({ children }: { children: ReactNode }) {
   const [tabs, setTabs] = useState<DockTab[]>([])
   const [activeTabId, setActiveTabId] = useState<string | null>(null)
   const [isExpanded, setIsExpanded] = useState(false)
+  const [leftOffset, setLeftOffset] = useState(0)
   // Keep a ref to the latest tabs for deduplication without stale-closure issues
   const tabsRef = useRef<DockTab[]>(tabs)
   useEffect(() => { tabsRef.current = tabs }, [tabs])
@@ -61,6 +64,9 @@ export function DockProvider({ children }: { children: ReactNode }) {
       }
       if (t.type === 'local-terminal') {
         return false // Allow multiple local terminals
+      }
+      if (t.type === 'traffic-flows') {
+        return true // Singleton — always reuse existing tab
       }
       return t.namespace === tabData.namespace &&
              t.podName === tabData.podName &&
@@ -117,11 +123,13 @@ export function DockProvider({ children }: { children: ReactNode }) {
       tabs,
       activeTabId,
       isExpanded,
+      leftOffset,
       addTab,
       removeTab,
       setActiveTab,
       toggleExpanded,
       setExpanded: setIsExpanded,
+      setLeftOffset,
       closeAll,
     }}>
       {children}
