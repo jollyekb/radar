@@ -438,19 +438,19 @@ export const TrafficFilterSidebar = memo(function TrafficFilterSidebar({
             <div>
               <div className="text-[10px] text-theme-text-tertiary mb-1">Status Code</div>
               <div className="flex flex-wrap gap-1">
-                {[
-                  { label: '2xx', color: 'green' },
-                  { label: '3xx', color: 'yellow' },
-                  { label: '4xx', color: 'orange' },
-                  { label: '5xx', color: 'red' },
-                ].map(({ label, color }) => (
+                {([
+                  { label: '2xx', active: 'bg-green-500/30 text-green-300' },
+                  { label: '3xx', active: 'bg-yellow-500/30 text-yellow-300' },
+                  { label: '4xx', active: 'bg-orange-500/30 text-orange-300' },
+                  { label: '5xx', active: 'bg-red-500/30 text-red-300' },
+                ] as const).map(({ label, active }) => (
                   <button
                     key={label}
                     onClick={() => onToggleL7StatusRange(label)}
                     className={clsx(
                       'px-1.5 py-0.5 rounded text-[10px] font-medium transition-colors',
                       l7StatusRanges.has(label)
-                        ? `bg-${color}-500/30 text-${color}-300`
+                        ? active
                         : 'bg-theme-elevated text-theme-text-tertiary hover:text-theme-text-secondary'
                     )}
                   >
@@ -464,18 +464,18 @@ export const TrafficFilterSidebar = memo(function TrafficFilterSidebar({
             <div>
               <div className="text-[10px] text-theme-text-tertiary mb-1">Verdict</div>
               <div className="flex flex-wrap gap-1">
-                {[
-                  { label: 'forwarded', color: 'green' },
-                  { label: 'dropped', color: 'red' },
-                  { label: 'error', color: 'orange' },
-                ].map(({ label, color }) => (
+                {([
+                  { label: 'forwarded', active: 'bg-green-500/30 text-green-300' },
+                  { label: 'dropped', active: 'bg-red-500/30 text-red-300' },
+                  { label: 'error', active: 'bg-orange-500/30 text-orange-300' },
+                ] as const).map(({ label, active }) => (
                   <button
                     key={label}
                     onClick={() => onToggleL7Verdict(label)}
                     className={clsx(
                       'px-1.5 py-0.5 rounded text-[10px] font-medium capitalize transition-colors',
                       l7Verdicts.has(label)
-                        ? `bg-${color}-500/30 text-${color}-300`
+                        ? active
                         : 'bg-theme-elevated text-theme-text-tertiary hover:text-theme-text-secondary'
                     )}
                   >

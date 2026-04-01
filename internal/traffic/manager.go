@@ -443,8 +443,6 @@ func (m *Manager) GetActiveSourceName() string {
 	return m.activeSource.Name()
 }
 
-
-
 // Close cleans up all traffic sources
 func (m *Manager) Close() error {
 	m.mu.Lock()
@@ -548,8 +546,6 @@ func (m *Manager) SetContextName(name string) {
 
 	// Istio shares Prometheus via caretta, no additional context update needed
 }
-
-// DefaultFlowOptions returns sensible defaults
 
 // carettaHelmChart returns the Helm chart info for Caretta
 func carettaHelmChart() *HelmChartInfo {

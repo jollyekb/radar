@@ -1175,7 +1175,7 @@ export function TrafficGraph({ flows, hotPathThreshold = 0, showNamespaceGroups 
       const l7Label = flow.l7Protocol ? `${flow.l7Protocol} · ` : ''
       const latencyLabel = flow.latencyP50Ms ? ` · ${formatLatency(flow.latencyP50Ms)}` : ''
       const errorLabel = hasErrors
-        ? ` · ${formatConnections(flow.errorCount!)} err`
+        ? ` · ${formatConnections(flow.errorCount ?? 0)} err`
         : ''
       const edgeLabel = `${l7Label}${connStr}${latencyLabel}${errorLabel}`
 

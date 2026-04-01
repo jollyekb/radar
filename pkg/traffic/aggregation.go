@@ -22,6 +22,7 @@ type flowAccumulator struct {
 
 type pathAcc struct {
 	count        int64
+	latencyCount int64   // only RESPONSE flows with latency
 	latencySumMs float64
 	errors       int64 // 4xx + 5xx
 }
@@ -100,6 +101,7 @@ func AggregateFlows(flows []Flow) []AggregatedFlow {
 			pa.count++
 			if f.LatencyNs > 0 && f.L7Type == "RESPONSE" {
 				pa.latencySumMs += float64(f.LatencyNs) / 1e6
+				pa.latencyCount++
 			}
 			if f.HTTPStatus >= 400 {
 				pa.errors++
@@ -180,8 +182,8 @@ func AggregateFlows(flows []Flow) []AggregatedFlow {
 					Path:   path,
 					Count:  pa.count,
 				}
-				if pa.latencySumMs > 0 && pa.count > 0 {
-					stat.AvgMs = pa.latencySumMs / float64(pa.count)
+				if pa.latencyCount > 0 {
+					stat.AvgMs = pa.latencySumMs / float64(pa.latencyCount)
 				}
 				if pa.count > 0 {
 					stat.ErrorPct = float64(pa.errors) / float64(pa.count) * 100
