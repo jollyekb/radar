@@ -74,9 +74,13 @@ func AggregateFlows(flows []Flow) []AggregatedFlow {
 			agg.LastSeen = f.LastSeen
 		}
 
-		// L7 protocol voting
+		// L7 protocol voting (use min weight of 1 so zero-connection L7 flows still count)
 		if f.L7Protocol != "" {
-			acc.l7Votes[f.L7Protocol] += f.Connections
+			weight := f.Connections
+			if weight <= 0 {
+				weight = 1
+			}
+			acc.l7Votes[f.L7Protocol] += weight
 		}
 
 		// Latency (only from RESPONSE flows where Hubble measured it)
@@ -245,7 +249,7 @@ func PercentileFloat64(sorted []float64, p float64) float64 {
 // RoundRate converts a per-second rate to an int64 count, ensuring that any
 // positive rate maps to at least 1 (so low-traffic services aren't invisible).
 func RoundRate(rate float64) int64 {
-	if rate <= 0 {
+	if rate <= 0 || math.IsNaN(rate) || math.IsInf(rate, 0) {
 		return 0
 	}
 	r := int64(math.Round(rate))

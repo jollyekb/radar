@@ -432,3 +432,31 @@ func TestPercentileFloat64(t *testing.T) {
 		})
 	}
 }
+
+func TestRoundRate(t *testing.T) {
+	tests := []struct {
+		name   string
+		rate   float64
+		expect int64
+	}{
+		{"zero", 0, 0},
+		{"negative", -1.5, 0},
+		{"tiny positive → at least 1", 0.001, 1},
+		{"rounds to zero → clamped to 1", 0.4, 1},
+		{"rounds to 1", 0.6, 1},
+		{"normal rounding", 5.7, 6},
+		{"exact integer", 100.0, 100},
+		{"NaN", math.NaN(), 0},
+		{"positive infinity", math.Inf(1), 0},
+		{"negative infinity", math.Inf(-1), 0},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := RoundRate(tt.rate)
+			if got != tt.expect {
+				t.Errorf("RoundRate(%v) = %d, want %d", tt.rate, got, tt.expect)
+			}
+		})
+	}
+}
