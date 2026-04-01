@@ -1,7 +1,8 @@
 /**
- * Triggers a file download in the browser or desktop webview.
+ * Triggers a file download in the browser.
  * When `overrideFn` is provided (e.g. for native desktop save dialogs),
- * it is called instead of the default blob URL approach.
+ * it delegates to that instead of the default blob URL approach.
+ * The override must handle its own errors (e.g. via toast notifications).
  */
 export function triggerDownload(
   content: string,
@@ -25,7 +26,7 @@ export function triggerDownload(
   document.body.appendChild(a)
   a.click()
 
-  // Delay cleanup so embedded webviews still have time to consume the blob URL.
+  // Delay cleanup so the browser has time to initiate the download before the blob URL is revoked.
   window.setTimeout(() => {
     URL.revokeObjectURL(url)
     a.remove()

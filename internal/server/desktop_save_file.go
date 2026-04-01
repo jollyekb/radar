@@ -3,22 +3,30 @@ package server
 import (
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"log"
 	"net/http"
 	"path/filepath"
 	"strings"
 )
 
+// ErrSaveCancelled is returned by saveFileFunc when the user dismisses the
+// native save dialog. The handler returns 204 No Content in this case.
+var ErrSaveCancelled = errors.New("save dialog cancelled")
+
 // handleDesktopSaveFile shows the native OS save dialog and writes a file.
 // In the desktop app, blob URL downloads are silently swallowed by WKWebView
 // (macOS) and other embedded webviews, so the frontend calls this endpoint
 // to trigger a native save dialog instead.
+// Returns 204 if the user cancels the dialog, or {"path": "..."} on success.
 // POST /api/desktop/save-file
 func (s *Server) handleDesktopSaveFile(w http.ResponseWriter, r *http.Request) {
 	if s.saveFileFunc == nil {
 		s.writeError(w, http.StatusNotFound, "not available")
 		return
 	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, 100<<20) // 100 MB limit
 
 	var req struct {
 		Filename      string `json:"filename"`
@@ -60,8 +68,7 @@ func (s *Server) handleDesktopSaveFile(w http.ResponseWriter, r *http.Request) {
 
 	path, err := s.saveFileFunc(req.Filename, data)
 	if err != nil {
-		// User cancelled the save dialog — not an error
-		if strings.Contains(err.Error(), "cancelled") {
+		if errors.Is(err, ErrSaveCancelled) {
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}
@@ -71,5 +78,7 @@ func (s *Server) handleDesktopSaveFile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"path": path})
+	if err := json.NewEncoder(w).Encode(map[string]string{"path": path}); err != nil {
+		log.Printf("[desktop] Failed to write save-file response: %v", err)
+	}
 }

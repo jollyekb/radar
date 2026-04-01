@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"log"
 	"os"
 
@@ -44,9 +43,9 @@ func (a *DesktopApp) saveFile(defaultFilename string, data []byte) (string, erro
 		return "", err
 	}
 	if path == "" {
-		return "", fmt.Errorf("cancelled")
+		return "", server.ErrSaveCancelled
 	}
-	if err := os.WriteFile(path, data, 0644); err != nil {
+	if err := os.WriteFile(path, data, 0600); err != nil {
 		return "", err
 	}
 	return path, nil

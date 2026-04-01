@@ -7,17 +7,20 @@ import { fetchJSON } from '../api/client'
 
 let desktopCheck: Promise<boolean> | null = null
 
-/** Returns true when running inside the desktop (Wails) app. Cached after first call. */
+/** Returns true when running inside the desktop (Wails) app. Cached after first successful call. */
 export function isDesktopApp(): Promise<boolean> {
   if (!desktopCheck) {
     desktopCheck = fetchJSON<{ isDesktop: boolean }>('/config')
       .then((d) => d.isDesktop ?? false)
-      .catch(() => false)
+      .catch(() => {
+        desktopCheck = null // allow retry on next call
+        return false
+      })
   }
   return desktopCheck
 }
 
-/** Save text content via native save dialog. Returns the chosen file path. */
+/** Save text content via native save dialog. Returns the chosen file path, or throws with message 'cancelled' if the user dismisses the dialog. */
 export async function desktopSaveFile(content: string, filename: string): Promise<string> {
   const res = await fetch('/api/desktop/save-file', {
     method: 'POST',
@@ -33,15 +36,17 @@ export async function desktopSaveFile(content: string, filename: string): Promis
   return body.path
 }
 
-/** Save a Blob via native save dialog. Returns the chosen file path. */
+/** Save a Blob via native save dialog. Returns the chosen file path, or throws with message 'cancelled' if the user dismisses the dialog. */
 export async function desktopSaveBlob(blob: Blob, filename: string): Promise<string> {
-  const buf = await blob.arrayBuffer()
-  const bytes = new Uint8Array(buf)
-  let binary = ''
-  for (let i = 0; i < bytes.length; i++) {
-    binary += String.fromCharCode(bytes[i])
-  }
-  const contentBase64 = btoa(binary)
+  const contentBase64 = await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onloadend = () => {
+      const dataUrl = reader.result as string
+      resolve(dataUrl.split(',')[1]) // strip "data:...;base64,"
+    }
+    reader.onerror = () => reject(new Error('Failed to read file'))
+    reader.readAsDataURL(blob)
+  })
 
   const res = await fetch('/api/desktop/save-file', {
     method: 'POST',

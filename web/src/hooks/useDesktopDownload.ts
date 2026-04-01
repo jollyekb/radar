@@ -5,6 +5,7 @@ import { isDesktopApp, desktopSaveFile } from '../utils/desktop-download'
 /**
  * Returns a download override function when running in the desktop app,
  * or undefined when running in a browser (so the default blob URL approach is used).
+ * The returned function shows toast notifications for success/failure and silently handles user cancellation.
  */
 export function useDesktopDownload(): ((content: string, mime: string, filename: string) => void) | undefined {
   const [isDesktop, setIsDesktop] = useState(false)
