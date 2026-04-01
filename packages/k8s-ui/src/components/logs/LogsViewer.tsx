@@ -25,6 +25,8 @@ export interface LogsViewerProps {
   fetchLogs: (params: LogsFetchParams) => Promise<{ [container: string]: string }>
   /** If provided, the stream button is enabled. Called to open an SSE connection. */
   createStream?: (params: Omit<LogsFetchParams, 'previous'>) => EventSource
+  /** Override the download mechanism (e.g. for desktop apps where blob URLs fail). */
+  overrideDownload?: (content: string, mime: string, filename: string) => void
   /** Force dark mode on the logs container (default: true) */
   forceDark?: boolean
 }
@@ -36,6 +38,7 @@ export function LogsViewer({
   initialContainer,
   fetchLogs,
   createStream,
+  overrideDownload,
   forceDark,
 }: LogsViewerProps) {
   const [selectedContainer, setSelectedContainer] = useState(initialContainer || containers[0] || '')
@@ -105,12 +108,14 @@ export function LogsViewer({
         mime = 'text/plain'
     }
     try {
-      triggerDownload(content, mime, filename)
-      showSuccess('Log download started', `Saving ${filename}. Check your browser or desktop Downloads location.`)
+      triggerDownload(content, mime, filename, overrideDownload)
+      if (!overrideDownload) {
+        showSuccess('Log download started', `Saving ${filename}. Check your browser Downloads.`)
+      }
     } catch (err) {
       showError('Failed to download logs', err instanceof Error ? err.message : 'Unknown download error')
     }
-  }, [entries, podName, selectedContainer, showError, showSuccess])
+  }, [entries, podName, selectedContainer, overrideDownload, showError, showSuccess])
 
   const toolbarExtra = (
     <>

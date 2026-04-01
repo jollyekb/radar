@@ -1,5 +1,19 @@
-/** Triggers a file download in the browser or desktop webview. */
-export function triggerDownload(content: string, mime: string, filename: string): void {
+/**
+ * Triggers a file download in the browser or desktop webview.
+ * When `overrideFn` is provided (e.g. for native desktop save dialogs),
+ * it is called instead of the default blob URL approach.
+ */
+export function triggerDownload(
+  content: string,
+  mime: string,
+  filename: string,
+  overrideFn?: (content: string, mime: string, filename: string) => void,
+): void {
+  if (overrideFn) {
+    overrideFn(content, mime, filename)
+    return
+  }
+
   const blob = new Blob([content], { type: mime })
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')

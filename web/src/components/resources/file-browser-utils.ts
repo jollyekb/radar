@@ -1,7 +1,12 @@
 import type { FileNode } from '../../types'
+import { isDesktopApp, desktopSaveBlob } from '../../utils/desktop-download'
 
-/** Trigger a browser file download from a Blob. */
-export function downloadBlob(blob: Blob, filename: string) {
+/** Trigger a file download from a Blob. Uses native save dialog on desktop. */
+export async function downloadBlob(blob: Blob, filename: string): Promise<void> {
+  if (await isDesktopApp()) {
+    await desktopSaveBlob(blob, filename)
+    return
+  }
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = url

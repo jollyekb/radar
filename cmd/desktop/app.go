@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
+	"os"
 
 	"github.com/skyhook-io/radar/internal/app"
 	"github.com/skyhook-io/radar/internal/k8s"
@@ -29,6 +31,25 @@ func NewDesktopApp(srv *server.Server, timelineStoreCfg timeline.StoreConfig) *D
 func (a *DesktopApp) startup(ctx context.Context) {
 	a.ctx = ctx
 	startNativeMouseMonitor(ctx)
+	a.srv.SetSaveFileFunc(a.saveFile)
+}
+
+// saveFile shows the native OS save dialog and writes the file.
+func (a *DesktopApp) saveFile(defaultFilename string, data []byte) (string, error) {
+	path, err := wailsRuntime.SaveFileDialog(a.ctx, wailsRuntime.SaveDialogOptions{
+		DefaultFilename: defaultFilename,
+		Title:           "Save File",
+	})
+	if err != nil {
+		return "", err
+	}
+	if path == "" {
+		return "", fmt.Errorf("cancelled")
+	}
+	if err := os.WriteFile(path, data, 0644); err != nil {
+		return "", err
+	}
+	return path, nil
 }
 
 // domReady is called when the webview DOM is ready.

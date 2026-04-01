@@ -639,7 +639,7 @@ function FileTreeNode({ node, depth, defaultExpanded = true, image, namespace, p
       }
 
       const blob = await response.blob()
-      downloadBlob(blob, node.name)
+      await downloadBlob(blob, node.name)
     } catch (err) {
       console.error('Download failed:', err)
     } finally {

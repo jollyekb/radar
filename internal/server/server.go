@@ -57,6 +57,7 @@ type Server struct {
 	authConfig      auth.Config
 	permCache       *auth.PermissionCache
 	oidcHandler     *auth.OIDCHandler
+	saveFileFunc    func(defaultFilename string, data []byte) (string, error)
 }
 
 // Config holds server configuration
@@ -333,6 +334,7 @@ func (s *Server) setupRoutes() {
 
 			// Desktop routes
 			r.Post("/desktop/open-url", s.handleDesktopOpenURL)
+			r.Post("/desktop/save-file", s.handleDesktopSaveFile)
 			r.Post("/desktop/update", s.handleDesktopUpdateStart)
 			r.Get("/desktop/update/status", s.handleDesktopUpdateStatus)
 			r.Post("/desktop/update/apply", s.handleDesktopUpdateApply)
@@ -428,6 +430,14 @@ func (s *Server) ActualAddr() string {
 // /api/desktop/update/* endpoints. Only used by the desktop app.
 func (s *Server) SetUpdater(u *updater.Updater) {
 	s.updater = u
+}
+
+// SetSaveFileFunc attaches a native save-file callback, enabling the
+// /api/desktop/save-file endpoint. The callback should show a native OS save
+// dialog, write the data to the chosen path, and return the path.
+// Only used by the desktop app.
+func (s *Server) SetSaveFileFunc(fn func(defaultFilename string, data []byte) (string, error)) {
+	s.saveFileFunc = fn
 }
 
 // Handler returns the server's HTTP handler for use with httptest.
