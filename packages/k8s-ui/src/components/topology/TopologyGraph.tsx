@@ -20,13 +20,14 @@ import {
 import '@xyflow/react/dist/style.css'
 import { toCanvas } from 'html-to-image'
 
-import { AlertTriangle, Download, Loader2, Pause, Play, RotateCw, Shield } from 'lucide-react'
+import { AlertTriangle, Download, LayoutGrid, Loader2, Maximize, Minus, Pause, Play, Plus, RotateCw, Shield, Workflow } from 'lucide-react'
+import { Tooltip } from '../ui/Tooltip'
 import { useToast } from '../ui/Toast'
 import { useRegisterShortcuts } from '../../hooks/useKeyboardShortcuts'
 
 import { K8sResourceNode } from './K8sResourceNode'
 import { GroupNode } from './GroupNode'
-import { buildHierarchicalElkGraph, applyHierarchicalLayout, getGroupKey } from './layout'
+import { buildHierarchicalElkGraph, applyHierarchicalLayout, getGroupKey, type GroupDisplayLevel } from './layout'
 import type { Topology, TopologyNode, TopologyEdge, ViewMode, GroupingMode } from '../../types'
 
 // Edge colors by type
@@ -66,6 +67,9 @@ function getEdgeStyle(type: string, isTrafficView: boolean, isTrafficEdge: boole
 
 // Threshold for disabling edge animations (performance optimization)
 const EDGE_ANIMATION_THRESHOLD = 200
+
+// Auto-collapse all namespace groups when cluster has more than this many namespaces
+const LARGE_CLUSTER_NS_THRESHOLD = 5
 
 // Build edges, handling collapsed groups
 function buildEdges(
@@ -159,6 +163,14 @@ interface TopologyGraphProps {
   showExportButton?: boolean
   paused?: boolean
   onTogglePause?: () => void
+  /** Called when user clicks "maximize" on a namespace group — sets namespace filter to just that namespace */
+  onMaximizeNamespace?: (namespace: string) => void
+  /** Shown as a breadcrumb label when viewing a single namespace */
+  namespaceBreadcrumb?: string
+  /** Called when breadcrumb "back" is clicked to return to all-namespace view */
+  onClearNamespace?: () => void
+  /** Serialized namespace filter — when this changes, reset groupLevels for fresh smart default */
+  namespacesKey?: string
 }
 
 export function TopologyGraph({
@@ -171,6 +183,10 @@ export function TopologyGraph({
   showExportButton = true,
   paused = false,
   onTogglePause,
+  onMaximizeNamespace,
+  namespaceBreadcrumb,
+  onClearNamespace,
+  namespacesKey = '',
 }: TopologyGraphProps) {
   const isTrafficView = viewMode === 'traffic'
   const [nodes, setNodes, onNodesChangeBase] = useNodesState([] as Node[])
@@ -185,10 +201,21 @@ export function TopologyGraph({
       }
     }
   }, [onNodesChangeBase])
-  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set())
+  // 3-level display: chip (compact) → cardGrid (workload cards) → topology (full graph)
+  const [groupLevels, setGroupLevels] = useState<Map<string, GroupDisplayLevel>>(new Map())
   const [expandedPodGroups, setExpandedPodGroups] = useState<Set<string>>(new Set())
+
+  // Derive collapsedGroups for ELK/edges: both 'chip' and 'cardGrid' are collapsed
+  const collapsedGroups = useMemo(() => {
+    const set = new Set<string>()
+    for (const [id, level] of groupLevels) {
+      if (level !== 'topology') set.add(id)
+    }
+    return set
+  }, [groupLevels])
   const [layoutError, setLayoutError] = useState<string | null>(null)
   const [layoutRetryCount, setLayoutRetryCount] = useState(0)
+  const [fitViewCounter, setFitViewCounter] = useState(0)
   const [isExporting, setIsExporting] = useState(false)
   const prevStructureRef = useRef<string>('')
   const layoutVersionRef = useRef(0) // Used to invalidate stale layout results
@@ -196,19 +223,48 @@ export function TopologyGraph({
   // Prevents every cluster change from re-running a full ELK layout (which shifts all nodes).
   const savedPositionsRef = useRef<Map<string, { x: number; y: number }>>(new Map())
   const prevRetryCountRef = useRef(0)
+  // Stores the current groupMap so collapse-all can reference group IDs without a stale closure
+  const groupMapRef = useRef<Map<string, string[]>>(new Map())
+  // Tracks whether the one-time smart default (collapse all for large clusters) has fired
+  const hasAppliedSmartDefaultRef = useRef(false)
+  // After layout completes for a single-group change, stores the group ID so
+  // ViewportController can fitView to it (with correct timing — after setNodes)
+  const fitToGroupAfterLayoutRef = useRef<string | null>(null)
 
-  // Toggle group collapse
-  const handleToggleCollapse = useCallback((groupId: string) => {
-    setCollapsedGroups(prev => {
-      const next = new Set(prev)
-      if (next.has(groupId)) {
-        next.delete(groupId)
-      } else {
-        next.add(groupId)
-      }
+  // Reset group display levels when namespace filter changes (instant switching)
+  const prevNamespacesKeyRef = useRef(namespacesKey)
+  useEffect(() => {
+    if (namespacesKey !== prevNamespacesKeyRef.current) {
+      prevNamespacesKeyRef.current = namespacesKey
+      setGroupLevels(new Map())
+      hasAppliedSmartDefaultRef.current = false
+      savedPositionsRef.current.clear()
+      setFitViewCounter(c => c + 1)
+    }
+  }, [namespacesKey])
+
+  // Set display level for a single group
+  const handleSetLevel = useCallback((groupId: string, level: GroupDisplayLevel) => {
+    setGroupLevels(prev => {
+      const next = new Map(prev)
+      next.set(groupId, level)
       return next
     })
+    savedPositionsRef.current.clear()
+    // After layout completes, ViewportController will fitView to this group
+    fitToGroupAfterLayoutRef.current = groupId
   }, [])
+
+  // Set all groups to a given level
+  const setAllLevels = useCallback((level: GroupDisplayLevel) => {
+    const next = new Map<string, GroupDisplayLevel>()
+    for (const groupKey of groupMapRef.current.keys()) {
+      next.set(`group-${groupingMode}-${groupKey}`, level)
+    }
+    setGroupLevels(next)
+    savedPositionsRef.current.clear()
+    setFitViewCounter(c => c + 1)
+  }, [groupingMode])
 
   // Expand pod group to show individual pods
   const handleExpandPodGroup = useCallback((podGroupId: string) => {
@@ -378,13 +434,19 @@ export function TopologyGraph({
     return { workingNodes: nodes, workingEdges: edges }
   }, [topology, expandedPodGroups, expandPodGroup, isTrafficView, groupingMode, createPerGroupInternetNodes])
 
-  // Structure key for change detection
+  // Handle card click in card-grid view — find the topology node and open drawer
+  const handleCardClick = useCallback((nodeId: string) => {
+    const topoNode = topology?.nodes.find(n => n.id === nodeId) || workingNodes.find(n => n.id === nodeId)
+    if (topoNode) onNodeClick(topoNode)
+  }, [topology, workingNodes, onNodeClick])
+
+  // Structure key for change detection — includes groupLevels so chip↔cardGrid triggers relayout
   const structureKey = useMemo(() => {
     const nodeIds = workingNodes.map(n => n.id).sort().join(',')
-    const collapsed = Array.from(collapsedGroups).sort().join(',')
+    const levels = Array.from(groupLevels.entries()).sort().map(([k, v]) => `${k}:${v}`).join(',')
     const expanded = Array.from(expandedPodGroups).sort().join(',')
-    return `${viewMode}|${nodeIds}|${collapsed}|${expanded}|${groupingMode}|${layoutRetryCount}`
-  }, [viewMode, workingNodes, collapsedGroups, expandedPodGroups, groupingMode, layoutRetryCount])
+    return `${viewMode}|${nodeIds}|${levels}|${expanded}|${groupingMode}|${layoutRetryCount}`
+  }, [viewMode, workingNodes, groupLevels, expandedPodGroups, groupingMode, layoutRetryCount])
 
   // Layout when structure changes - use hierarchical ELK layout
   useEffect(() => {
@@ -393,6 +455,7 @@ export function TopologyGraph({
       setEdges([])
       prevStructureRef.current = ''
       savedPositionsRef.current.clear() // Clear on context switch / topology reset
+      hasAppliedSmartDefaultRef.current = false
       return
     }
 
@@ -418,6 +481,24 @@ export function TopologyGraph({
 
     prevStructureRef.current = structureKey
 
+    // Smart default: start all namespace groups as chips for large clusters.
+    // Fires once per topology lifecycle (reset on context switch). Returns early
+    // so the re-render with groupLevels set computes the actual layout.
+    if (!hasAppliedSmartDefaultRef.current && groupLevels.size === 0 && groupingMode === 'namespace' && !hideGroupHeader) {
+      const uniqueNamespaces = new Set(workingNodes.map(n => n.data.namespace as string).filter(Boolean))
+      if (uniqueNamespaces.size > LARGE_CLUSTER_NS_THRESHOLD) {
+        hasAppliedSmartDefaultRef.current = true
+        savedPositionsRef.current.clear()
+        const levels = new Map<string, GroupDisplayLevel>()
+        for (const ns of uniqueNamespaces) levels.set(`group-namespace-${ns}`, 'chip')
+        setGroupLevels(levels)
+        return
+      }
+      // Don't mark as applied when skipping — topology data may be stale (e.g., still
+      // showing single-namespace data during a transition to all-namespaces). The real
+      // all-namespace data will arrive and re-trigger this check.
+    }
+
     // Increment version to invalidate any previous in-flight layout
     const thisLayoutVersion = ++layoutVersionRef.current
 
@@ -426,18 +507,22 @@ export function TopologyGraph({
       workingNodes,
       workingEdges,
       groupingMode,
-      collapsedGroups
+      collapsedGroups,
+      groupLevels
     )
+    groupMapRef.current = groupMap
 
     // Apply layout and get positioned nodes
     applyHierarchicalLayout(
       elkGraph,
       workingNodes,
+      workingEdges,
       groupMap,
       groupingMode,
       collapsedGroups,
-      handleToggleCollapse,
-      hideGroupHeader
+      { onSetLevel: handleSetLevel, onCardClick: handleCardClick, onMaximizeNamespace },
+      hideGroupHeader,
+      groupLevels
     ).then(({ nodes: layoutedNodes, error }) => {
       // Check if a newer layout has started - if so, discard this stale result
       if (layoutVersionRef.current !== thisLayoutVersion) {
@@ -492,23 +577,34 @@ export function TopologyGraph({
 
       setNodes(nodesWithHandlers)
 
-      // Build edges with styling (pass node count for animation threshold)
-      const builtEdges = buildEdges(
-        workingEdges,
-        collapsedGroups,
-        groupMap,
-        groupingMode,
-        isTrafficView,
-        nodeToGroup,
-        nodesWithHandlers.length
+      // Hide edges when all groups are collapsed — inter-namespace edges are noise in the overview.
+      // Always show edges in single-namespace view (hideGroupHeader) since there's no group container.
+      const hasAnyExpandedGroup = hideGroupHeader || nodesWithHandlers.some(n =>
+        n.type === 'group' && (n.data as Record<string, unknown>)?.displayLevel === 'topology'
       )
-      setEdges(builtEdges)
+      if (!hasAnyExpandedGroup && groupingMode !== 'none') {
+        setEdges([])
+      } else {
+        const builtEdges = buildEdges(
+          workingEdges,
+          collapsedGroups,
+          groupMap,
+          groupingMode,
+          isTrafficView,
+          nodeToGroup,
+          nodesWithHandlers.length
+        )
+        setEdges(builtEdges)
+      }
+    }).catch((err) => {
+      console.error('[TopologyGraph] Layout post-processing error:', err)
+      setLayoutError(err instanceof Error ? err.message : String(err))
     })
 
     // No cleanup function - we use version-based invalidation instead
     // This prevents React's effect re-runs from canceling in-flight layouts
     // when the actual structure hasn't changed
-  }, [workingNodes, workingEdges, structureKey, groupingMode, hideGroupHeader, collapsedGroups, handleToggleCollapse, isTrafficView, expandedPodGroups, handleExpandPodGroup, handleCollapsePodGroup, setNodes, setEdges, layoutRetryCount])
+  }, [workingNodes, workingEdges, structureKey, groupingMode, hideGroupHeader, collapsedGroups, groupLevels, handleSetLevel, handleCardClick, onMaximizeNamespace, isTrafficView, expandedPodGroups, handleExpandPodGroup, handleCollapsePodGroup, setNodes, setEdges, layoutRetryCount])
 
   // Handle node click
   const handleNodeClick = useCallback(
@@ -554,7 +650,18 @@ export function TopologyGraph({
     })
   }, [selectedNodeId, setNodes])
 
-  if (!topology || topology.nodes.length === 0) {
+  if (!topology) {
+    return (
+      <div className="flex-1 flex items-center justify-center text-theme-text-secondary">
+        <div className="text-center">
+          <Loader2 className="w-6 h-6 animate-spin mx-auto mb-2 opacity-50" />
+          <p className="text-sm">Loading topology...</p>
+        </div>
+      </div>
+    )
+  }
+
+  if (topology.nodes.length === 0) {
     return (
       <div className="flex-1 flex items-center justify-center text-theme-text-secondary">
         <div className="text-center">
@@ -596,6 +703,25 @@ export function TopologyGraph({
 
   return (
     <ReactFlowProvider>
+      {/* Namespace breadcrumb — shown when viewing a single namespace */}
+      {namespaceBreadcrumb && (
+        <div className="absolute top-3 left-3 z-10 flex items-center gap-1.5">
+          {onClearNamespace && (
+            <button
+              onClick={onClearNamespace}
+              className="text-xs text-theme-text-tertiary hover:text-theme-text-secondary transition-colors"
+            >
+              All Namespaces
+            </button>
+          )}
+          {onClearNamespace && (
+            <span className="text-xs text-theme-text-tertiary">/</span>
+          )}
+          <span className="text-xs font-medium text-theme-text-secondary bg-theme-surface/80 backdrop-blur-sm border border-theme-border/50 rounded-md px-2 py-0.5">
+            {namespaceBreadcrumb}
+          </span>
+        </div>
+      )}
       {/* Warning banner for partial topology data */}
       {topology?.warnings && topology.warnings.length > 0 && (() => {
         const rbacWarnings = topology.warnings.filter(w => w.includes('RBAC not granted'))
@@ -675,19 +801,53 @@ export function TopologyGraph({
         <Controls
           className="bg-theme-surface border border-theme-border rounded-lg"
           showInteractive={false}
+          showZoom={false}
+          showFitView={false}
         >
-          {showExportButton && <ExportImageButton onExportingChange={setIsExporting} />}
-          {onTogglePause && (
-            <button
-              className={`react-flow__controls-button ${paused ? 'text-amber-400' : ''}`}
-              onClick={onTogglePause}
-              title={paused ? 'Resume live updates' : 'Pause live updates'}
-            >
-              {paused ? <Play className="w-3 h-3" /> : <Pause className="w-3 h-3" />}
-            </button>
-          )}
+          <CustomControlButtons
+            showExportButton={showExportButton}
+            paused={paused}
+            onTogglePause={onTogglePause}
+            onExportingChange={setIsExporting}
+          />
         </Controls>
-        <ViewportController viewMode={viewMode} layoutRetryCount={layoutRetryCount} />
+        {/* Level controls — separate group matching per-node icons */}
+        {groupingMode !== 'none' && (
+          <div className="react-flow__panel react-flow__controls bottom-left bg-theme-surface border border-theme-border rounded-lg" style={{ marginBottom: 0, left: 10, bottom: 'auto', top: namespaceBreadcrumb ? 40 : 10 }}>
+            {!hideGroupHeader && (
+              <Tooltip content="Collapse all" delay={100} position="right">
+                <button
+                  className="react-flow__controls-button"
+                  onClick={() => setAllLevels('chip')}
+                >
+                  <Minus className="w-3.5 h-3.5" />
+                </button>
+              </Tooltip>
+            )}
+            <Tooltip content="All workload cards" delay={100} position="right">
+              <button
+                className="react-flow__controls-button"
+                onClick={() => setAllLevels('cardGrid')}
+              >
+                <LayoutGrid className="w-3.5 h-3.5" />
+              </button>
+            </Tooltip>
+            <Tooltip content="Expand all" delay={100} position="right">
+              <button
+                className="react-flow__controls-button"
+                onClick={() => setAllLevels('topology')}
+              >
+                <Workflow className="w-3.5 h-3.5" />
+              </button>
+            </Tooltip>
+          </div>
+        )}
+        <ViewportController
+          viewMode={viewMode}
+          layoutRetryCount={layoutRetryCount}
+          fitViewCounter={fitViewCounter}
+          fitToGroupAfterLayoutRef={fitToGroupAfterLayoutRef}
+        />
       </ReactFlow>
     </ReactFlowProvider>
   )
@@ -854,14 +1014,15 @@ function ExportImageButton({ onExportingChange }: { onExportingChange: (v: boole
 
   return (
     <>
-      <button
-        className="react-flow__controls-button"
-        onClick={openDialog}
-        disabled={exporting}
-        title="Export as image"
-      >
-        {exporting ? <Loader2 className="w-3 h-3 animate-spin" /> : <Download className="w-3 h-3" />}
-      </button>
+      <Tooltip content="Export as image" delay={100} position="right">
+        <button
+          className="react-flow__controls-button"
+          onClick={openDialog}
+          disabled={exporting}
+        >
+          {exporting ? <Loader2 className="w-3 h-3 animate-spin" /> : <Download className="w-3 h-3" />}
+        </button>
+      </Tooltip>
       {showDialog && (
         <div
           className="absolute bottom-12 left-0 z-50 bg-theme-surface border border-theme-border rounded-lg shadow-2xl p-3 w-72"
@@ -963,6 +1124,52 @@ function ExportImageButton({ onExportingChange }: { onExportingChange: (v: boole
   )
 }
 
+// Custom control buttons — replaces ReactFlow defaults so we can use our Tooltip component
+function CustomControlButtons({
+  showExportButton,
+  paused,
+  onTogglePause,
+  onExportingChange,
+}: {
+  showExportButton: boolean
+  paused: boolean
+  onTogglePause?: () => void
+  onExportingChange: (v: boolean) => void
+}) {
+  const { zoomIn, zoomOut, fitView } = useReactFlow()
+  const TIP = 100
+  return (
+    <>
+      <Tooltip content="Zoom in" delay={TIP} position="right">
+        <button className="react-flow__controls-button" onClick={() => zoomIn({ duration: 200 })}>
+          <Plus className="w-3 h-3" />
+        </button>
+      </Tooltip>
+      <Tooltip content="Zoom out" delay={TIP} position="right">
+        <button className="react-flow__controls-button" onClick={() => zoomOut({ duration: 200 })}>
+          <Minus className="w-3 h-3" />
+        </button>
+      </Tooltip>
+      <Tooltip content="Fit view" delay={TIP} position="right">
+        <button className="react-flow__controls-button" onClick={() => fitView({ padding: 0.15, duration: 400 })}>
+          <Maximize className="w-3 h-3" />
+        </button>
+      </Tooltip>
+      {showExportButton && <ExportImageButton onExportingChange={onExportingChange} />}
+      {onTogglePause && (
+        <Tooltip content={paused ? 'Resume live updates' : 'Pause live updates'} delay={TIP} position="right">
+          <button
+            className={`react-flow__controls-button ${paused ? 'text-amber-400' : ''}`}
+            onClick={onTogglePause}
+          >
+            {paused ? <Play className="w-3 h-3" /> : <Pause className="w-3 h-3" />}
+          </button>
+        </Tooltip>
+      )}
+    </>
+  )
+}
+
 // Animation duration for viewport transitions
 const VIEWPORT_ANIMATION_DURATION = 400
 
@@ -971,14 +1178,19 @@ const VIEWPORT_ANIMATION_DURATION = 400
 function ViewportController({
   viewMode,
   layoutRetryCount,
+  fitViewCounter = 0,
+  fitToGroupAfterLayoutRef,
 }: {
   viewMode: string
   layoutRetryCount: number
+  fitViewCounter?: number
+  fitToGroupAfterLayoutRef?: React.MutableRefObject<string | null>
 }) {
   const { fitView, zoomIn, zoomOut, setViewport, getViewport } = useReactFlow()
   const nodes = useNodes() // Reactive hook to watch node changes
   const prevViewModeRef = useRef<string>(viewMode)
   const prevRetryCountRef = useRef(layoutRetryCount)
+  const prevFitViewCounterRef = useRef(fitViewCounter)
   const prevNodesLengthRef = useRef(0)
 
   // Topology keyboard shortcuts
@@ -1056,12 +1268,14 @@ function ViewportController({
     const nodesJustPopulated = prevNodesLengthRef.current === 0 && nodes.length > 0
     const viewModeChanged = viewMode !== prevViewModeRef.current
     const retryRequested = layoutRetryCount !== prevRetryCountRef.current
+    const fitViewRequested = fitViewCounter !== prevFitViewCounterRef.current
 
     prevNodesLengthRef.current = nodes.length
     prevViewModeRef.current = viewMode
     prevRetryCountRef.current = layoutRetryCount
+    prevFitViewCounterRef.current = fitViewCounter
 
-    if (nodesJustPopulated || viewModeChanged || retryRequested) {
+    if (nodesJustPopulated || viewModeChanged || retryRequested || fitViewRequested) {
       const timeoutId = setTimeout(() => {
         fitView({
           padding: 0.15,
@@ -1071,7 +1285,27 @@ function ViewportController({
 
       return () => clearTimeout(timeoutId)
     }
-  }, [viewMode, layoutRetryCount, nodes.length, fitView])
+  }, [viewMode, layoutRetryCount, fitViewCounter, nodes.length, fitView])
+
+  // After a single-group expand/collapse, fit the viewport to that group.
+  // This effect fires when nodes update (triggered by setNodes after async layout).
+  useEffect(() => {
+    if (!fitToGroupAfterLayoutRef?.current) return
+    const targetGroupId = fitToGroupAfterLayoutRef.current
+    fitToGroupAfterLayoutRef.current = null
+    // Find the group and its children to fit to
+    const targetNodes = nodes.filter(n => n.id === targetGroupId || n.parentId === targetGroupId)
+    if (targetNodes.length > 0) {
+      setTimeout(() => {
+        fitView({
+          nodes: targetNodes.map(n => ({ id: n.id })),
+          padding: 0.2,
+          duration: VIEWPORT_ANIMATION_DURATION,
+          maxZoom: 1.5,
+        })
+      }, 10)
+    }
+  }, [nodes, fitView, fitToGroupAfterLayoutRef])
 
   return null
 }

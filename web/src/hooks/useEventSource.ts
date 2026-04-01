@@ -33,7 +33,9 @@ const MAX_RECONNECT_DELAY_MS = 30000 // Cap at 30 seconds
 export function useEventSource(
   namespaces: string[],
   viewMode: ViewMode = 'resources',
-  options?: UseEventSourceOptions
+  options?: UseEventSourceOptions,
+  /** When set, SSE reconnects with this namespace filter (for large clusters that require server-side filtering) */
+  forceNamespaceFilter?: string[]
 ): UseEventSourceReturn {
   const [topology, setTopology] = useState<Topology | null>(null)
   const [events, setEvents] = useState<K8sEvent[]>([])
@@ -49,8 +51,12 @@ export function useEventSource(
   const throttleTimeoutRef = useRef<number | null>(null)
   const currentNodeCountRef = useRef<number>(0) // Track node count for dynamic throttle
 
-  // Serialize namespaces for stable dependency
+  // Serialize namespaces for stable dependency (used for events clearing)
   const namespacesKey = namespaces.join(',')
+
+  // SSE namespace filter: only used for large clusters that require server-side filtering.
+  // Small/medium clusters get all-namespace data and filter on the frontend.
+  const sseNamespaceFilter = forceNamespaceFilter?.join(',') || ''
 
   // Use ref to avoid stale closures while not triggering reconnection on callback changes
   const optionsRef = useRef(options)
@@ -60,15 +66,17 @@ export function useEventSource(
     // Clean up existing connection
     if (eventSourceRef.current) {
       eventSourceRef.current.close()
+      // Clear stale topology so consumers show loading state instead of old data
+      setTopology(null)
     }
     if (reconnectTimeoutRef.current) {
       clearTimeout(reconnectTimeoutRef.current)
     }
 
-    // Build URL
+    // Build URL — only pass namespace filter for large clusters (forceNamespaceFilter)
     const params = new URLSearchParams()
-    if (namespaces.length > 0) {
-      params.set('namespaces', namespaces.join(','))
+    if (sseNamespaceFilter) {
+      params.set('namespaces', sseNamespaceFilter)
     }
     if (viewMode && viewMode !== 'resources') {
       params.set('view', viewMode)
@@ -207,7 +215,7 @@ export function useEventSource(
         console.error('Failed to parse connection_state event:', e)
       }
     })
-  }, [namespacesKey, viewMode])
+  }, [sseNamespaceFilter, viewMode])
 
   // Reconnect function for manual reconnection
   const reconnect = useCallback(() => {
