@@ -45,15 +45,22 @@ func (a *DesktopApp) saveFile(defaultFilename string, data []byte) (string, erro
 		return "", err
 	}
 	dir := filepath.Join(home, "Downloads")
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return "", fmt.Errorf("cannot access Downloads folder: %w", err)
+	}
 
 	// Collision handling: file.txt → file (1).txt → file (2).txt
 	base := defaultFilename
 	ext := filepath.Ext(base)
 	name := strings.TrimSuffix(base, ext)
 	path := filepath.Join(dir, base)
-	for i := 1; ; i++ {
-		if _, err := os.Stat(path); os.IsNotExist(err) {
+	for i := 1; i <= 1000; i++ {
+		_, statErr := os.Stat(path)
+		if os.IsNotExist(statErr) {
 			break
+		}
+		if statErr != nil {
+			return "", fmt.Errorf("cannot check file %q: %w", path, statErr)
 		}
 		path = filepath.Join(dir, fmt.Sprintf("%s (%d)%s", name, i, ext))
 	}

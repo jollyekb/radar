@@ -7,7 +7,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
-	"strings"
 
 	"github.com/skyhook-io/radar/internal/version"
 )
@@ -28,8 +27,9 @@ func (s *Server) handleDesktopOpenFolder(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// Only allow absolute paths to prevent traversal
-	if !filepath.IsAbs(req.Path) || strings.Contains(req.Path, "..") {
+	// Sanitize and validate path
+	req.Path = filepath.Clean(req.Path)
+	if !filepath.IsAbs(req.Path) {
 		s.writeError(w, http.StatusBadRequest, "absolute path required")
 		return
 	}
@@ -54,7 +54,8 @@ func (s *Server) handleDesktopOpenFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !filepath.IsAbs(req.Path) || strings.Contains(req.Path, "..") {
+	req.Path = filepath.Clean(req.Path)
+	if !filepath.IsAbs(req.Path) {
 		s.writeError(w, http.StatusBadRequest, "absolute path required")
 		return
 	}
