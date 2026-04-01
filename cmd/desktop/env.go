@@ -12,37 +12,61 @@ import (
 	"time"
 )
 
-// enrichPath ensures the desktop app can find CLI tools like
-// gke-gcloud-auth-plugin, aws, gcloud, helm, etc. that are
-// installed in the user's shell environment but not available
-// to macOS .app bundles or Linux desktop applications.
-func enrichPath() {
-	shellPath := getShellPath()
-	if shellPath != "" {
-		os.Setenv("PATH", shellPath)
-		log.Printf("PATH enriched from login shell (%d entries)", len(strings.Split(shellPath, ":")))
-		return
+// shellEnvVars lists environment variables to capture from the user's
+// login shell. GUI apps (macOS .app, Linux .desktop) inherit a minimal
+// environment that lacks these, causing silent failures when tools or
+// configs set in .zshrc/.bashrc are not available.
+var shellEnvVars = []string{
+	"PATH",
+	"KUBECONFIG",
+	"AWS_PROFILE",
+	"AWS_DEFAULT_REGION",
+	"GOOGLE_APPLICATION_CREDENTIALS",
+	"CLOUDSDK_CONFIG",
+	"AZURE_CONFIG_DIR",
+}
+
+// enrichEnv captures key environment variables from the user's login
+// shell so the desktop app can find CLI tools and config files that are
+// set in .zshrc/.bashrc but not available to macOS .app bundles or
+// Linux desktop applications.
+func enrichEnv() {
+	captured := getShellEnv(shellEnvVars)
+
+	if path, ok := captured["PATH"]; ok && path != "" {
+		os.Setenv("PATH", path)
+		log.Printf("PATH enriched from login shell (%d entries)", len(strings.Split(path, ":")))
+	} else {
+		// Fallback: append common tool locations
+		current := os.Getenv("PATH")
+		extras := commonPaths()
+		if len(extras) > 0 {
+			os.Setenv("PATH", current+":"+strings.Join(extras, ":"))
+			log.Printf("PATH enriched with %d common paths (shell detection failed)", len(extras))
+		} else {
+			log.Printf("PATH enrichment: no additional paths found; auth plugins like gke-gcloud-auth-plugin may not be found")
+		}
 	}
 
-	// Fallback: append common tool locations
-	current := os.Getenv("PATH")
-	extras := commonPaths()
-	if len(extras) > 0 {
-		os.Setenv("PATH", current+":"+strings.Join(extras, ":"))
-		log.Printf("PATH enriched with %d common paths (shell detection failed)", len(extras))
-	} else {
-		log.Printf("PATH enrichment: no additional paths found; auth plugins like gke-gcloud-auth-plugin may not be found")
+	// Apply non-PATH vars that were found in the shell but not in our env
+	for _, key := range shellEnvVars {
+		if key == "PATH" {
+			continue
+		}
+		if val, ok := captured[key]; ok && val != "" && os.Getenv(key) == "" {
+			os.Setenv(key, val)
+			log.Printf("Env enriched: %s from login shell", key)
+		}
 	}
 }
 
-// getShellPath runs the user's login shell to capture their full PATH.
+// getShellEnv runs the user's login shell to capture environment variables.
 // It uses -i (interactive) so that zsh reads ~/.zshrc, where tools like
-// Homebrew's google-cloud-sdk add their PATH entries. Without -i, a
-// non-interactive login shell skips ~/.zshrc, so PATH entries added
-// there (like gke-gcloud-auth-plugin) are missing.
-// Output markers safely extract PATH even if the interactive shell
+// Homebrew's google-cloud-sdk add their PATH/KUBECONFIG entries. Without -i,
+// a non-interactive login shell skips ~/.zshrc.
+// Output markers safely extract values even if the interactive shell
 // prints extra text (e.g. Oh My Zsh banners, motd).
-func getShellPath() string {
+func getShellEnv(keys []string) map[string]string {
 	shell := os.Getenv("SHELL")
 	if shell == "" {
 		if runtime.GOOS == "darwin" {
@@ -52,9 +76,16 @@ func getShellPath() string {
 		}
 	}
 
-	const startMarker = "__RADAR_PATH_START__"
-	const endMarker = "__RADAR_PATH_END__"
-	echoCmd := "echo " + startMarker + "$PATH" + endMarker
+	// Print each var on its own line between markers so values containing
+	// special strings don't break parsing. Using printf '%s\n' per var.
+	const startMarker = "__RADAR_ENV_START__"
+	const endMarker = "__RADAR_ENV_END__"
+
+	var printCmds []string
+	for _, key := range keys {
+		printCmds = append(printCmds, "printf '%s\\n' \"$"+key+"\"")
+	}
+	echoCmd := "echo " + startMarker + "; " + strings.Join(printCmds, "; ") + "; echo " + endMarker
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -68,24 +99,34 @@ func getShellPath() string {
 	cmd.Stdin = nil
 	out, err := cmd.Output()
 	if err != nil {
-		log.Printf("Shell PATH detection failed (%s -l -i -c): %v", shell, err)
-		return ""
+		log.Printf("Shell env detection failed (%s -l -i -c): %v", shell, err)
+		return nil
 	}
 
 	output := string(out)
 	startIdx := strings.Index(output, startMarker)
 	endIdx := strings.Index(output, endMarker)
 	if startIdx == -1 || endIdx == -1 || endIdx <= startIdx {
-		log.Printf("Shell PATH detection: markers not found in output")
-		return ""
+		log.Printf("Shell env detection: markers not found in output")
+		return nil
 	}
-	path := output[startIdx+len(startMarker) : endIdx]
-	path = strings.TrimSpace(path)
+	// Payload is: \nVAL1\nVAL2\n...\nVALn\n (empty vars produce empty lines).
+	// Split on \n gives ["", val1, val2, ..., valn, ""] — trim first and last.
+	payload := output[startIdx+len(startMarker) : endIdx]
+	lines := strings.Split(payload, "\n")
+	if len(lines) >= 2 {
+		lines = lines[1 : len(lines)-1] // drop leading "" from echo newline and trailing ""
+	}
+	if len(lines) != len(keys) {
+		log.Printf("Shell env detection: expected %d values, got %d", len(keys), len(lines))
+		return nil
+	}
 
-	if path == "" || path == os.Getenv("PATH") {
-		return ""
+	result := make(map[string]string, len(keys))
+	for i, key := range keys {
+		result[key] = lines[i]
 	}
-	return path
+	return result
 }
 
 // commonPaths returns well-known directories where CLI tools are typically installed.
