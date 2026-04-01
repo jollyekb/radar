@@ -20,6 +20,7 @@ import type { AggregatedFlow } from '../../types'
 import { clsx } from 'clsx'
 import { X, ArrowRight, Globe, Server, Activity, Puzzle } from 'lucide-react'
 import { isClusterAddon, type AddonMode } from './TrafficView'
+import { SEVERITY_BADGE, SEVERITY_TEXT } from '@skyhook-io/k8s-ui/utils/badge-colors'
 import { getNamespaceColor } from '../../utils/traffic-colors'
 
 const elk = new ELK()
@@ -36,6 +37,17 @@ const elkOptions = {
   'elk.layered.crossingMinimization.strategy': 'LAYER_SWEEP',
 }
 
+// Exported selection info for parent components (e.g., to filter flow list)
+export interface TrafficGraphSelection {
+  type: 'node' | 'edge'
+  // For node: the node ID (ns/name or just name)
+  // For edge: source and destination IDs
+  nodeId?: string
+  sourceId?: string
+  destId?: string
+  port?: number
+}
+
 interface TrafficGraphProps {
   flows: AggregatedFlow[]
   hotPathThreshold?: number
@@ -43,6 +55,7 @@ interface TrafficGraphProps {
   serviceCategories?: Map<string, string>
   addonMode?: AddonMode
   trafficSource?: string
+  onSelectionChange?: (selection: TrafficGraphSelection | null) => void
 }
 
 // Phase 2.1: Calculate edge width based on connection count (log scale)
@@ -66,17 +79,23 @@ function formatLatency(ms: number): string {
 }
 
 function latencyColor(ms: number): string {
-  if (ms > 500) return 'text-red-400'
-  if (ms > 200) return 'text-orange-400'
-  if (ms > 50) return 'text-yellow-400'
-  return 'text-green-400'
+  if (ms > 500) return SEVERITY_TEXT.error
+  if (ms > 200) return SEVERITY_TEXT.warning
+  if (ms > 50) return SEVERITY_TEXT.info
+  return SEVERITY_TEXT.success
 }
 
 const STATUS_COLORS: Record<string, { bg: string; text: string }> = {
-  '2xx': { bg: 'bg-green-500', text: 'text-green-300' },
-  '3xx': { bg: 'bg-yellow-500', text: 'text-yellow-300' },
-  '4xx': { bg: 'bg-orange-500', text: 'text-orange-300' },
-  '5xx': { bg: 'bg-red-500', text: 'text-red-300' },
+  '2xx': { bg: 'bg-emerald-500', text: SEVERITY_TEXT.success },
+  '3xx': { bg: 'bg-amber-500', text: SEVERITY_TEXT.neutral },
+  '4xx': { bg: 'bg-amber-500', text: SEVERITY_TEXT.warning },
+  '5xx': { bg: 'bg-red-500', text: SEVERITY_TEXT.error },
+}
+
+const VERDICT_BADGE: Record<string, string> = {
+  forwarded: SEVERITY_BADGE.success,
+  dropped: SEVERITY_BADGE.error,
+  error: SEVERITY_BADGE.warning,
 }
 
 function StatusDistributionBar({ counts }: { counts: Record<string, number> }) {
@@ -576,7 +595,7 @@ function DetailsPanel({
                     <div className="text-theme-text-tertiary mb-1">Protocols</div>
                     <div className="flex flex-wrap gap-1.5">
                       {nodeStats.l7Protocols.size > 0 && Array.from(nodeStats.l7Protocols).map(proto => (
-                        <span key={`l7-${proto}`} className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-300">
+                        <span key={`l7-${proto}`} className={clsx('inline-flex items-center gap-1 px-1.5 py-0.5 rounded badge', SEVERITY_BADGE.info)}>
                           <span className="font-medium">{proto}</span>
                         </span>
                       ))}
@@ -627,9 +646,7 @@ function DetailsPanel({
                     <span
                       key={verdict}
                       className={clsx('inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium',
-                        verdict === 'forwarded' ? 'bg-green-500/20 text-green-300' :
-                        verdict === 'dropped' ? 'bg-red-500/20 text-red-300' :
-                        'bg-orange-500/20 text-orange-300'
+                        VERDICT_BADGE[verdict] ?? SEVERITY_BADGE.neutral
                       )}
                     >
                       {verdict}: {count}
@@ -827,11 +844,11 @@ function DetailsPanel({
                   <div className="space-y-1 max-h-40 overflow-y-auto">
                     {edgeData.flow.topHTTPPaths.map((p, i) => (
                       <div key={i} className="flex items-center gap-1.5 text-[10px]">
-                        <span className="shrink-0 px-1 py-0.5 rounded bg-blue-500/20 text-blue-300 font-medium">{p.method}</span>
+                        <span className={clsx('shrink-0 px-1 py-0.5 rounded badge font-medium', SEVERITY_BADGE.info)}>{p.method}</span>
                         <span className="text-theme-text-primary truncate flex-1" title={p.path}>{p.path || '/'}</span>
                         <span className="shrink-0 text-theme-text-secondary">{p.count}</span>
                         {p.avgMs ? <span className="shrink-0 text-theme-text-tertiary">{formatLatency(p.avgMs)}</span> : null}
-                        {p.errorPct ? <span className={clsx('shrink-0', p.errorPct > 10 ? 'text-red-400' : 'text-yellow-400')}>{p.errorPct.toFixed(0)}%err</span> : null}
+                        {p.errorPct ? <span className={clsx('shrink-0', p.errorPct > 10 ? SEVERITY_TEXT.error : SEVERITY_TEXT.warning)}>{p.errorPct.toFixed(0)}%err</span> : null}
                       </div>
                     ))}
                   </div>
@@ -847,7 +864,7 @@ function DetailsPanel({
                       <div key={i} className="flex items-center gap-1.5 text-[10px]">
                         <span className="text-theme-text-primary truncate flex-1" title={q.query}>{q.query}</span>
                         <span className="shrink-0 text-theme-text-secondary">{q.count}</span>
-                        {q.nxCount ? <span className="shrink-0 text-orange-400">NX:{q.nxCount}</span> : null}
+                        {q.nxCount ? <span className={clsx('shrink-0', SEVERITY_TEXT.warning)}>NX:{q.nxCount}</span> : null}
                         {q.avgTTL ? <span className="shrink-0 text-theme-text-tertiary">TTL:{q.avgTTL}s</span> : null}
                       </div>
                     ))}
@@ -876,7 +893,7 @@ function DetailsPanel({
                   {edgeData.flow.dropReasons && Object.keys(edgeData.flow.dropReasons).length > 0 && (
                     <div className="mt-1 space-y-0.5">
                       {Object.entries(edgeData.flow.dropReasons).map(([reason, count]) => (
-                        <div key={reason} className="text-[9px] text-red-400 pl-1">
+                        <div key={reason} className={clsx('text-[9px] pl-1', SEVERITY_TEXT.error)}>
                           {reason}: {count}
                         </div>
                       ))}
@@ -949,7 +966,7 @@ const nodeTypes = {
   addonGroup: AddonGroupNode,
 }
 
-export function TrafficGraph({ flows, hotPathThreshold = 0, showNamespaceGroups = false, serviceCategories, addonMode = 'show', trafficSource = '' }: TrafficGraphProps) {
+export function TrafficGraph({ flows, hotPathThreshold = 0, showNamespaceGroups = false, serviceCategories, addonMode = 'show', trafficSource = '', onSelectionChange }: TrafficGraphProps) {
   const isIstio = trafficSource === 'istio'
   const connLabel = isIstio ? 'req/s' : 'conn'
   const [layoutedNodes, setLayoutedNodes] = useState<Node<TrafficNodeData>[]>([])
@@ -1441,7 +1458,8 @@ export function TrafficGraph({ flows, hotPathThreshold = 0, showNamespaceGroups 
       id: node.id,
       data: node.data,
     })
-  }, [])
+    onSelectionChange?.({ type: 'node', nodeId: node.id })
+  }, [onSelectionChange])
 
   const onEdgeClick: EdgeMouseHandler<Edge> = useCallback((_event, edge) => {
     const flow = flowByEdgeId.get(edge.id)
@@ -1457,11 +1475,13 @@ export function TrafficGraph({ flows, hotPathThreshold = 0, showNamespaceGroups 
         flow,
       },
     })
-  }, [flowByEdgeId])
+    onSelectionChange?.({ type: 'edge', sourceId: edge.source, destId: edge.target, port: flow?.port })
+  }, [flowByEdgeId, onSelectionChange])
 
   const onPaneClick = useCallback(() => {
     setSelection(null)
-  }, [])
+    onSelectionChange?.(null)
+  }, [onSelectionChange])
 
   // FitView handler component - must be inside ReactFlow
   const FitViewOnChange = () => {

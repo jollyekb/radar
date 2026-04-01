@@ -1,8 +1,6 @@
 import { memo, useState, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import {
-  ChevronLeft,
-  ChevronRight,
   ChevronDown,
   Eye,
   Layers,
@@ -15,6 +13,7 @@ import {
   Puzzle,
 } from 'lucide-react'
 import { clsx } from 'clsx'
+import { SEVERITY_BADGE } from '@skyhook-io/k8s-ui/utils/badge-colors'
 import type { AddonMode } from './TrafficView'
 import { getNamespaceColor } from '../../utils/traffic-colors'
 
@@ -101,6 +100,8 @@ interface TrafficFilterSidebarProps {
 
   // L7 filters (Hubble-only)
   isHubble?: boolean
+  l7Protocol: string // 'all' | 'HTTP' | 'DNS' | 'TCP'
+  setL7Protocol: (v: string) => void
   l7Methods: Set<string>
   onToggleL7Method: (method: string) => void
   l7StatusRanges: Set<string>
@@ -115,9 +116,6 @@ interface TrafficFilterSidebarProps {
   hiddenNamespaces: Set<string>
   onToggleNamespace: (ns: string) => void
 
-  // Collapse state
-  collapsed?: boolean
-  onToggleCollapse?: () => void
 }
 
 // Compact toggle component with tooltip
@@ -193,6 +191,8 @@ export const TrafficFilterSidebar = memo(function TrafficFilterSidebar({
   timeRange,
   setTimeRange,
   isHubble,
+  l7Protocol,
+  setL7Protocol,
   l7Methods,
   onToggleL7Method,
   l7StatusRanges,
@@ -204,8 +204,6 @@ export const TrafficFilterSidebar = memo(function TrafficFilterSidebar({
   namespaces,
   hiddenNamespaces,
   onToggleNamespace,
-  collapsed = false,
-  onToggleCollapse,
 }: TrafficFilterSidebarProps) {
   const [namespacesExpanded, setNamespacesExpanded] = useState(false)
 
@@ -214,64 +212,11 @@ export const TrafficFilterSidebar = memo(function TrafficFilterSidebar({
   const visibleNamespaces = namespacesExpanded ? sortedNamespaces : sortedNamespaces.slice(0, 8)
   const hasMore = sortedNamespaces.length > 8
 
-  if (collapsed) {
-    return (
-      <div className="flex flex-col items-center py-3 px-1 bg-theme-surface/90 backdrop-blur border-r border-theme-border">
-        <button
-          onClick={onToggleCollapse}
-          className="p-2 text-theme-text-secondary hover:text-theme-text-primary hover:bg-theme-elevated rounded-lg transition-colors"
-          title="Expand filters"
-        >
-          <ChevronRight className="w-4 h-4" />
-        </button>
-        <div className="mt-3 flex flex-col gap-2">
-          <button
-            onClick={() => setHideSystem(!hideSystem)}
-            className={clsx(
-              'p-1.5 rounded transition-colors',
-              hideSystem ? 'selection-strong selection-text' : 'text-theme-text-tertiary hover:text-theme-text-secondary'
-            )}
-            title="Hide system traffic"
-          >
-            <Cpu className="w-4 h-4" />
-          </button>
-          <button
-            onClick={() => setHideExternal(!hideExternal)}
-            className={clsx(
-              'p-1.5 rounded transition-colors',
-              hideExternal ? 'selection-strong selection-text' : 'text-theme-text-tertiary hover:text-theme-text-secondary'
-            )}
-            title="Hide external traffic"
-          >
-            <Globe className="w-4 h-4" />
-          </button>
-          <button
-            onClick={() => setShowNamespaceGroups(!showNamespaceGroups)}
-            className={clsx(
-              'p-1.5 rounded transition-colors',
-              showNamespaceGroups ? 'selection-strong selection-text' : 'text-theme-text-tertiary hover:text-theme-text-secondary'
-            )}
-            title="Show namespace groups"
-          >
-            <Layers className="w-4 h-4" />
-          </button>
-        </div>
-      </div>
-    )
-  }
-
   return (
-    <div className="w-72 flex flex-col bg-theme-surface/90 backdrop-blur border-r border-theme-border overflow-hidden">
+    <div className="w-72 flex flex-col shrink-0 bg-theme-surface/90 backdrop-blur border-r border-theme-border overflow-hidden">
       {/* Header */}
-      <div className="flex items-center justify-between px-3 py-2 border-b border-theme-border">
+      <div className="flex items-center px-3 py-2 border-b border-theme-border">
         <span className="text-sm font-medium text-theme-text-secondary">Traffic Filters</span>
-        <button
-          onClick={onToggleCollapse}
-          className="p-1 text-theme-text-secondary hover:text-theme-text-primary hover:bg-theme-elevated rounded transition-colors"
-          title="Collapse sidebar"
-        >
-          <ChevronLeft className="w-4 h-4" />
-        </button>
       </div>
 
       {/* Scrollable content */}
@@ -413,61 +358,99 @@ export const TrafficFilterSidebar = memo(function TrafficFilterSidebar({
               <span className="text-[10px] font-medium text-theme-text-tertiary uppercase tracking-wider">L7 Filters</span>
             </div>
 
-            {/* HTTP Method */}
+            {/* Protocol selector */}
             <div>
-              <div className="text-[10px] text-theme-text-tertiary mb-1">HTTP Method</div>
-              <div className="flex flex-wrap gap-1">
-                {['GET', 'POST', 'PUT', 'DELETE', 'PATCH'].map(method => (
+              <div className="text-[10px] text-theme-text-tertiary mb-1">Protocol</div>
+              <div className="flex rounded-md overflow-hidden border border-theme-border">
+                {['all', 'HTTP', 'DNS', 'TCP'].map(proto => (
                   <button
-                    key={method}
-                    onClick={() => onToggleL7Method(method)}
+                    key={proto}
+                    onClick={() => setL7Protocol(proto)}
                     className={clsx(
-                      'px-1.5 py-0.5 rounded text-[10px] font-medium transition-colors',
-                      l7Methods.has(method)
-                        ? 'bg-blue-500/30 text-blue-300'
-                        : 'bg-theme-elevated text-theme-text-tertiary hover:text-theme-text-secondary'
+                      'flex-1 px-2 py-1 text-[10px] font-medium transition-colors capitalize',
+                      l7Protocol === proto
+                        ? 'bg-skyhook-500 text-white'
+                        : 'bg-theme-elevated text-theme-text-secondary hover:bg-theme-hover'
                     )}
                   >
-                    {method}
+                    {proto === 'all' ? 'All' : proto}
                   </button>
                 ))}
               </div>
             </div>
 
-            {/* Status Code Range */}
-            <div>
-              <div className="text-[10px] text-theme-text-tertiary mb-1">Status Code</div>
-              <div className="flex flex-wrap gap-1">
-                {([
-                  { label: '2xx', active: 'bg-green-500/30 text-green-300' },
-                  { label: '3xx', active: 'bg-yellow-500/30 text-yellow-300' },
-                  { label: '4xx', active: 'bg-orange-500/30 text-orange-300' },
-                  { label: '5xx', active: 'bg-red-500/30 text-red-300' },
-                ] as const).map(({ label, active }) => (
-                  <button
-                    key={label}
-                    onClick={() => onToggleL7StatusRange(label)}
-                    className={clsx(
-                      'px-1.5 py-0.5 rounded text-[10px] font-medium transition-colors',
-                      l7StatusRanges.has(label)
-                        ? active
-                        : 'bg-theme-elevated text-theme-text-tertiary hover:text-theme-text-secondary'
-                    )}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
-            </div>
+            {/* HTTP sub-filters (visible when protocol is All or HTTP) */}
+            {(l7Protocol === 'all' || l7Protocol === 'HTTP') && (
+              <>
+                <div>
+                  <div className="text-[10px] text-theme-text-tertiary mb-1">HTTP Method</div>
+                  <div className="flex flex-wrap gap-1">
+                    {['GET', 'POST', 'PUT', 'DELETE', 'PATCH'].map(method => (
+                      <button
+                        key={method}
+                        onClick={() => onToggleL7Method(method)}
+                        className={clsx(
+                          'px-1.5 py-0.5 rounded text-[10px] font-medium transition-colors',
+                          l7Methods.has(method)
+                            ? SEVERITY_BADGE.info
+                            : 'bg-theme-elevated text-theme-text-tertiary hover:text-theme-text-secondary'
+                        )}
+                      >
+                        {method}
+                      </button>
+                    ))}
+                  </div>
+                </div>
 
-            {/* Verdict */}
+                <div>
+                  <div className="text-[10px] text-theme-text-tertiary mb-1">Status Code</div>
+                  <div className="flex flex-wrap gap-1">
+                    {([
+                      { label: '2xx', active: SEVERITY_BADGE.success },
+                      { label: '3xx', active: SEVERITY_BADGE.neutral },
+                      { label: '4xx', active: SEVERITY_BADGE.warning },
+                      { label: '5xx', active: SEVERITY_BADGE.error },
+                    ] as const).map(({ label, active }) => (
+                      <button
+                        key={label}
+                        onClick={() => onToggleL7StatusRange(label)}
+                        className={clsx(
+                          'px-1.5 py-0.5 rounded text-[10px] font-medium transition-colors',
+                          l7StatusRanges.has(label)
+                            ? active
+                            : 'bg-theme-elevated text-theme-text-tertiary hover:text-theme-text-secondary'
+                        )}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </>
+            )}
+
+            {/* DNS sub-filter (visible when protocol is All or DNS) */}
+            {(l7Protocol === 'all' || l7Protocol === 'DNS') && (
+              <div>
+                <div className="text-[10px] text-theme-text-tertiary mb-1">DNS Query</div>
+                <input
+                  type="text"
+                  value={dnsPattern}
+                  onChange={(e) => setDnsPattern(e.target.value)}
+                  placeholder="e.g. example.com"
+                  className="w-full px-2 py-1 text-[11px] rounded bg-theme-elevated border border-theme-border text-theme-text-primary placeholder:text-theme-text-tertiary focus:outline-none focus:ring-1 focus:ring-blue-500/50"
+                />
+              </div>
+            )}
+
+            {/* Verdict (always visible — applies to all protocols) */}
             <div>
               <div className="text-[10px] text-theme-text-tertiary mb-1">Verdict</div>
               <div className="flex flex-wrap gap-1">
                 {([
-                  { label: 'forwarded', active: 'bg-green-500/30 text-green-300' },
-                  { label: 'dropped', active: 'bg-red-500/30 text-red-300' },
-                  { label: 'error', active: 'bg-orange-500/30 text-orange-300' },
+                  { label: 'forwarded', active: SEVERITY_BADGE.success },
+                  { label: 'dropped', active: SEVERITY_BADGE.error },
+                  { label: 'error', active: SEVERITY_BADGE.warning },
                 ] as const).map(({ label, active }) => (
                   <button
                     key={label}
@@ -483,18 +466,6 @@ export const TrafficFilterSidebar = memo(function TrafficFilterSidebar({
                   </button>
                 ))}
               </div>
-            </div>
-
-            {/* DNS Query Pattern */}
-            <div>
-              <div className="text-[10px] text-theme-text-tertiary mb-1">DNS Query</div>
-              <input
-                type="text"
-                value={dnsPattern}
-                onChange={(e) => setDnsPattern(e.target.value)}
-                placeholder="e.g. example.com"
-                className="w-full px-2 py-1 text-[11px] rounded bg-theme-elevated border border-theme-border text-theme-text-primary placeholder:text-theme-text-tertiary focus:outline-none focus:ring-1 focus:ring-blue-500/50"
-              />
             </div>
           </div>
         )}

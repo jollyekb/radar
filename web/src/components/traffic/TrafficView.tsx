@@ -4,11 +4,13 @@ import { useTrafficSources, useTrafficFlows, useTrafficConnect, useSetTrafficSou
 import { useClusterInfo } from '../../api/client'
 import type { TrafficWizardState, AggregatedFlow } from '../../types'
 import { TrafficWizard } from './TrafficWizard'
-import { TrafficGraph } from './TrafficGraph'
+import { TrafficGraph, type TrafficGraphSelection } from './TrafficGraph'
 import { TrafficFilterSidebar } from './TrafficFilterSidebar'
-import { Loader2, RefreshCw, Filter, Plug, ChevronDown } from 'lucide-react'
+import { TrafficFlowListProvider } from './TrafficFlowListContext'
+import { Loader2, RefreshCw, Filter, Plug, ChevronDown, List } from 'lucide-react'
 import { clsx } from 'clsx'
 import { useQueryClient } from '@tanstack/react-query'
+import { useDock } from '../dock'
 
 // Addon types for filtering
 export type AddonMode = 'show' | 'group' | 'hide'
@@ -345,9 +347,26 @@ export function TrafficView({ namespaces }: TrafficViewProps) {
   const [detectServices, setDetectServices] = useState(true)
   const [collapseInternet, setCollapseInternet] = useState(true)
   const [addonMode, setAddonMode] = useState<AddonMode>('show')
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
+  const [graphSelection, setGraphSelection] = useState<TrafficGraphSelection | null>(null)
+  const dock = useDock()
+
+  // Dock: offset past sidebar, close flows tab on unmount
+  const flowsTabIdRef = useRef<string | null>(null)
+  useEffect(() => {
+    dock.setLeftOffset(288)
+    return () => {
+      dock.setLeftOffset(0)
+      // Close the flows tab when leaving traffic view
+      if (flowsTabIdRef.current) {
+        dock.removeTab(flowsTabIdRef.current)
+        flowsTabIdRef.current = null
+      }
+    }
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
   const [hiddenNamespaces, setHiddenNamespaces] = useState<Set<string>>(new Set())
   // L7 filters (Hubble-only)
+  const [l7Protocol, setL7Protocol] = useState<string>('all')
   const [l7Methods, setL7Methods] = useState<Set<string>>(new Set())
   const [l7StatusRanges, setL7StatusRanges] = useState<Set<string>>(new Set())
   const [l7Verdicts, setL7Verdicts] = useState<Set<string>>(new Set())
@@ -380,7 +399,7 @@ export function TrafficView({ namespaces }: TrafficViewProps) {
     lastClusterRef.current = currentCluster
   }, [clusterInfo?.context, queryClient])
 
-  // Close source picker on outside click
+  // Close source picker on outside click (capture phase to beat ReactFlow)
   useEffect(() => {
     if (!sourcePickerOpen) return
     const handler = (e: MouseEvent) => {
@@ -388,8 +407,8 @@ export function TrafficView({ namespaces }: TrafficViewProps) {
         setSourcePickerOpen(false)
       }
     }
-    document.addEventListener('mousedown', handler)
-    return () => document.removeEventListener('mousedown', handler)
+    document.addEventListener('mousedown', handler, true)
+    return () => document.removeEventListener('mousedown', handler, true)
   }, [sourcePickerOpen])
 
   const {
@@ -479,7 +498,12 @@ export function TrafficView({ namespaces }: TrafficViewProps) {
         if (destNs && hiddenNamespaces.has(destNs)) return false
       }
 
-      // L7 filters (only apply when any are active)
+      // Protocol filter
+      if (l7Protocol === 'HTTP' && flow.l7Protocol !== 'HTTP') return false
+      if (l7Protocol === 'DNS' && flow.l7Protocol !== 'DNS') return false
+      if (l7Protocol === 'TCP' && flow.l7Protocol) return false // TCP = no L7
+
+      // L7 sub-filters (only apply when active)
       if (l7Methods.size > 0) {
         if (!flow.topHTTPPaths?.some(p => l7Methods.has(p.method))) return false
       }
@@ -496,7 +520,95 @@ export function TrafficView({ namespaces }: TrafficViewProps) {
 
       return true
     })
-  }, [flowsData?.aggregated, hideSystem, hideExternal, minConnections, hiddenNamespaces, addonMode, l7Methods, l7StatusRanges, l7Verdicts, dnsPattern])
+  }, [flowsData?.aggregated, hideSystem, hideExternal, minConnections, hiddenNamespaces, addonMode, l7Protocol, l7Methods, l7StatusRanges, l7Verdicts, dnsPattern])
+
+  // Filter raw flows with the same base filters (for list view)
+  const filteredRawFlows = useMemo(() => {
+    if (!flowsData?.flows) return []
+    return flowsData.flows.filter(flow => {
+      const sourceIsSystem = isSystemEndpoint(flow.source.name, flow.source.namespace, flow.source.kind)
+      const destIsSystem = isSystemEndpoint(flow.destination.name, flow.destination.namespace, flow.destination.kind)
+      if (hideSystem && (sourceIsSystem || destIsSystem)) return false
+
+      const isAlwaysFiltered = (name: string) =>
+        name === 'metadata.google.internal' || name === 'metadata.google.internal.' ||
+        name.startsWith('169.254.') || name === 'instance-data.ec2.internal' ||
+        name === 'localhost' || name === '127.0.0.1' || name.startsWith('127.') || name === '0.0.0.0'
+      if (isAlwaysFiltered(flow.source.name) || isAlwaysFiltered(flow.destination.name)) return false
+
+      if (hideExternal && (isExternal(flow.source.kind) || isExternal(flow.destination.kind))) return false
+
+      if (addonMode === 'hide') {
+        if (isClusterAddon(flow.source.name, flow.source.namespace) || isClusterAddon(flow.destination.name, flow.destination.namespace)) return false
+      }
+
+      if (hiddenNamespaces.size > 0) {
+        if (flow.source.namespace && hiddenNamespaces.has(flow.source.namespace)) return false
+        if (flow.destination.namespace && hiddenNamespaces.has(flow.destination.namespace)) return false
+      }
+
+      // Protocol filter
+      if (l7Protocol === 'HTTP' && flow.l7Protocol !== 'HTTP') return false
+      if (l7Protocol === 'DNS' && flow.l7Protocol !== 'DNS') return false
+      if (l7Protocol === 'TCP' && flow.l7Protocol) return false
+
+      // L7 sub-filters on individual flow fields
+      if (l7Methods.size > 0) {
+        if (!flow.httpMethod || !l7Methods.has(flow.httpMethod)) return false
+      }
+      if (l7StatusRanges.size > 0) {
+        if (!flow.httpStatus) return false
+        const bucket = `${Math.floor(flow.httpStatus / 100)}xx`
+        if (!l7StatusRanges.has(bucket)) return false
+      }
+      if (l7Verdicts.size > 0) {
+        if (!flow.verdict || !l7Verdicts.has(flow.verdict)) return false
+      }
+      if (dnsPattern) {
+        if (!flow.dnsQuery || !flow.dnsQuery.toLowerCase().includes(dnsPattern.toLowerCase())) return false
+      }
+
+      return true
+    })
+  }, [flowsData?.flows, hideSystem, hideExternal, hiddenNamespaces, addonMode, l7Protocol, l7Methods, l7StatusRanges, l7Verdicts, dnsPattern])
+
+  // Apply graph selection to filter raw flows for the list panel
+  const listFlows = useMemo(() => {
+    if (!graphSelection) return filteredRawFlows
+    if (graphSelection.type === 'node' && graphSelection.nodeId) {
+      const id = graphSelection.nodeId
+      return filteredRawFlows.filter(f => {
+        const srcId = f.source.namespace ? `${f.source.namespace}/${f.source.name}` : f.source.name
+        const dstId = f.destination.namespace ? `${f.destination.namespace}/${f.destination.name}` : f.destination.name
+        return srcId === id || dstId === id
+      })
+    }
+    if (graphSelection.type === 'edge' && graphSelection.sourceId && graphSelection.destId) {
+      return filteredRawFlows.filter(f => {
+        const srcId = f.source.namespace ? `${f.source.namespace}/${f.source.name}` : f.source.name
+        const dstId = f.destination.namespace ? `${f.destination.namespace}/${f.destination.name}` : f.destination.name
+        // Match either direction (request goes A→B, response goes B→A)
+        return (srcId === graphSelection.sourceId && dstId === graphSelection.destId) ||
+               (srcId === graphSelection.destId && dstId === graphSelection.sourceId)
+      })
+    }
+    return filteredRawFlows
+  }, [filteredRawFlows, graphSelection])
+
+  // Open flow list in the bottom dock
+  const openFlowListDock = useCallback(() => {
+    const id = dock.addTab({ type: 'traffic-flows', title: 'Traffic Flows' })
+    flowsTabIdRef.current = id
+  }, [dock])
+
+  // Auto-open flows dock when Hubble raw flows are available
+  const hasAutoOpenedFlowsRef = useRef(false)
+  useEffect(() => {
+    if (flowsData?.flows && flowsData.flows.length > 0 && !hasAutoOpenedFlowsRef.current) {
+      hasAutoOpenedFlowsRef.current = true
+      openFlowListDock()
+    }
+  }, [flowsData?.flows, openFlowListDock])
 
   // Show L7 filters only when flows actually contain L7 data
   const hasL7Data = useMemo(() => {
@@ -844,27 +956,35 @@ export function TrafficView({ namespaces }: TrafficViewProps) {
     }
   }, [sourcesData, sourcesLoading])
 
+  // Shared connection handler — used by auto-connect and retry buttons
+  const handleConnect = useCallback(() => {
+    setIsConnecting(true)
+    setConnectionError(null)
+    queryClient.removeQueries({ queryKey: ['traffic-flows'] })
+
+    connectMutation.mutate(undefined, {
+      onSuccess: (data) => {
+        setIsConnecting(false)
+        if (!data.connected && data.error) {
+          setConnectionError(data.error)
+          hasAutoConnectedRef.current = false // allow retry
+        }
+      },
+      onError: (error) => {
+        setIsConnecting(false)
+        setConnectionError(error.message)
+        hasAutoConnectedRef.current = false // allow retry
+      },
+    })
+  }, [connectMutation, queryClient])
+
   // Auto-connect when source is detected
   useEffect(() => {
     if (wizardState === 'ready' && !hasAutoConnectedRef.current && !isConnecting) {
       hasAutoConnectedRef.current = true
-      setIsConnecting(true)
-      setConnectionError(null)
-
-      connectMutation.mutate(undefined, {
-        onSuccess: (data) => {
-          setIsConnecting(false)
-          if (!data.connected && data.error) {
-            setConnectionError(data.error)
-          }
-        },
-        onError: (error) => {
-          setIsConnecting(false)
-          setConnectionError(error.message)
-        },
-      })
+      handleConnect()
     }
-  }, [wizardState, isConnecting, connectMutation])
+  }, [wizardState, isConnecting, handleConnect])
 
   // Show wizard if no traffic source detected
   if (wizardState !== 'ready') {
@@ -880,6 +1000,7 @@ export function TrafficView({ namespaces }: TrafficViewProps) {
   }
 
   return (
+    <TrafficFlowListProvider flows={listFlows} graphSelection={graphSelection} clearSelection={() => setGraphSelection(null)}>
     <div className="flex h-full w-full">
       {/* Sidebar */}
       <TrafficFilterSidebar
@@ -902,6 +1023,8 @@ export function TrafficView({ namespaces }: TrafficViewProps) {
         timeRange={timeRange}
         setTimeRange={setTimeRange}
         isHubble={sourcesData?.active === 'hubble' && hasL7Data}
+        l7Protocol={l7Protocol}
+        setL7Protocol={setL7Protocol}
         l7Methods={l7Methods}
         onToggleL7Method={toggleL7Method}
         l7StatusRanges={l7StatusRanges}
@@ -913,164 +1036,104 @@ export function TrafficView({ namespaces }: TrafficViewProps) {
         namespaces={namespacesWithCounts}
         hiddenNamespaces={hiddenNamespaces}
         onToggleNamespace={toggleNamespace}
-        collapsed={sidebarCollapsed}
-        onToggleCollapse={() => setSidebarCollapsed(!sidebarCollapsed)}
       />
 
       {/* Main content area */}
-      <div className="flex-1 flex flex-col min-w-0">
-        {/* Compact header */}
-        <div className="flex items-center justify-between px-4 py-2 border-b border-theme-border bg-theme-surface/50">
-          <div className="flex items-center gap-4">
-            <h2 className="text-sm font-medium text-theme-text-primary">Traffic Flow</h2>
-            {(() => {
-              const availableSources = sourcesData?.detected.filter(s => s.status === 'available') || []
-              const activeName = sourcesData?.active
-              const activeSource = availableSources.find(s => s.name === activeName) || availableSources[0]
-              if (!activeSource) return null
+      <div className="flex-1 relative min-w-0">
+          {/* Floating controls — overlaid on graph like topology view */}
+          {(() => {
+            const availableSources = sourcesData?.detected.filter(s => s.status === 'available') || []
+            const activeName = sourcesData?.active
+            const activeSource = availableSources.find(s => s.name === activeName) || availableSources[0]
 
-              const sourceDescription: Record<string, string> = {
-                hubble: 'network connections observed via eBPF',
-                caretta: 'network connections observed via eBPF',
-                istio: 'request metrics via Prometheus',
-              }
+            const handleSwitchSource = (name: string) => {
+              if (name === activeSource?.name) { setSourcePickerOpen(false); return }
+              setSourcePickerOpen(false)
+              setIsConnecting(true)
+              setConnectionError(null)
+              hasAutoConnectedRef.current = true
+              setSourceMutation.mutate(name, {
+                onSuccess: () => {
+                  queryClient.invalidateQueries({ queryKey: ['traffic-sources'] })
+                  connectMutation.mutate(undefined, {
+                    onSuccess: (data) => {
+                      setIsConnecting(false)
+                      if (!data.connected && data.error) setConnectionError(data.error)
+                      queryClient.invalidateQueries({ queryKey: ['traffic-flows'] })
+                    },
+                    onError: (error) => { setIsConnecting(false); setConnectionError(error.message) },
+                  })
+                },
+                onError: (error) => { setIsConnecting(false); setConnectionError(error.message) },
+              })
+            }
 
-              const handleSwitchSource = (name: string) => {
-                if (name === activeSource.name) {
-                  setSourcePickerOpen(false)
-                  return
-                }
-                setSourcePickerOpen(false)
-                setIsConnecting(true)
-                setConnectionError(null)
-                hasAutoConnectedRef.current = true
-                setSourceMutation.mutate(name, {
-                  onSuccess: () => {
-                    queryClient.invalidateQueries({ queryKey: ['traffic-sources'] })
-                    // Reconnect after switching source
-                    connectMutation.mutate(undefined, {
-                      onSuccess: (data) => {
-                        setIsConnecting(false)
-                        if (!data.connected && data.error) {
-                          setConnectionError(data.error)
-                        }
-                        queryClient.invalidateQueries({ queryKey: ['traffic-flows'] })
-                      },
-                      onError: (error) => {
-                        setIsConnecting(false)
-                        setConnectionError(error.message)
-                      },
-                    })
-                  },
-                  onError: (error) => {
-                    setIsConnecting(false)
-                    setConnectionError(error.message)
-                  },
-                })
-              }
-
-              return (
-                <div className="flex items-center gap-2 text-xs text-theme-text-secondary border-l border-theme-border pl-4">
-                  {isConnecting ? (
-                    <>
-                      <Loader2 className="h-3 w-3 animate-spin text-blue-400" />
-                      <span className="text-blue-400">Connecting...</span>
-                    </>
-                  ) : connectionError ? (
-                    <>
-                      <span className="inline-block w-2 h-2 rounded-full bg-yellow-500" />
-                      <span className="text-yellow-400">{activeSource.name}</span>
-                      <button
-                        onClick={() => {
-                          setIsConnecting(true)
-                          setConnectionError(null)
-                          queryClient.removeQueries({ queryKey: ['traffic-flows'] })
-                          hasAutoConnectedRef.current = false
-                        }}
-                        className="flex items-center gap-1 px-1.5 py-0.5 text-[10px] bg-yellow-500/10 text-yellow-400 rounded hover:bg-yellow-500/20"
-                        title="Retry connection"
-                      >
-                        <Plug className="h-3 w-3" />
-                        Retry
-                      </button>
-                    </>
-                  ) : (
-                    <>
-                      <span className="inline-block w-2 h-2 rounded-full bg-green-500" />
-                      {availableSources.length > 1 ? (
-                        <div className="relative" ref={sourcePickerRef}>
-                          <button
-                            onClick={() => setSourcePickerOpen(!sourcePickerOpen)}
-                            className="flex items-center gap-1 hover:text-theme-text-primary transition-colors"
-                          >
-                            <span>via {activeSource.name}</span>
-                            <ChevronDown className="h-3 w-3" />
-                          </button>
-                          {sourcePickerOpen && (
-                            <div className="absolute top-full left-0 mt-1 z-50 bg-theme-surface border border-theme-border rounded-md shadow-lg py-1 min-w-[140px]">
-                              {availableSources.map(source => (
-                                <button
-                                  key={source.name}
-                                  onClick={() => handleSwitchSource(source.name)}
-                                  className={clsx(
-                                    'w-full text-left px-3 py-1.5 text-xs hover:bg-theme-hover transition-colors flex items-center justify-between gap-3',
-                                    source.name === activeSource.name && 'text-blue-400'
-                                  )}
-                                >
-                                  <span className="capitalize">{source.name}</span>
-                                  {source.name === activeSource.name && (
-                                    <span className="inline-block w-1.5 h-1.5 rounded-full bg-blue-400" />
-                                  )}
-                                </button>
-                              ))}
-                            </div>
-                          )}
-                        </div>
+            return (
+              <>
+                {/* Top-left: source status pill */}
+                <div className="absolute top-3 left-3 z-10 flex items-center gap-2">
+                  {activeSource && (
+                    <div className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-theme-surface/90 backdrop-blur border border-theme-border text-[11px]">
+                      {isConnecting ? (
+                        <>
+                          <Loader2 className="h-3 w-3 animate-spin text-blue-400" />
+                          <span className="text-blue-400">Connecting...</span>
+                        </>
+                      ) : connectionError ? (
+                        <>
+                          <span className="w-2 h-2 rounded-full bg-yellow-500" />
+                          <span className="text-theme-text-secondary">{activeSource.name}</span>
+                          <button onClick={handleConnect} className="text-yellow-500 hover:text-yellow-400 font-medium">retry</button>
+                        </>
                       ) : (
-                        <span>via {activeSource.name}</span>
+                        <>
+                          <span className="w-2 h-2 rounded-full bg-green-500" />
+                          {availableSources.length > 1 ? (
+                            <div className="relative" ref={sourcePickerRef}>
+                              <button onClick={() => setSourcePickerOpen(!sourcePickerOpen)} className="flex items-center gap-1 text-theme-text-secondary hover:text-theme-text-primary">
+                                {activeSource.name} <ChevronDown className="h-3 w-3" />
+                              </button>
+                              {sourcePickerOpen && (
+                                <div className="absolute top-full left-0 mt-1 z-50 bg-theme-surface border border-theme-border rounded-md shadow-lg py-1 min-w-[120px]">
+                                  {availableSources.map(source => (
+                                    <button key={source.name} onClick={() => handleSwitchSource(source.name)}
+                                      className={clsx('w-full text-left px-3 py-1 text-xs hover:bg-theme-hover capitalize', source.name === activeSource.name && 'text-blue-400')}>
+                                      {source.name}
+                                    </button>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          ) : (
+                            <span className="text-theme-text-secondary">{activeSource.name}</span>
+                          )}
+                        </>
                       )}
-                      {activeSource.native && (
-                        <span className="px-1.5 py-0.5 text-[10px] bg-blue-500/10 text-blue-400 rounded">
-                          Native
-                        </span>
-                      )}
-                      <span className="text-theme-text-tertiary">· {sourceDescription[activeSource.name] || 'traffic visibility'}</span>
-                    </>
+                    </div>
                   )}
                 </div>
-              )
-            })()}
-          </div>
 
-          <div className="flex items-center gap-3">
-            {/* Flow stats */}
-            <div className="text-xs text-theme-text-tertiary">
-              {flowStats.shown} of {flowStats.total} flows
-              {flowStats.aggregated > 0 && (
-                <span className="text-theme-text-secondary"> ({flowStats.aggregated} aggregated)</span>
-              )}
-            </div>
+                {/* Top-right: stats + actions */}
+                <div className="absolute top-3 right-3 z-10 flex items-center gap-2">
+                  {flowsData?.flows && flowsData.flows.length > 0 && (
+                    <button onClick={openFlowListDock}
+                      className="flex items-center gap-1 px-2 py-1 text-[10px] rounded-lg bg-theme-surface/90 backdrop-blur border border-theme-border text-theme-text-secondary hover:text-theme-text-primary transition-colors"
+                      title="Open flow list in dock">
+                      <List className="w-3 h-3" /> Flows
+                    </button>
+                  )}
+                  <div className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-theme-surface/90 backdrop-blur border border-theme-border text-[10px] text-theme-text-tertiary">
+                    {flowStats.shown}/{flowStats.total}
+                    <button onClick={refetchFlows} disabled={flowsLoading || isRefreshAnimating}
+                      className={clsx('p-0.5 rounded hover:text-theme-text-primary transition-colors', (flowsLoading || isRefreshAnimating) && 'opacity-50')}>
+                      {flowsLoading ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className={clsx('h-3 w-3', isRefreshAnimating && 'animate-spin')} />}
+                    </button>
+                  </div>
+                </div>
+              </>
+            )
+          })()}
 
-            <button
-              onClick={refetchFlows}
-              disabled={flowsLoading || isRefreshAnimating}
-              className={clsx(
-                'p-1.5 rounded text-theme-text-secondary hover:text-theme-text-primary hover:bg-theme-hover transition-colors',
-                (flowsLoading || isRefreshAnimating) && 'opacity-50 cursor-not-allowed'
-              )}
-              title="Refresh traffic data"
-            >
-              {flowsLoading ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <RefreshCw className={clsx('h-4 w-4', isRefreshAnimating && 'animate-spin')} />
-              )}
-            </button>
-          </div>
-        </div>
-
-        {/* Graph area */}
-        <div className="flex-1 relative">
           {isConnecting || (flowsFetching && finalFlows.length === 0) ? (
             <div className="absolute inset-0 flex items-center justify-center">
               <div className="flex items-center gap-2 text-theme-text-secondary">
@@ -1086,6 +1149,7 @@ export function TrafficView({ namespaces }: TrafficViewProps) {
               serviceCategories={serviceCategories}
               addonMode={addonMode}
               trafficSource={sourcesData?.active || ''}
+              onSelectionChange={setGraphSelection}
             />
           ) : connectionError ? (
             <div className="absolute inset-0 flex items-center justify-center">
@@ -1096,12 +1160,7 @@ export function TrafficView({ namespaces }: TrafficViewProps) {
                   {connectionError}
                 </p>
                 <button
-                  onClick={() => {
-                    setIsConnecting(true)
-                    setConnectionError(null)
-                    queryClient.removeQueries({ queryKey: ['traffic-flows'] })
-                    hasAutoConnectedRef.current = false
-                  }}
+                  onClick={handleConnect}
                   className="px-3 py-1.5 text-sm btn-brand rounded"
                 >
                   Retry Connection
@@ -1147,8 +1206,8 @@ export function TrafficView({ namespaces }: TrafficViewProps) {
               </div>
             </div>
           )}
-        </div>
       </div>
     </div>
+    </TrafficFlowListProvider>
   )
 }
