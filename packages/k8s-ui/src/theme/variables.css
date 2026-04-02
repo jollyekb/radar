@@ -11,7 +11,7 @@
  */
 
 :root {
-  color-scheme: light dark;
+  color-scheme: light;
 
   /* ── Brand (refined blue — more life than slate, less generic than tech blue) ── */
   --color-brand: light-dark(#4A7CC9, #6A9FE0);
@@ -128,8 +128,13 @@
   --scrollbar-thumb-hover: light-dark(#AABACF, #484C55);
 }
 
-/* Dark overrides for comma-separated values that can't use light-dark() */
+/* Dark overrides — color-scheme drives light-dark() resolution.
+   We declare it in CSS (not just via JS inline style) because Lightning CSS
+   may compile light-dark() into a @media (prefers-color-scheme) polyfill
+   (e.g. on Node <22), which only responds to CSS color-scheme declarations.
+   Also guards against WKWebView quirks in the desktop app. */
 .dark {
+  color-scheme: dark;
   --shadow-sm: 0 1px 3px rgba(0,0,0,0.3), 0 1px 2px rgba(0,0,0,0.2), 0 0 0 1px rgba(255,255,255,0.06);
   --shadow-md: 0 4px 12px -2px rgba(0,0,0,0.35), 0 2px 4px rgba(0,0,0,0.15), 0 0 0 1px rgba(255,255,255,0.06);
   --shadow-lg: 0 12px 32px -6px rgba(0,0,0,0.3), 0 4px 8px rgba(0,0,0,0.1);
