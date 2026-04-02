@@ -125,10 +125,12 @@ func ClassifyError(err error) string {
 	// Timeout errors — but when an exec credential plugin is configured,
 	// timeouts almost always mean expired credentials (the plugin hangs
 	// trying to refresh), not actual network timeouts.
+	// Exception: "cluster unreachable" means the connectivity test ran
+	// (exec plugin didn't block), so the cluster itself is down/offline.
 	if strings.Contains(errLower, "i/o timeout") ||
 		strings.Contains(errLower, "context deadline exceeded") ||
 		strings.Contains(errLower, "timeout") {
-		if UsesExecAuth() {
+		if UsesExecAuth() && !strings.Contains(errLower, "cluster unreachable") {
 			return "auth"
 		}
 		return "timeout"

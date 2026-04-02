@@ -2,9 +2,10 @@ import { LocalTerminalTab as SharedLocalTerminalTab } from '@skyhook-io/k8s-ui'
 
 interface LocalTerminalTabProps {
   isActive?: boolean
+  initialCommand?: string
 }
 
-export function LocalTerminalTab({ isActive }: LocalTerminalTabProps) {
+export function LocalTerminalTab({ isActive, initialCommand }: LocalTerminalTabProps) {
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
 
   const createSession = () =>
@@ -16,6 +17,7 @@ export function LocalTerminalTab({ isActive }: LocalTerminalTabProps) {
     <SharedLocalTerminalTab
       isActive={isActive}
       createSession={createSession}
+      initialCommand={initialCommand}
     />
   )
 }
