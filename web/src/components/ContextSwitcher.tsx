@@ -1,16 +1,10 @@
 import { useState, useRef, useEffect, useMemo } from 'react'
-import { ChevronDown, Check, Loader2, Server, AlertTriangle, XCircle, Search, X } from 'lucide-react'
+import { ChevronDown, Check, Loader2, Server, AlertTriangle, Search, X } from 'lucide-react'
 import { useContexts, useSwitchContext, useClusterInfo, fetchSessionCounts, type SessionCounts } from '../api/client'
 import { useContextSwitch } from '../context/ContextSwitchContext'
 import { useDock } from '../components/dock'
 import type { ContextInfo } from '../types'
 import { parseContextName, type ParsedContextName } from '../utils/context-name'
-
-interface SwitchError {
-  contextName: string
-  clusterName: string
-  message: string
-}
 
 interface ContextSwitcherProps {
   className?: string
@@ -34,7 +28,6 @@ export function ContextSwitcher({ className = '' }: ContextSwitcherProps) {
   const [showConfirm, setShowConfirm] = useState(false)
   const [pendingSwitch, setPendingSwitch] = useState<ParsedContext | null>(null)
   const [sessionCounts, setSessionCounts] = useState<SessionCounts | null>(null)
-  const [switchError, setSwitchError] = useState<SwitchError | null>(null)
   const dropdownRef = useRef<HTMLDivElement>(null)
   const searchInputRef = useRef<HTMLInputElement>(null)
 
@@ -217,9 +210,6 @@ export function ContextSwitcher({ className = '' }: ContextSwitcherProps) {
 
   // Actually perform the context switch
   const performSwitch = async (parsed: ParsedContext) => {
-    // Clear any previous error
-    setSwitchError(null)
-
     startSwitch({
       raw: parsed.raw,
       provider: parsed.provider,
@@ -232,14 +222,9 @@ export function ContextSwitcher({ className = '' }: ContextSwitcherProps) {
       // Success - endSwitch is called by the overlay when it detects success
     } catch (error) {
       console.error('Failed to switch context:', error)
-      // On error, end the switch state so the overlay goes away
+      // End the switch overlay — ConnectionErrorView will show the error
+      // with provider-specific re-auth hints via the connection state
       endSwitch()
-      // Show error dialog with context details
-      setSwitchError({
-        contextName: parsed.context.name,
-        clusterName: parsed.clusterName,
-        message: error instanceof Error ? error.message : 'Unknown error',
-      })
     }
   }
 
@@ -484,39 +469,6 @@ export function ContextSwitcher({ className = '' }: ContextSwitcherProps) {
         </div>
       )}
 
-      {/* Error dialog when context switch fails */}
-      {switchError && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50">
-          <div className="bg-theme-surface border border-theme-border rounded-lg shadow-xl max-w-md mx-4 overflow-hidden">
-            <div className="px-4 py-3 border-b border-red-500/30 bg-red-500/10 flex items-center gap-2">
-              <XCircle className="w-5 h-5 text-red-400" />
-              <span className="font-medium text-theme-text-primary">Connection Failed</span>
-            </div>
-            <div className="px-4 py-4">
-              <p className="text-sm text-theme-text-secondary mb-3">
-                Failed to switch to cluster <span className="font-medium text-theme-text-primary">{switchError.clusterName}</span>
-              </p>
-              <div className="bg-theme-base rounded-md p-3 mb-4">
-                <p className="text-xs text-red-400 font-mono break-all">
-                  {switchError.message}
-                </p>
-              </div>
-              <p className="text-xs text-theme-text-tertiary">
-                The cluster may be unreachable, or your credentials may have expired.
-                Try running <code className="bg-theme-elevated px-1 py-0.5 rounded text-theme-text-secondary">kubectl get nodes</code> to verify connectivity.
-              </p>
-            </div>
-            <div className="px-4 py-3 border-t border-theme-border flex justify-end">
-              <button
-                onClick={() => setSwitchError(null)}
-                className="px-4 py-1.5 text-sm rounded-md bg-theme-elevated hover:bg-theme-hover text-theme-text-primary transition-colors"
-              >
-                OK
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   )
 }
