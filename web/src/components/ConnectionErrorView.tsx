@@ -1,8 +1,9 @@
-import { XCircle, RefreshCw, Loader2, Copy, Check } from 'lucide-react'
+import { XCircle, RefreshCw, Loader2, Copy, Check, TerminalSquare } from 'lucide-react'
 import { useState } from 'react'
 import type { ConnectionState } from '../context/ConnectionContext'
 import { ContextSwitcher } from './ContextSwitcher'
 import { parseContextName } from '../utils/context-name'
+import { useOpenLocalTerminal } from '@skyhook-io/k8s-ui'
 
 interface ConnectionErrorViewProps {
   connection: ConnectionState
@@ -13,7 +14,10 @@ interface ConnectionErrorViewProps {
 interface AuthHints {
   title: string
   hints: string[]
-  commands?: { label: string; command: string }[]
+  /** Primary auth command — usually sufficient on its own */
+  authCommand?: { label: string; command: string }
+  /** Secondary command shown as fallback if primary doesn't resolve the issue */
+  fallbackCommand?: { label: string; command: string }
 }
 
 function getAuthHints(context: string): AuthHints {
@@ -21,47 +25,41 @@ function getAuthHints(context: string): AuthHints {
 
   switch (parsed.provider) {
     case 'GKE': {
-      const commands: { label: string; command: string }[] = [
-        { label: 'Re-authenticate with Google Cloud:', command: 'gcloud auth login' },
-      ]
+      const result: AuthHints = {
+        title: 'GKE Authentication Failed',
+        hints: ['Your Google Cloud credentials have expired.'],
+        authCommand: { label: 'Re-authenticate with Google Cloud:', command: 'gcloud auth login' },
+      }
       if (parsed.region && parsed.account) {
         const isZone = /^[a-z]+-[a-z]+\d+-[a-z]$/.test(parsed.region)
         const flag = isZone ? '--zone' : '--region'
-        commands.push({
-          label: 'Then refresh cluster credentials:',
+        result.fallbackCommand = {
+          label: 'If that doesn\'t work, refresh cluster credentials:',
           command: `gcloud container clusters get-credentials ${parsed.clusterName} ${flag} ${parsed.region} --project ${parsed.account}`,
-        })
+        }
       }
-      return {
-        title: 'GKE Authentication Failed',
-        hints: ['Your Google Cloud credentials have expired.'],
-        commands,
-      }
+      return result
     }
     case 'EKS': {
-      const commands: { label: string; command: string }[] = [
-        { label: 'Re-authenticate with AWS:', command: 'aws sso login' },
-      ]
-      if (parsed.region) {
-        commands.push({
-          label: 'Then refresh cluster credentials:',
-          command: `aws eks update-kubeconfig --name ${parsed.clusterName} --region ${parsed.region}`,
-        })
-      }
-      return {
+      const result: AuthHints = {
         title: 'EKS Authentication Failed',
         hints: ['Your AWS credentials have expired.'],
-        commands,
+        authCommand: { label: 'Re-authenticate with AWS:', command: 'aws sso login' },
       }
+      if (parsed.region) {
+        result.fallbackCommand = {
+          label: 'If that doesn\'t work, refresh cluster credentials:',
+          command: `aws eks update-kubeconfig --name ${parsed.clusterName} --region ${parsed.region}`,
+        }
+      }
+      return result
     }
     case 'AKS':
       return {
         title: 'AKS Authentication Failed',
         hints: ['Your Azure credentials have expired.'],
-        commands: [
-          { label: 'Re-authenticate with Azure:', command: 'az login' },
-          { label: 'Then refresh cluster credentials:', command: 'az aks get-credentials --name <cluster> --resource-group <rg>' },
-        ],
+        authCommand: { label: 'Re-authenticate with Azure:', command: 'az login' },
+        fallbackCommand: { label: 'If that doesn\'t work, refresh cluster credentials:', command: 'az aks get-credentials --name <cluster> --resource-group <rg>' },
       }
     default:
       return {
@@ -120,7 +118,7 @@ const errorHints: Record<string, { title: string; hints: string[] }> = {
   },
 }
 
-function CopyableCommand({ command }: { command: string }) {
+function CopyableCommand({ command, onRunInTerminal }: { command: string; onRunInTerminal?: (command: string) => void }) {
   const [copied, setCopied] = useState(false)
 
   const handleCopy = () => {
@@ -133,14 +131,21 @@ function CopyableCommand({ command }: { command: string }) {
   }
 
   return (
-    <div
-      className="mt-2 flex items-center gap-2 bg-theme-elevated border border-theme-border rounded-md px-3 py-2 cursor-pointer hover:border-theme-border-hover transition-colors group"
-      onClick={handleCopy}
-    >
+    <div className="mt-2 flex items-center gap-2 bg-theme-elevated border border-theme-border rounded-md px-3 py-2 group">
       <code className="text-xs font-mono text-theme-text-primary flex-1 select-all break-all">
         {command}
       </code>
+      {onRunInTerminal && (
+        <button
+          onClick={() => onRunInTerminal(command)}
+          className="shrink-0 text-theme-text-tertiary hover:text-theme-text-secondary transition-colors"
+          title="Run in terminal"
+        >
+          <TerminalSquare className="w-3.5 h-3.5" />
+        </button>
+      )}
       <button
+        onClick={handleCopy}
         className="shrink-0 text-theme-text-tertiary hover:text-theme-text-secondary transition-colors"
         title="Copy to clipboard"
       >
@@ -159,6 +164,22 @@ export function ConnectionErrorView({ connection, onRetry, isRetrying }: Connect
   const isAuth = connection.errorType === 'auth'
   const authInfo = isAuth ? getAuthHints(connection.context || '') : null
   const errorInfo = authInfo || errorHints[connection.errorType || 'unknown'] || errorHints.unknown
+  const openLocalTerminal = useOpenLocalTerminal()
+
+  // Build a command that auto-retries connection after successful auth
+  const retryCmd = `curl -s -X POST http://${window.location.host}/api/connection/retry > /dev/null`
+
+  const handleAuthInTerminal = () => {
+    if (!authInfo?.authCommand) return
+    openLocalTerminal({
+      initialCommand: `${authInfo.authCommand.command} && ${retryCmd}`,
+      title: 'Auth',
+    })
+  }
+
+  const handleRunInTerminal = (command: string) => {
+    openLocalTerminal({ initialCommand: command, title: 'Auth' })
+  }
 
   return (
     <div className="flex-1 flex items-start justify-center pt-16 px-8">
@@ -194,12 +215,25 @@ export function ConnectionErrorView({ connection, onRetry, isRetrying }: Connect
                 </li>
               ))}
             </ul>
-            {authInfo?.commands?.map((cmd, i) => (
-              <div key={i} className="mt-3">
-                <p className="text-xs text-theme-text-tertiary">{cmd.label}</p>
-                <CopyableCommand command={cmd.command} />
+            {authInfo?.authCommand && (
+              <div className="mt-3">
+                <p className="text-xs text-theme-text-tertiary">{authInfo.authCommand.label}</p>
+                <CopyableCommand command={authInfo.authCommand.command} onRunInTerminal={handleRunInTerminal} />
+                <button
+                  onClick={handleAuthInTerminal}
+                  className="mt-3 w-full inline-flex items-center justify-center gap-2 px-3 py-2 text-xs font-medium btn-brand rounded-md"
+                >
+                  <TerminalSquare className="w-3.5 h-3.5" />
+                  Authenticate in terminal
+                </button>
               </div>
-            ))}
+            )}
+            {authInfo?.fallbackCommand && (
+              <div className="mt-4 pt-3 border-t border-theme-border/50">
+                <p className="text-xs text-theme-text-tertiary">{authInfo.fallbackCommand.label}</p>
+                <CopyableCommand command={authInfo.fallbackCommand.command} onRunInTerminal={handleRunInTerminal} />
+              </div>
+            )}
           </div>
 
           {connection.error && (

@@ -20,6 +20,8 @@ export interface DockTab {
   workloadName?: string
   // Node terminal props
   nodeName?: string
+  // Local terminal props
+  initialCommand?: string
 }
 
 export interface DockContextValue {
@@ -250,10 +252,11 @@ export function useOpenNodeTerminal() {
 export function useOpenLocalTerminal() {
   const { addTab } = useDock()
 
-  return () => {
+  return (opts?: { initialCommand?: string; title?: string }) => {
     addTab({
       type: 'local-terminal',
-      title: 'Terminal',
+      title: opts?.title || 'Terminal',
+      initialCommand: opts?.initialCommand,
     })
   }
 }

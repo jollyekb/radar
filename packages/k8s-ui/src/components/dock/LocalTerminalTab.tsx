@@ -10,11 +10,14 @@ export interface LocalTerminalTabProps {
   isActive?: boolean
   /** Returns the WebSocket URL for the local terminal session */
   createSession: () => Promise<{ wsUrl: string }>
+  /** Command to auto-execute after the terminal connects */
+  initialCommand?: string
 }
 
 export function LocalTerminalTab({
   isActive = true,
   createSession,
+  initialCommand,
 }: LocalTerminalTabProps) {
   const terminalRef = useRef<HTMLDivElement>(null)
   const xtermRef = useRef<XTerm | null>(null)
@@ -104,6 +107,14 @@ export function LocalTerminalTab({
           setIsConnecting(false)
           doFit(ws)
           xterm.focus()
+          if (initialCommand) {
+            // Small delay to let the shell prompt initialize
+            setTimeout(() => {
+              if (ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ type: 'input', data: initialCommand + '\n' }))
+              }
+            }, 300)
+          }
         }
 
         ws.onmessage = (event) => {

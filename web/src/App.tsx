@@ -826,7 +826,7 @@ function AppInner() {
           {/* Local terminal */}
           {capabilities.localTerminal && (
             <button
-              onClick={openLocalTerminal}
+              onClick={() => openLocalTerminal()}
               className="p-1.5 rounded-md bg-theme-elevated hover:bg-theme-hover text-theme-text-secondary hover:text-theme-text-primary transition-colors"
               title="Open local terminal"
             >
