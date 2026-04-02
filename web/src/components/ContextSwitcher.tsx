@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useMemo } from 'react'
 import { ChevronDown, Check, Loader2, Server, AlertTriangle, Search, X } from 'lucide-react'
 import { useContexts, useSwitchContext, useClusterInfo, fetchSessionCounts, type SessionCounts } from '../api/client'
 import { useContextSwitch } from '../context/ContextSwitchContext'
+import { useToast } from '../components/ui/Toast'
 import { useDock } from '../components/dock'
 import type { ContextInfo } from '../types'
 import { parseContextName, type ParsedContextName } from '../utils/context-name'
@@ -35,6 +36,7 @@ export function ContextSwitcher({ className = '' }: ContextSwitcherProps) {
   const { data: clusterInfo } = useClusterInfo()
   const switchContext = useSwitchContext()
   const { startSwitch, endSwitch } = useContextSwitch()
+  const { showError } = useToast()
   const { tabs } = useDock()
 
   // Parse, group, and sort contexts
@@ -222,9 +224,14 @@ export function ContextSwitcher({ className = '' }: ContextSwitcherProps) {
       // Success - endSwitch is called by the overlay when it detects success
     } catch (error) {
       console.error('Failed to switch context:', error)
-      // End the switch overlay — ConnectionErrorView will show the error
-      // with provider-specific re-auth hints via the connection state
       endSwitch()
+      // Show toast as fallback — if the backend set StateDisconnected,
+      // ConnectionErrorView will render with provider-specific hints.
+      // But if the request never reached the backend (network error,
+      // client timeout), connection.state stays 'connected' and the
+      // toast is the only error feedback the user gets.
+      const message = error instanceof Error ? error.message : 'Unknown error'
+      showError('Failed to switch context', message)
     }
   }
 
