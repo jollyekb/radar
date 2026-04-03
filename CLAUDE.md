@@ -89,7 +89,7 @@ radar/
 │   │   └── workload.go        # Workload operations (restart, scale, rollback)
 │   ├── mcp/                   # MCP (Model Context Protocol) server
 │   │   ├── server.go          # MCP HTTP handler setup
-│   │   ├── tools.go           # MCP tool definitions (14 tools)
+│   │   ├── tools.go           # MCP tool definitions (15 tools)
 │   │   ├── tools_helm.go      # Helm-specific MCP tools
 │   │   ├── tools_gitops.go    # GitOps-specific MCP tools
 │   │   ├── tools_workloads.go # Workload-specific MCP tools
@@ -448,12 +448,12 @@ Error responses are parsed as `{"error": "message"}` and displayed in toasts.
 - Long text in alerts/banners needs `break-all` class for CSS word breaking
 - **Kind collision rule:** When a CRD kind collides with a core K8s kind (e.g., Knative Service vs core Service), you must guard THREE places in `ResourceRendererDispatch.tsx`: (1) the core renderer line, (2) `getResourceStatus()`, (3) action buttons (Port Forward, etc.). Use `data?.apiVersion?.includes('group.name')` checks. Missing any one causes dual rendering bugs.
 - Core K8s renderers: Pod, Service, ConfigMap, Secret, Ingress, PersistentVolume, ReplicaSet, StorageClass, NetworkPolicy, Event, Workload (Deployment/StatefulSet/DaemonSet), Role, ClusterRole, RoleBinding, ClusterRoleBinding, ServiceAccount, IngressClass, PriorityClass, RuntimeClass, Lease, MutatingWebhookConfiguration, ValidatingWebhookConfiguration
-- 88 CRD renderer components across 20+ integrations — see `packages/k8s-ui/src/components/resources/renderers/` for the full list, and **[docs/INTEGRATION_GUIDE.md](docs/INTEGRATION_GUIDE.md)** for the step-by-step checklist when adding new ones
+- 100+ CRD renderer components across 20+ integrations — see `packages/k8s-ui/src/components/resources/renderers/` for the full list, and **[docs/INTEGRATION_GUIDE.md](docs/INTEGRATION_GUIDE.md)** for the step-by-step checklist when adding new ones
 
 ## Tech Stack
 
 ### Backend
-- Go 1.25+
+- Go 1.26+
 - client-go (K8s client library)
 - chi (HTTP router with middleware)
 - gorilla/websocket (WebSocket support for exec)

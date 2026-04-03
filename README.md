@@ -11,7 +11,7 @@ Topology, event timeline, and service traffic — plus resource browsing, Helm m
 [![Go Report Card](https://goreportcard.com/badge/github.com/skyhook-io/radar?v=2)](https://goreportcard.com/report/github.com/skyhook-io/radar)
 [![Downloads](https://img.shields.io/github/downloads/skyhook-io/radar/total?logo=github)](https://github.com/skyhook-io/radar/releases)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
-[![Go](https://img.shields.io/badge/Go-1.25+-00ADD8?logo=go&logoColor=white)](https://go.dev/)
+[![Go](https://img.shields.io/badge/Go-1.26+-00ADD8?logo=go&logoColor=white)](https://go.dev/)
 
 Visualize your cluster topology, browse resources, stream logs, exec into pods, inspect container image filesystems, manage Helm releases, monitor GitOps workflows (FluxCD & ArgoCD), and forward ports — all from a single binary with zero cluster-side installation.
 
@@ -141,6 +141,9 @@ radar
 | `--history-limit` | `10000` | Maximum events to retain in timeline |
 | `--disable-exec` | `false` | Disable terminal and debug shell |
 | `--disable-helm-write` | `false` | Disable Helm write operations |
+| `--disable-local-terminal` | `false` | Disable local terminal feature |
+| `--prometheus-url` | (auto-discover) | Manual Prometheus/VictoriaMetrics URL (skips auto-discovery) |
+| `--auth-mode` | `none` | Authentication mode: `none`, `proxy`, or `oidc` ([details](docs/authentication.md)) |
 | `--no-mcp` | `false` | Disable MCP server for AI tool integration |
 | `--version` | | Show version and exit |
 
@@ -252,6 +255,16 @@ Visualize live network traffic between services using Hubble or Caretta.
 - Filter by namespace, protocol, or status code
 - Setup wizard to install a traffic source if none is detected
 
+### Cost Insights
+
+Track Kubernetes spending with OpenCost integration — no additional configuration needed.
+
+- Cluster hourly and projected monthly cost, top namespaces by spend
+- Cost trend charts with 6h/24h/7d range selector
+- Namespace and workload-level cost breakdowns with efficiency scoring
+- Node costs with instance type and region pricing
+- Appears automatically when OpenCost metrics are detected in Prometheus
+
 ### AI Integration (MCP) <sup>beta</sup>
 
 Radar includes a built-in [Model Context Protocol](https://modelcontextprotocol.io) (MCP) server that lets AI assistants — Claude, Cursor, Copilot, and others — query your cluster through Radar.
@@ -259,6 +272,17 @@ Radar includes a built-in [Model Context Protocol](https://modelcontextprotocol.
 Instead of raw `kubectl` output (verbose YAML that burns through LLM context windows), your AI gets pre-processed, token-optimized data: topology graphs, health assessments, deduplicated events, and filtered logs. Read tools are strictly read-only; write tools (restart, scale, sync) are clearly annotated and non-destructive.
 
 Enabled by default. Disable with `--no-mcp`. See the **[MCP Guide](docs/mcp.md)** for setup instructions.
+
+### Authentication
+
+For shared in-cluster deployments, Radar supports optional user authentication with per-user Kubernetes RBAC.
+
+- **Proxy mode** — works with oauth2-proxy, Pomerium, Cloudflare Access, or any auth proxy that sets forwarded headers
+- **OIDC mode** — built-in login via Google, Okta, Dex, Keycloak, or any OIDC provider
+- Per-user namespace scoping and write authorization via K8s impersonation
+- UI adapts automatically — buttons only appear if the user has RBAC permission
+
+No auth by default (local use). See the **[Authentication Guide](docs/authentication.md)** for setup.
 
 ---
 
@@ -280,7 +304,9 @@ Radar auto-discovers any CRD in your cluster. Popular tools get [dedicated integ
 | **Argo Workflows** | Workflow, WorkflowTemplate |
 | **cert-manager** | Certificate, CertificateRequest, Order, Challenge, Issuer, ClusterIssuer |
 | **Gateway API** | Gateway, GatewayClass, HTTPRoute, GRPCRoute, TCPRoute, TLSRoute |
+| **Istio** | VirtualService, DestinationRule, Gateway, ServiceEntry, PeerAuthentication, AuthorizationPolicy |
 | **Traefik** | IngressRoute, IngressRouteTCP, IngressRouteUDP, Middleware, MiddlewareTCP, TraefikService, ServersTransport, ServersTransportTCP, TLSOption, TLSStore |
+| **Contour** | HTTPProxy |
 | **Knative Serving** | Service, Configuration, Revision, Route, DomainMapping |
 | **Knative Eventing** | Broker, Trigger, EventType, Channel, InMemoryChannel, Subscription |
 | **Knative Sources** | PingSource, ApiServerSource, ContainerSource, SinkBinding |
@@ -290,6 +316,11 @@ Radar auto-discovers any CRD in your cluster. Popular tools get [dedicated integ
 | **KEDA** | ScaledObject, ScaledJob, TriggerAuthentication, ClusterTriggerAuthentication |
 | **Prometheus Operator** | ServiceMonitor, PodMonitor, PrometheusRule, Alertmanager |
 | **Security (Trivy)** | VulnerabilityReport, ConfigAuditReport, ExposedSecretReport, ClusterComplianceReport, SbomReport, RbacAssessmentReport, InfraAssessmentReport |
+| **Velero** | Backup, Restore, Schedule, BackupStorageLocation, VolumeSnapshotLocation |
+| **External Secrets** | ExternalSecret, ClusterExternalSecret, SecretStore, ClusterSecretStore |
+| **CloudNativePG** | Cluster, Backup, ScheduledBackup, Pooler |
+| **Kyverno** | Policy, ClusterPolicy, PolicyReport, ClusterPolicyReport |
+| **Sealed Secrets** | SealedSecret |
 | **Cost (OpenCost)** | Namespace/workload/node cost breakdown via Prometheus (no CRDs) |
 | **CRDs** | Any Custom Resource Definition in your cluster (auto-discovered) |
 

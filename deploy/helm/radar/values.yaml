@@ -75,9 +75,9 @@ rbac:
     gcpMonitoring: true     # monitoring.googleapis.com
     grafana: true           # monitoring.grafana.com, tempo/loki/grafana.integreatly.org
     istio: true             # networking.istio.io, security.istio.io
-    karpenter: true         # karpenter.sh, karpenter.k8s.aws
+    karpenter: true         # karpenter.sh, karpenter.k8s.aws, karpenter.azure.com, karpenter.gcp.compute.com
     keda: true              # keda.sh
-    knative: true           # serving.knative.dev, eventing.knative.dev
+    knative: true           # serving.knative.dev, eventing.knative.dev, sources/messaging/flows/networking.internal.knative.dev
     kubeshark: true         # kubeshark.io
     kured: true             # kured.io
     kyverno: true           # kyverno.io, wgpolicyk8s.io, reports.kyverno.io
