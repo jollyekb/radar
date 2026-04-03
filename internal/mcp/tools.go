@@ -175,6 +175,18 @@ func registerTools(server *mcp.Server) {
 	}, logToolCall("manage_gitops", handleManageGitOps))
 
 	mcp.AddTool(server, &mcp.Tool{
+		Name: "apply_resource",
+		Description: "Create or update a Kubernetes resource from a YAML manifest. " +
+			"In 'apply' mode (default), performs a server-side apply (idempotent create-or-update). " +
+			"In 'create' mode, performs a strict create that fails if the resource already exists. " +
+			"Supports multi-document YAML separated by '---'. " +
+			"Use dry_run to validate without persisting changes.",
+		Annotations: &mcp.ToolAnnotations{
+			DestructiveHint: boolPtr(false),
+		},
+	}, logToolCall("apply_resource", handleApplyResource))
+
+	mcp.AddTool(server, &mcp.Tool{
 		Name: "manage_node",
 		Description: "Perform operations on a Kubernetes node. " +
 			"Supported actions: 'cordon' marks the node as unschedulable (no new pods will be scheduled), " +

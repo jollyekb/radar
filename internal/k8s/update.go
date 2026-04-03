@@ -3,6 +3,7 @@ package k8s
 import (
 	"context"
 	"log"
+	"strings"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/client-go/dynamic"
@@ -14,6 +15,8 @@ import (
 type WorkloadRevision = k8score.WorkloadRevision
 type UpdateResourceOptions = k8score.UpdateResourceOptions
 type DeleteResourceOptions = k8score.DeleteResourceOptions
+type ApplyResourceOptions = k8score.ApplyResourceOptions
+type ApplyResourceResult = k8score.ApplyResourceResult
 
 func getWorkloadManager() *k8score.WorkloadManager {
 	var disc *k8score.ResourceDiscovery
@@ -58,6 +61,28 @@ func DeleteResource(ctx context.Context, opts DeleteResourceOptions) error {
 // If client is nil, uses the shared dynamic client.
 func DeleteResourceWithClient(ctx context.Context, opts DeleteResourceOptions, client dynamic.Interface) error {
 	return getWorkloadManagerWithClient(client).DeleteResource(ctx, opts)
+}
+
+// ApplyResource creates or updates a Kubernetes resource from YAML.
+func ApplyResource(ctx context.Context, opts ApplyResourceOptions) (*ApplyResourceResult, error) {
+	return getWorkloadManager().ApplyResource(ctx, opts)
+}
+
+// ApplyResourceWithClient creates or updates a Kubernetes resource using the provided client.
+func ApplyResourceWithClient(ctx context.Context, opts ApplyResourceOptions, client dynamic.Interface) (*ApplyResourceResult, error) {
+	return getWorkloadManagerWithClient(client).ApplyResource(ctx, opts)
+}
+
+// SplitYAMLDocuments splits multi-document YAML on "---" separators.
+func SplitYAMLDocuments(content string) []string {
+	var docs []string
+	for _, doc := range strings.Split(content, "\n---") {
+		doc = strings.TrimSpace(doc)
+		if doc != "" && doc != "---" {
+			docs = append(docs, doc)
+		}
+	}
+	return docs
 }
 
 // TriggerCronJob creates a Job from a CronJob.

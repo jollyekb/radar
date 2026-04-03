@@ -1,6 +1,7 @@
 import { useState, useCallback } from 'react'
 import {
   Copy,
+  CopyPlus,
   Check,
   RefreshCw,
   Pencil,
@@ -11,6 +12,7 @@ import {
 import { stringify as yamlStringify } from 'yaml'
 import { CodeViewer } from '../ui/CodeViewer'
 import { YamlEditor } from '../ui/YamlEditor'
+import { Tooltip } from '../ui/Tooltip'
 import type { SelectedResource } from '../../types'
 
 // ============================================================================
@@ -102,9 +104,11 @@ interface EditableYamlViewProps {
   isSaving?: boolean
   /** Error message from the last save attempt */
   saveError?: string | null
+  /** Duplicate handler — opens create dialog with this resource's YAML */
+  onDuplicate?: (params: { kind: string; namespace: string; name: string; yaml: string }) => void
 }
 
-export function EditableYamlView({ resource, data, onCopy, copied, onSaved, onSave, isSaving, saveError }: EditableYamlViewProps) {
+export function EditableYamlView({ resource, data, onCopy, copied, onSaved, onSave, isSaving, saveError, onDuplicate }: EditableYamlViewProps) {
   const [isEditing, setIsEditing] = useState(false)
   const [editedYaml, setEditedYaml] = useState('')
   const [yamlErrors, setYamlErrors] = useState<string[]>([])
@@ -289,6 +293,17 @@ export function EditableYamlView({ resource, data, onCopy, copied, onSaved, onSa
             {copied ? <Check className="w-3.5 h-3.5 text-green-400" /> : <Copy className="w-3.5 h-3.5" />}
             Copy
           </button>
+          {onDuplicate && (
+            <Tooltip content="Duplicate as new resource">
+              <button
+                onClick={() => onDuplicate({ kind: resource.kind, namespace: resource.namespace, name: resource.name, yaml: yamlContent })}
+                className="flex items-center gap-1 px-2 py-1 text-xs text-theme-text-secondary hover:text-theme-text-primary hover:bg-theme-elevated rounded"
+              >
+                <CopyPlus className="w-3.5 h-3.5" />
+                Duplicate
+              </button>
+            </Tooltip>
+          )}
         </div>
       </div>
       <CodeViewer

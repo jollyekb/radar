@@ -210,6 +210,7 @@ func (s *Server) setupRoutes() {
 			r.Get("/resource-counts", s.handleResourceCounts)
 			r.Get("/resources/{kind}", s.handleListResources)
 			r.Get("/resources/{kind}/{namespace}/{name}", s.handleGetResource)
+			r.Post("/resources/apply", s.handleApplyResource)
 			r.Put("/resources/{kind}/{namespace}/{name}", s.handleUpdateResource)
 			r.Get("/resources/{kind}/{namespace}/{name}/cascade-preview", s.handleCascadeDeletePreview)
 			r.Delete("/resources/{kind}/{namespace}/{name}", s.handleDeleteResource)
@@ -1654,6 +1655,100 @@ func (s *Server) handleChangeChildren(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.writeJSON(w, children)
+}
+
+// handleApplyResource creates or updates a Kubernetes resource from YAML.
+// Supports ?mode=create (strict) or ?mode=apply (default, server-side apply).
+// Supports ?dryRun=true for validation without persisting.
+// Accepts multi-document YAML (split on ---).
+func (s *Server) handleApplyResource(w http.ResponseWriter, r *http.Request) {
+	if !s.requireConnected(w) {
+		return
+	}
+
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		s.writeError(w, http.StatusBadRequest, "failed to read request body")
+		return
+	}
+	defer r.Body.Close()
+
+	yamlContent := strings.TrimSpace(string(body))
+	if yamlContent == "" {
+		s.writeError(w, http.StatusBadRequest, "request body is empty")
+		return
+	}
+
+	mode := r.URL.Query().Get("mode")
+	if mode == "" {
+		mode = "apply"
+	}
+	if mode != "apply" && mode != "create" {
+		s.writeError(w, http.StatusBadRequest, "mode must be 'apply' or 'create'")
+		return
+	}
+	dryRun := r.URL.Query().Get("dryRun") == "true"
+
+	client := s.getDynamicClientForRequest(r)
+	if client == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "cluster client not available — check cluster connection")
+		return
+	}
+
+	// Split multi-document YAML
+	docs := k8s.SplitYAMLDocuments(yamlContent)
+
+	var results []k8s.ApplyResourceResult
+	for i, doc := range docs {
+		doc = strings.TrimSpace(doc)
+		if doc == "" {
+			continue
+		}
+
+		result, err := k8s.ApplyResourceWithClient(r.Context(), k8s.ApplyResourceOptions{
+			YAML:   doc,
+			Mode:   mode,
+			DryRun: dryRun,
+		}, client)
+		if err != nil {
+			errMsg := err.Error()
+			if len(docs) > 1 {
+				errMsg = fmt.Sprintf("document %d: %s", i+1, errMsg)
+			}
+			if apierrors.IsConflict(err) || apierrors.IsAlreadyExists(err) {
+				s.writeError(w, http.StatusConflict, errMsg)
+				return
+			}
+			if apierrors.IsForbidden(err) {
+				s.writeError(w, http.StatusForbidden, errMsg)
+				return
+			}
+			if apierrors.IsNotFound(err) {
+				s.writeError(w, http.StatusNotFound, errMsg)
+				return
+			}
+			if apierrors.IsInvalid(err) || apierrors.IsBadRequest(err) {
+				s.writeError(w, http.StatusUnprocessableEntity, errMsg)
+				return
+			}
+			if strings.Contains(err.Error(), "invalid YAML") || strings.Contains(err.Error(), "must include") {
+				s.writeError(w, http.StatusBadRequest, errMsg)
+				return
+			}
+			log.Printf("[apply] Failed to apply resource: %v", err)
+			s.writeError(w, http.StatusInternalServerError, errMsg)
+			return
+		}
+		auth.AuditLog(r, result.Namespace, result.Name)
+		results = append(results, *result)
+	}
+
+	if len(results) == 0 {
+		s.writeError(w, http.StatusBadRequest, "no valid YAML documents found")
+		return
+	}
+
+	s.writeJSON(w, results)
 }
 
 // handleUpdateResource updates a Kubernetes resource from YAML

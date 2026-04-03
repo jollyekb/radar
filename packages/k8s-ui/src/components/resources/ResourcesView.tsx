@@ -20,6 +20,7 @@ import {
   Tag,
   Copy,
   Check,
+  Plus,
 } from 'lucide-react'
 import { clsx } from 'clsx'
 import { ResourceBar } from '../ui/ResourceBar'
@@ -1421,6 +1422,8 @@ interface ResourcesViewProps {
   onSelectedKindChange?: (kind: { name: string; kind: string; group: string }) => void
   /** When true, the sidebar is not rendered. Useful when a standalone ResourcesSidebar is used externally. */
   hideSidebar?: boolean
+  /** Callback when the [+] create button is clicked. Receives the currently selected kind info. */
+  onCreateResource?: (kind: { name: string; kind: string; group: string } | null) => void
 }
 
 // Default selected kind
@@ -1492,6 +1495,7 @@ export function ResourcesView({
   onOpenWorkloadLogs,
   onSelectedKindChange,
   hideSidebar = false,
+  onCreateResource,
 }: ResourcesViewProps) {
   const location = useMemo(() => ({ search: locationSearch, pathname: locationPathname }), [locationSearch, locationPathname])
   const initialFilters = getInitialFiltersFromURL()
@@ -3157,6 +3161,16 @@ export function ResourcesView({
               : <RefreshCw className={clsx('w-4 h-4', refreshPhase === 'spinning' && 'animate-spin')} />
             }
           </button>
+          {onCreateResource && (
+            <Tooltip content={`Create ${selectedKind.kind || 'resource'}`}>
+              <button
+                onClick={() => onCreateResource(selectedKind)}
+                className="p-2 hover:bg-theme-elevated rounded-lg text-theme-text-secondary hover:text-theme-text-primary transition-colors"
+              >
+                <Plus className="w-4 h-4" />
+              </button>
+            </Tooltip>
+          )}
         </div>
 
         {/* Table */}

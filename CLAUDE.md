@@ -89,7 +89,7 @@ radar/
 │   │   └── workload.go        # Workload operations (restart, scale, rollback)
 │   ├── mcp/                   # MCP (Model Context Protocol) server
 │   │   ├── server.go          # MCP HTTP handler setup
-│   │   ├── tools.go           # MCP tool definitions (14 tools)
+│   │   ├── tools.go           # MCP tool definitions (15 tools)
 │   │   ├── tools_helm.go      # Helm-specific MCP tools
 │   │   ├── tools_gitops.go    # GitOps-specific MCP tools
 │   │   ├── tools_workloads.go # Workload-specific MCP tools
@@ -265,7 +265,7 @@ make clean          # Remove build artifacts
 ## API Endpoints & CLI Flags
 
 **You MUST read `internal/server/server.go` before adding or modifying any endpoint** — it is the single source of truth for all routes. CLI flags live in `cmd/explorer/main.go`. Key URL patterns:
-- REST resources: `/api/resources/{kind}`, `/api/resources/{kind}/{ns}/{name}`
+- REST resources: `/api/resources/{kind}`, `/api/resources/{kind}/{ns}/{name}`, `/api/resources/apply` (POST)
 - SSE streaming: `/api/events/stream`, `/api/traffic/flows/stream`
 - WebSocket: `/api/pods/{ns}/{name}/exec`
 - MCP: `/mcp` (Streamable HTTP — POST for JSON-RPC, GET for SSE)
@@ -364,11 +364,11 @@ make clean          # Remove build artifacts
 
 ### MCP Server
 - Stateless HTTP handler mounted at `/mcp` (JSON-RPC over HTTP)
-- 15 tools organized into read and write categories:
+- 16 tools organized into read and write categories:
   - **Read tools** (8): `get_dashboard` (with problem-correlated changes), `list_resources`, `get_resource` (with optional `include`: events, relationships, metrics, logs), `get_topology` (with `format`: graph or summary), `get_events` (with optional `kind`/`name` resource filter), `get_pod_logs`, `list_namespaces`, `get_changes` (timeline of resource mutations)
   - **Read tools — Helm** (2): `list_helm_releases`, `get_helm_release` (with optional values/history/diff)
   - **Read tools — Logs** (1): `get_workload_logs` (aggregated, AI-filtered logs across all pods)
-  - **Write tools** (4): `manage_workload` (restart/scale/rollback), `manage_cronjob` (trigger/suspend/resume), `manage_gitops` (ArgoCD sync/suspend/resume, FluxCD reconcile/suspend/resume), `manage_node` (cordon/uncordon/drain)
+  - **Write tools** (5): `apply_resource` (create or update from YAML, supports multi-doc and dry-run), `manage_workload` (restart/scale/rollback), `manage_cronjob` (trigger/suspend/resume), `manage_gitops` (ArgoCD sync/suspend/resume, FluxCD reconcile/suspend/resume), `manage_node` (cordon/uncordon/drain)
 - 3 resources: `cluster://health`, `cluster://topology`, `cluster://events`
 - Tool annotations: read-only tools use `readOnlyHint`, write tools use `destructiveHint: false`
 - Respects cluster RBAC

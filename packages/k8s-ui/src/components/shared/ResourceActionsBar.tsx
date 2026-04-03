@@ -18,6 +18,7 @@ import {
 } from 'lucide-react'
 import { createTwoFilesPatch } from 'diff'
 import { clsx } from 'clsx'
+import { Tooltip } from '../ui/Tooltip'
 import { ForceDeleteConfirmDialog, type CascadeDependent } from '../ui/ForceDeleteConfirmDialog'
 import { ConfirmDialog } from '../ui/ConfirmDialog'
 import { DialogPortal } from '../ui/DialogPortal'
@@ -483,13 +484,14 @@ export function ResourceActionsBar({
       )}
 
       {onDelete && (
-        <button
-          onClick={() => setShowDeleteConfirm(true)}
-          className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-red-400 hover:text-white hover:bg-red-600 border border-red-400/50 hover:border-red-600 rounded-lg transition-colors"
-        >
-          <Trash2 className="w-3.5 h-3.5" />
-          Delete
-        </button>
+        <Tooltip content="Delete resource">
+          <button
+            onClick={() => setShowDeleteConfirm(true)}
+            className="p-1.5 text-theme-text-secondary border border-theme-border-light rounded-lg hover:text-red-400 hover:border-red-400/50 hover:bg-red-500/10 transition-colors"
+          >
+            <Trash2 className="w-3.5 h-3.5" />
+          </button>
+        </Tooltip>
       )}
 
       <ForceDeleteConfirmDialog
