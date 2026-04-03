@@ -112,13 +112,63 @@ func (c *Client) discover(ctx context.Context) (string, string, error) {
 		return "", "", fmt.Errorf("no Kubernetes client available for discovery")
 	}
 
-	// Layer 3: Well-known service locations
-	info := c.findWellKnownService(ctx)
-	if info == nil {
-		// Layer 4: Dynamic discovery
-		info = c.discoverDynamic(ctx)
+	// Layer 3: Well-known service locations — try each reachable candidate
+	candidates := c.findWellKnownServices(ctx)
+	if len(candidates) > 0 {
+		log.Printf("[prometheus] Found %d well-known service(s), probing...", len(candidates))
 	}
 
+	for _, info := range candidates {
+		if c.probe(ctx, info.clusterAddr+info.basePath) {
+			log.Printf("[prometheus] Connected to %s/%s at %s", info.namespace, info.name, info.clusterAddr)
+			c.mu.Lock()
+			c.discoveryService = &ServiceInfo{
+				Namespace: info.namespace,
+				Name:      info.name,
+				Port:      info.port,
+				BasePath:  info.basePath,
+			}
+			c.baseURL = info.clusterAddr
+			c.basePath = info.basePath
+			c.discovered = true
+			c.mu.Unlock()
+			return info.clusterAddr, info.basePath, nil
+		}
+		log.Printf("[prometheus] Well-known service %s/%s not reachable in-cluster, trying next...", info.namespace, info.name)
+	}
+
+	// If well-known services exist but none reachable in-cluster, try port-forward on first candidate
+	if len(candidates) > 0 {
+		info := candidates[0]
+		log.Printf("[prometheus] No well-known service reachable in-cluster, trying port-forward to %s/%s...", info.namespace, info.name)
+		c.mu.Lock()
+		c.discoveryService = &ServiceInfo{
+			Namespace: info.namespace,
+			Name:      info.name,
+			Port:      info.port,
+			BasePath:  info.basePath,
+		}
+		c.mu.Unlock()
+
+		connInfo, pfErr := portforward.Start(ctx, info.namespace, info.name, info.targetPort, contextName)
+		if pfErr == nil {
+			addr := connInfo.Address
+			if c.probe(ctx, addr+info.basePath) {
+				c.mu.Lock()
+				c.baseURL = addr
+				c.basePath = info.basePath
+				c.discovered = true
+				c.mu.Unlock()
+				return addr, info.basePath, nil
+			}
+			portforward.Stop()
+		} else {
+			errorlog.Record("prometheus", "error", "port-forward to %s/%s failed: %v", info.namespace, info.name, pfErr)
+		}
+	}
+
+	// Layer 4: Dynamic discovery
+	info := c.discoverDynamic(ctx)
 	if info == nil {
 		c.mu.Lock()
 		c.discoveryService = nil
@@ -136,9 +186,8 @@ func (c *Client) discover(ctx context.Context) (string, string, error) {
 	}
 	c.mu.Unlock()
 
-	// Try cluster-internal address (no lock held during probe)
 	if c.probe(ctx, info.clusterAddr+info.basePath) {
-		log.Printf("[prometheus] Connected to %s/%s at %s", info.namespace, info.name, info.clusterAddr)
+		log.Printf("[prometheus] Connected to %s/%s at %s (dynamic)", info.namespace, info.name, info.clusterAddr)
 		c.mu.Lock()
 		c.baseURL = info.clusterAddr
 		c.basePath = info.basePath
@@ -147,7 +196,6 @@ func (c *Client) discover(ctx context.Context) (string, string, error) {
 		return info.clusterAddr, info.basePath, nil
 	}
 
-	// Not reachable in-cluster — try port-forward
 	log.Printf("[prometheus] Service %s/%s not reachable in-cluster, starting port-forward...", info.namespace, info.name)
 	connInfo, err := portforward.Start(ctx, info.namespace, info.name, info.targetPort, contextName)
 	if err != nil {
@@ -156,22 +204,13 @@ func (c *Client) discover(ctx context.Context) (string, string, error) {
 	}
 
 	addr := connInfo.Address
-	if info.basePath != "" {
-		if c.probe(ctx, addr+info.basePath) {
-			c.mu.Lock()
-			c.baseURL = addr
-			c.basePath = info.basePath
-			c.discovered = true
-			c.mu.Unlock()
-			return addr, info.basePath, nil
-		}
-	} else if c.probe(ctx, addr) {
+	if c.probe(ctx, addr+info.basePath) {
 		c.mu.Lock()
 		c.baseURL = addr
-		c.basePath = ""
+		c.basePath = info.basePath
 		c.discovered = true
 		c.mu.Unlock()
-		return addr, "", nil
+		return addr, info.basePath, nil
 	}
 
 	portforward.Stop()
@@ -188,11 +227,12 @@ type serviceInfo struct {
 	basePath    string
 }
 
-func (c *Client) findWellKnownService(ctx context.Context) *serviceInfo {
+func (c *Client) findWellKnownServices(ctx context.Context) []*serviceInfo {
 	c.mu.RLock()
 	k8sClient := c.k8sClient
 	c.mu.RUnlock()
 
+	var results []*serviceInfo
 	for _, loc := range wellKnownLocations {
 		svc, err := k8sClient.CoreV1().Services(loc.namespace).Get(ctx, loc.name, metav1.GetOptions{})
 		if err != nil {
@@ -207,16 +247,16 @@ func (c *Client) findWellKnownService(ctx context.Context) *serviceInfo {
 		tp := resolveTargetPort(*svc, port)
 
 		log.Printf("[prometheus] Found well-known service: %s/%s:%d (targetPort=%d)", svc.Namespace, svc.Name, port, tp)
-		return &serviceInfo{
+		results = append(results, &serviceInfo{
 			namespace:   svc.Namespace,
 			name:        svc.Name,
 			port:        port,
 			targetPort:  tp,
 			clusterAddr: addr,
 			basePath:    loc.basePath,
-		}
+		})
 	}
-	return nil
+	return results
 }
 
 type scoredCandidate struct {
