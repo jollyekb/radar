@@ -100,3 +100,4 @@ When running in-cluster (using the pod's service account), context switching is 
 
 - [README](../README.md#usage) — CLI flags and basic usage
 - [In-Cluster Deployment](in-cluster.md) — Deploy Radar inside your cluster with Helm
+- [Authentication & Authorization](authentication.md) — Proxy and OIDC auth for shared deployments

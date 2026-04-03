@@ -42,7 +42,7 @@ For detailed architecture, API reference, and release process, see [DEVELOPMENT.
 
 ### Prerequisites
 
-- Go 1.25+
+- Go 1.26+
 - Node.js 20+
 - npm
 - Access to a Kubernetes cluster (minikube, kind, or remote)
@@ -54,10 +54,8 @@ For detailed architecture, API reference, and release process, see [DEVELOPMENT.
 git clone https://github.com/YOUR_USERNAME/radar.git
 cd radar
 
-# Install frontend dependencies
-cd web
-npm install
-cd ..
+# Install all dependencies (Go + npm)
+make deps
 
 # Run in development mode
 # Terminal 1: Backend

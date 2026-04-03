@@ -4,7 +4,7 @@ Guide for developers contributing to Radar or building custom versions.
 
 ## Prerequisites
 
-- **Go 1.25+**
+- **Go 1.26+**
 - **Node.js 20+**
 - **npm**
 - **kubectl** with cluster access
@@ -135,7 +135,7 @@ radar/
 
 ### Tech Stack
 
-**Backend:** Go 1.25+, client-go, chi router, gorilla/websocket, Helm SDK, Cilium/Hubble, go-containerregistry, SQLite, Wails v2, `go:embed`
+**Backend:** Go 1.26+, client-go, chi router, gorilla/websocket, Helm SDK, Cilium/Hubble, go-containerregistry, SQLite, Wails v2, `go:embed`
 
 **Frontend:** React 19, TypeScript, Vite, @xyflow/react + ELK.js, @xterm/xterm, Monaco Editor, TanStack React Query v5, Tailwind CSS v4 + shadcn/ui
 

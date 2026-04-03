@@ -45,8 +45,8 @@ When deploying Radar inside a Kubernetes cluster:
 
 - **ServiceAccount-based auth**: Uses the pod's ServiceAccount for Kubernetes API access
 - **RBAC-scoped permissions**: Configure the ServiceAccount with minimal required permissions
-- **Team access**: Expose via Ingress with your organization's authentication (OAuth, SSO, etc.)
-- **Advanced permission management**: Coming soon - granular user/role management for shared deployments
+- **Team access**: Expose via Ingress with authentication (proxy or OIDC mode)
+- **Per-user authorization**: Supports K8s impersonation so each user's actions are governed by their own RBAC bindings. See the [Authentication Guide](docs/authentication.md) for details.
 
 ### Capabilities
 

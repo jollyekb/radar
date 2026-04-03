@@ -748,7 +748,7 @@ See the main [README](../README.md#gitops) for GitOps integration details.
 
 [OpenCost](https://www.opencost.io/) is a CNCF tool for Kubernetes cost monitoring, exposing cloud provider pricing and workload resource allocation as Prometheus metrics.
 
-Radar discovers if Opencost metrics are available in the already-discovered Prometheus. If OpenCost is installed and scraping into Prometheus, cost data appears automatically with no additional configuration. The integration is passive and read-only.
+Radar discovers if OpenCost metrics are available in the already-discovered Prometheus. If OpenCost is installed and scraping into Prometheus, cost data appears automatically with no additional configuration. The integration is passive and read-only.
 
 ### What Radar Shows
 
@@ -766,7 +766,7 @@ Radar discovers if Opencost metrics are available in the already-discovered Prom
 
 ### Prerequisites
 
-1. OpenCost (or Kubecost) deployed in your cluster, with it's metrics being scraped by Prometheus
+1. OpenCost (or Kubecost) deployed in your cluster, with its metrics being scraped by Prometheus
 
 OpenCost cost data is not CRD-based — no custom resources are required. Cost views appear automatically when metrics are detected; they are hidden when no OpenCost metrics are found in Prometheus.
 
