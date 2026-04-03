@@ -27,6 +27,19 @@ Persistent defaults for CLI flags. CLI flags always override these values. Manag
 
 All fields are optional — omitted fields use built-in defaults.
 
+| Field | Description |
+|-------|-------------|
+| `kubeconfig` | Path to kubeconfig file (same as `--kubeconfig`) |
+| `kubeconfigDirs` | Directories containing kubeconfig files (same as `--kubeconfig-dir`) |
+| `namespace` | Initial namespace filter |
+| `port` | Server port (default 9280) |
+| `noBrowser` | Don't auto-open browser |
+| `timelineStorage` | `memory` or `sqlite` |
+| `timelineDbPath` | Path to SQLite database |
+| `historyLimit` | Max timeline events to retain |
+| `prometheusUrl` | Manual Prometheus/VictoriaMetrics URL — skips auto-discovery. Useful when Prometheus is not in the same cluster or uses a non-standard service name. |
+| `mcp` | Enable/disable MCP server for AI tools |
+
 ### Settings File (`~/.radar/settings.json`)
 
 User preferences for the UI. Managed via the Settings dialog or `PUT /api/settings`.

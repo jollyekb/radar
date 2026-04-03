@@ -138,6 +138,8 @@ Some features require additional permissions. Most are disabled by default for s
 | Helm Write | `rbac.helm: true` | `false` | Install/upgrade/rollback/uninstall Helm releases (grants broad write access; auto-enables secrets) |
 | Traffic TLS | `rbac.traffic: true` | `true` | Read Hubble relay TLS certs for Cilium traffic observation |
 
+> **Node management** (cordon, uncordon, drain) is available via the MCP server and API. These operations require `patch` and `create eviction` verbs on nodes/pods, which are not included in the default ClusterRole. Add them via `rbac.additionalRules` or use [per-user authentication](authentication.md) so each user's own RBAC governs node operations.
+
 Enable features as needed:
 
 ```yaml
@@ -163,9 +165,9 @@ rbac:
     certManager: true   # cert-manager.io
     flux: true          # *.toolkit.fluxcd.io
     istio: true         # networking.istio.io, security.istio.io
-    karpenter: true     # karpenter.sh, karpenter.k8s.aws, karpenter.azure.com
+    karpenter: true     # karpenter.sh, karpenter.k8s.aws, karpenter.azure.com, karpenter.gcp.compute.com
     keda: true          # keda.sh
-    knative: true       # *.knative.dev
+    knative: true       # serving, eventing, sources, messaging, flows, networking.internal (.knative.dev)
     prometheus: true    # monitoring.coreos.com
     traefik: true       # traefik.io
     velero: true        # velero.io
