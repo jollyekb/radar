@@ -63,6 +63,8 @@ func main() {
 	authOIDCRedirectURL := flag.String("auth-oidc-redirect-url", "", "OIDC redirect URL")
 	authOIDCGroupsClaim := flag.String("auth-oidc-groups-claim", "groups", "JWT claim for groups")
 	authOIDCPostLogoutRedirectURL := flag.String("auth-oidc-post-logout-redirect-url", "", "URL to redirect after OIDC provider logout (must be registered with IdP)")
+	authOIDCInsecureSkipVerify := flag.Bool("auth-oidc-insecure-skip-verify", false, "Skip TLS certificate verification for OIDC provider (insecure, dev/test only)")
+	authOIDCCACert := flag.String("auth-oidc-ca-cert", "", "Path to CA certificate file for OIDC provider TLS verification")
 	flag.Parse()
 
 	if *showVersion {
@@ -119,7 +121,9 @@ func main() {
 			OIDCClientSecret: *authOIDCClientSecret,
 			OIDCRedirectURL:           *authOIDCRedirectURL,
 			OIDCGroupsClaim:           *authOIDCGroupsClaim,
-			OIDCPostLogoutRedirectURL: *authOIDCPostLogoutRedirectURL,
+			OIDCPostLogoutRedirectURL:  *authOIDCPostLogoutRedirectURL,
+			OIDCInsecureSkipVerify:     *authOIDCInsecureSkipVerify,
+			OIDCCACert:                 *authOIDCCACert,
 		},
 	}
 

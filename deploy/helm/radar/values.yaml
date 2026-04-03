@@ -177,6 +177,10 @@ auth:
     groupsClaim: "groups"
     # URL to redirect after OIDC provider logout (must be registered with IdP)
     postLogoutRedirectURL: ""
+    # Path to CA certificate file for OIDC provider TLS (e.g., /etc/radar/oidc-ca.crt)
+    caCert: ""
+    # Skip TLS verification for OIDC provider (insecure, dev/test only)
+    insecureSkipVerify: false
 
 # MCP (Model Context Protocol) server for AI tools
 mcp:
