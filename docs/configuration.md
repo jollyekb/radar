@@ -38,7 +38,7 @@ All fields are optional — omitted fields use built-in defaults.
 | `timelineDbPath` | Path to SQLite database |
 | `historyLimit` | Max timeline events to retain |
 | `prometheusUrl` | Manual Prometheus/VictoriaMetrics URL — skips auto-discovery. Useful when Prometheus is not in the same cluster or uses a non-standard service name. |
-| `mcp` | Enable/disable MCP server for AI tools |
+| `mcp` | Enable/disable MCP server for AI tools (default: enabled) |
 
 ### Settings File (`~/.radar/settings.json`)
 

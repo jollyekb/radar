@@ -138,7 +138,7 @@ Some features require additional permissions. Most are disabled by default for s
 | Helm Write | `rbac.helm: true` | `false` | Install/upgrade/rollback/uninstall Helm releases (grants broad write access; auto-enables secrets) |
 | Traffic TLS | `rbac.traffic: true` | `true` | Read Hubble relay TLS certs for Cilium traffic observation |
 
-> **Node management** (cordon, uncordon, drain) is available via the MCP server and API. These operations require `patch` and `create eviction` verbs on nodes/pods, which are not included in the default ClusterRole. Add them via `rbac.additionalRules` or use [per-user authentication](authentication.md) so each user's own RBAC governs node operations.
+> **Node management** (cordon, uncordon, drain) is available via the MCP server and API. These operations require `patch` on nodes, `list` on pods, and `create` on `pods/eviction`, which are not included in the default ClusterRole. Add them via `rbac.additionalRules` or use [per-user authentication](authentication.md) so each user's own RBAC governs node operations.
 
 Enable features as needed:
 

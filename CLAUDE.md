@@ -89,7 +89,7 @@ radar/
 │   │   └── workload.go        # Workload operations (restart, scale, rollback)
 │   ├── mcp/                   # MCP (Model Context Protocol) server
 │   │   ├── server.go          # MCP HTTP handler setup
-│   │   ├── tools.go           # MCP tool definitions (14 tools)
+│   │   ├── tools.go           # MCP tool definitions (15 tools)
 │   │   ├── tools_helm.go      # Helm-specific MCP tools
 │   │   ├── tools_gitops.go    # GitOps-specific MCP tools
 │   │   ├── tools_workloads.go # Workload-specific MCP tools
