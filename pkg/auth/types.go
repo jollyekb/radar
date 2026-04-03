@@ -27,7 +27,9 @@ type Config struct {
 	OIDCClientSecret string
 	OIDCRedirectURL           string
 	OIDCGroupsClaim           string // default "groups"
-	OIDCPostLogoutRedirectURL string // optional, URL to redirect after IdP logout
+	OIDCPostLogoutRedirectURL  string // optional, URL to redirect after IdP logout
+	OIDCInsecureSkipVerify     bool   // skip TLS verification for OIDC provider (dev/test only)
+	OIDCCACert                 string // path to CA certificate file for OIDC provider TLS
 }
 
 // User represents an authenticated user

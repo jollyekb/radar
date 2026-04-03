@@ -72,6 +72,12 @@ spec:
             {{- if .Values.auth.oidc.postLogoutRedirectURL }}
             - --auth-oidc-post-logout-redirect-url={{ .Values.auth.oidc.postLogoutRedirectURL }}
             {{- end }}
+            {{- if .Values.auth.oidc.caCert }}
+            - --auth-oidc-ca-cert={{ .Values.auth.oidc.caCert }}
+            {{- end }}
+            {{- if .Values.auth.oidc.insecureSkipVerify }}
+            - --auth-oidc-insecure-skip-verify
+            {{- end }}
             {{- end }}
           ports:
             - name: http

@@ -3,11 +3,15 @@ package auth
 import (
 	"context"
 	"crypto/rand"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"net/url"
+	"os"
 	"time"
 
 	"github.com/coreos/go-oidc/v3/oidc"
@@ -23,12 +27,42 @@ type OIDCHandler struct {
 	provider           *oidc.Provider
 	oauth              oauth2.Config
 	verifier           *oidc.IDTokenVerifier
-	endSessionEndpoint string // from OIDC discovery; empty if IdP doesn't support RP-Initiated Logout
+	endSessionEndpoint string       // from OIDC discovery; empty if IdP doesn't support RP-Initiated Logout
+	httpClient         *http.Client // custom TLS client for OIDC provider calls; nil = default
 }
 
 // NewOIDCHandler creates a new OIDC handler. Returns an error if the provider
 // cannot be discovered (network error, invalid issuer URL, etc.).
 func NewOIDCHandler(ctx context.Context, cfg Config) (*OIDCHandler, error) {
+	// Build a custom HTTP client for OIDC provider TLS when configured
+	var httpClient *http.Client
+	if cfg.OIDCCACert != "" {
+		caCert, err := os.ReadFile(cfg.OIDCCACert)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read OIDC CA cert %s: %w", cfg.OIDCCACert, err)
+		}
+		pool := x509.NewCertPool()
+		if !pool.AppendCertsFromPEM(caCert) {
+			return nil, fmt.Errorf("failed to parse OIDC CA cert %s: no valid certificates found", cfg.OIDCCACert)
+		}
+		transport := http.DefaultTransport.(*http.Transport).Clone()
+		transport.TLSClientConfig = &tls.Config{RootCAs: pool}
+		httpClient = &http.Client{Transport: transport}
+		log.Printf("[oidc] Using custom CA certificate: %s", cfg.OIDCCACert)
+		if cfg.OIDCInsecureSkipVerify {
+			log.Printf("[oidc] WARNING: --auth-oidc-insecure-skip-verify is ignored because --auth-oidc-ca-cert is set")
+		}
+	} else if cfg.OIDCInsecureSkipVerify {
+		transport := http.DefaultTransport.(*http.Transport).Clone()
+		transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true} //nolint:gosec // user-requested via CLI flag
+		httpClient = &http.Client{Transport: transport}
+		log.Printf("[oidc] WARNING: TLS verification disabled for OIDC provider — do NOT use in production")
+	}
+
+	if httpClient != nil {
+		ctx = context.WithValue(ctx, oauth2.HTTPClient, httpClient)
+	}
+
 	provider, err := oidc.NewProvider(ctx, cfg.OIDCIssuer)
 	if err != nil {
 		return nil, err
@@ -62,6 +96,7 @@ func NewOIDCHandler(ctx context.Context, cfg Config) (*OIDCHandler, error) {
 		oauth:              oauthCfg,
 		verifier:           verifier,
 		endSessionEndpoint: providerClaims.EndSessionEndpoint,
+		httpClient:         httpClient,
 	}, nil
 }
 
@@ -106,6 +141,11 @@ func (h *OIDCHandler) HandleLogin(w http.ResponseWriter, r *http.Request) {
 func (h *OIDCHandler) HandleCallback(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
+
+	// Inject custom TLS client for OIDC provider calls (token exchange, JWKS fetch)
+	if h.httpClient != nil {
+		ctx = context.WithValue(ctx, oauth2.HTTPClient, h.httpClient)
+	}
 
 	// Verify state against cookie to prevent CSRF
 	stateCookie, err := r.Cookie(oidcStateCookieName)

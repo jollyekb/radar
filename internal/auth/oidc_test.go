@@ -1,9 +1,12 @@
 package auth
 
 import (
+	"context"
 	"encoding/json"
+	"encoding/pem"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -276,5 +279,204 @@ func TestHandleLogin_NoForceLoginWithoutCookie(t *testing.T) {
 	location := w.Header().Get("Location")
 	if strings.Contains(location, "prompt=login") {
 		t.Errorf("redirect URL should NOT contain prompt=login on normal login, got %q", location)
+	}
+}
+
+// newTLSOIDCServer starts an httptest.NewTLSServer that serves a minimal OIDC
+// discovery document. The caller must call Close() when done.
+func newTLSOIDCServer() *httptest.Server {
+	var srv *httptest.Server
+	srv = httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"issuer":                 srv.URL,
+			"authorization_endpoint": srv.URL + "/auth",
+			"token_endpoint":         srv.URL + "/token",
+			"jwks_uri":               srv.URL + "/jwks",
+			"response_types_supported": []string{"code"},
+			"subject_types_supported":  []string{"public"},
+			"id_token_signing_alg_values_supported": []string{"RS256"},
+		})
+	}))
+	return srv
+}
+
+func TestNewOIDCHandler_FailsWithSelfSignedCert(t *testing.T) {
+	srv := newTLSOIDCServer()
+	defer srv.Close()
+
+	_, err := NewOIDCHandler(context.Background(), Config{
+		Mode:         "oidc",
+		OIDCIssuer:   srv.URL,
+		OIDCClientID: "test",
+		OIDCClientSecret: "secret",
+		OIDCRedirectURL:  "http://localhost/callback",
+	})
+	if err == nil {
+		t.Fatal("expected TLS error, got nil")
+	}
+	if !strings.Contains(err.Error(), "certificate") {
+		t.Errorf("expected certificate error, got: %v", err)
+	}
+}
+
+func TestNewOIDCHandler_InsecureSkipVerify(t *testing.T) {
+	srv := newTLSOIDCServer()
+	defer srv.Close()
+
+	h, err := NewOIDCHandler(context.Background(), Config{
+		Mode:                   "oidc",
+		OIDCIssuer:             srv.URL,
+		OIDCClientID:           "test",
+		OIDCClientSecret:       "secret",
+		OIDCRedirectURL:        "http://localhost/callback",
+		OIDCInsecureSkipVerify: true,
+	})
+	if err != nil {
+		t.Fatalf("expected success with InsecureSkipVerify, got: %v", err)
+	}
+	if h.httpClient == nil {
+		t.Error("httpClient should be set when InsecureSkipVerify is true")
+	}
+}
+
+func TestNewOIDCHandler_CACert(t *testing.T) {
+	srv := newTLSOIDCServer()
+	defer srv.Close()
+
+	// Write the test server's CA cert to a temp file
+	certPEM := pem.EncodeToMemory(&pem.Block{
+		Type:  "CERTIFICATE",
+		Bytes: srv.TLS.Certificates[0].Certificate[0],
+	})
+	f, err := os.CreateTemp("", "oidc-ca-*.pem")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(f.Name())
+	if _, err := f.Write(certPEM); err != nil {
+		t.Fatal(err)
+	}
+	f.Close()
+
+	h, err := NewOIDCHandler(context.Background(), Config{
+		Mode:             "oidc",
+		OIDCIssuer:       srv.URL,
+		OIDCClientID:     "test",
+		OIDCClientSecret: "secret",
+		OIDCRedirectURL:  "http://localhost/callback",
+		OIDCCACert:       f.Name(),
+	})
+	if err != nil {
+		t.Fatalf("expected success with CA cert, got: %v", err)
+	}
+	if h.httpClient == nil {
+		t.Error("httpClient should be set when CACert is provided")
+	}
+}
+
+func TestNewOIDCHandler_CACertTakesPrecedence(t *testing.T) {
+	srv := newTLSOIDCServer()
+	defer srv.Close()
+
+	// Write CA cert
+	certPEM := pem.EncodeToMemory(&pem.Block{
+		Type:  "CERTIFICATE",
+		Bytes: srv.TLS.Certificates[0].Certificate[0],
+	})
+	f, err := os.CreateTemp("", "oidc-ca-*.pem")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(f.Name())
+	if _, err := f.Write(certPEM); err != nil {
+		t.Fatal(err)
+	}
+	f.Close()
+
+	// Both flags set — CA cert should win (InsecureSkipVerify should be false on transport)
+	h, err := NewOIDCHandler(context.Background(), Config{
+		Mode:                   "oidc",
+		OIDCIssuer:             srv.URL,
+		OIDCClientID:           "test",
+		OIDCClientSecret:       "secret",
+		OIDCRedirectURL:        "http://localhost/callback",
+		OIDCCACert:             f.Name(),
+		OIDCInsecureSkipVerify: true,
+	})
+	if err != nil {
+		t.Fatalf("expected success, got: %v", err)
+	}
+	if h.httpClient == nil {
+		t.Fatal("httpClient should be set")
+	}
+	// Verify InsecureSkipVerify is NOT set (CA cert takes precedence)
+	transport := h.httpClient.Transport.(*http.Transport)
+	if transport.TLSClientConfig.InsecureSkipVerify {
+		t.Error("InsecureSkipVerify should be false when CA cert is provided")
+	}
+	if transport.TLSClientConfig.RootCAs == nil {
+		t.Error("RootCAs should be set when CA cert is provided")
+	}
+}
+
+func TestNewOIDCHandler_InvalidCACertPath(t *testing.T) {
+	_, err := NewOIDCHandler(context.Background(), Config{
+		Mode:             "oidc",
+		OIDCIssuer:       "https://example.com",
+		OIDCClientID:     "test",
+		OIDCClientSecret: "secret",
+		OIDCRedirectURL:  "http://localhost/callback",
+		OIDCCACert:       "/nonexistent/ca.pem",
+	})
+	if err == nil {
+		t.Fatal("expected error for invalid CA cert path")
+	}
+	if !strings.Contains(err.Error(), "failed to read") {
+		t.Errorf("expected 'failed to read' error, got: %v", err)
+	}
+}
+
+func TestNewOIDCHandler_InvalidCACertContent(t *testing.T) {
+	f, err := os.CreateTemp("", "oidc-bad-ca-*.pem")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(f.Name())
+	f.WriteString("not a certificate")
+	f.Close()
+
+	_, err = NewOIDCHandler(context.Background(), Config{
+		Mode:             "oidc",
+		OIDCIssuer:       "https://example.com",
+		OIDCClientID:     "test",
+		OIDCClientSecret: "secret",
+		OIDCRedirectURL:  "http://localhost/callback",
+		OIDCCACert:       f.Name(),
+	})
+	if err == nil {
+		t.Fatal("expected error for invalid CA cert content")
+	}
+	if !strings.Contains(err.Error(), "no valid certificates") {
+		t.Errorf("expected 'no valid certificates' error, got: %v", err)
+	}
+}
+
+func TestOIDCHandler_CallbackUsesCustomClient(t *testing.T) {
+	h := newTestOIDCHandler()
+	h.httpClient = &http.Client{} // non-nil signals custom client is set
+
+	// The callback should inject the client into the context.
+	// We test this indirectly: a valid state + code but nil oauth config
+	// will fail at Exchange, not at client injection.
+	r := httptest.NewRequest("GET", "/auth/callback?state=abc&code=xyz", nil)
+	r.AddCookie(&http.Cookie{Name: oidcStateCookieName, Value: "abc"})
+	w := httptest.NewRecorder()
+
+	h.HandleCallback(w, r)
+
+	// Should fail at token exchange (oauth config is nil), not panic
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("status = %d, want 500 (exchange failure, not panic)", w.Code)
 	}
 }
