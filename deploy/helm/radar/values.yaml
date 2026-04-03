@@ -173,6 +173,11 @@ auth:
     issuerURL: ""
     clientID: ""
     clientSecret: ""
+    # Use an existing K8s Secret for the OIDC client secret (avoids storing in Helm values).
+    # The Secret must contain a key matching clientSecretKey below.
+    existingSecret: ""
+    # Key within the existingSecret that holds the client secret value
+    clientSecretKey: "client-secret"
     redirectURL: ""
     groupsClaim: "groups"
     # URL to redirect after OIDC provider logout (must be registered with IdP)

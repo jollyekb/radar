@@ -52,9 +52,12 @@ func (c *Config) Defaults() {
 	if c.OIDCGroupsClaim == "" {
 		c.OIDCGroupsClaim = "groups"
 	}
-	// Fall back to env var for secret (used by Helm chart)
+	// Fall back to env vars for secrets (used by Helm chart)
 	if c.Secret == "" {
 		c.Secret = os.Getenv("RADAR_AUTH_SECRET")
+	}
+	if c.OIDCClientSecret == "" {
+		c.OIDCClientSecret = os.Getenv("RADAR_OIDC_CLIENT_SECRET")
 	}
 	// Auto-generate secret if still empty and auth is enabled
 	if c.Secret == "" && c.Enabled() {

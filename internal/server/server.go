@@ -101,7 +101,7 @@ func New(cfg Config) *Server {
 				log.Fatalf("[auth] --auth-oidc-client-id is required when auth-mode=oidc")
 			}
 			if s.authConfig.OIDCClientSecret == "" {
-				log.Fatalf("[auth] --auth-oidc-client-secret is required when auth-mode=oidc")
+				log.Fatalf("[auth] OIDC client secret is required when auth-mode=oidc (set --auth-oidc-client-secret flag or RADAR_OIDC_CLIENT_SECRET env var)")
 			}
 			if s.authConfig.OIDCRedirectURL == "" {
 				log.Fatalf("[auth] --auth-oidc-redirect-url is required when auth-mode=oidc")

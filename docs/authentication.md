@@ -93,21 +93,39 @@ Radar discovers the provider's `end_session_endpoint` automatically from the OID
 
 To redirect users back to Radar after IdP logout, set `--auth-oidc-post-logout-redirect-url` (or `auth.oidc.postLogoutRedirectURL` in Helm). This URL **must be registered** with your identity provider as a valid post-logout redirect URI.
 
-**Using a K8s Secret for the session signing key:**
+**Using K8s Secrets for sensitive values:**
 
-> `existingSecret` stores only the HMAC key used to sign session cookies — not OIDC client credentials. The OIDC client ID and secret are still passed as Helm values (visible in Helm release history). For production, consider injecting them via environment variables or a secrets manager.
+For production, use K8s Secrets instead of storing credentials in Helm values (which are visible in Helm release history):
 
 ```yaml
 auth:
   mode: oidc
+  # Session signing key from a K8s Secret
   existingSecret: radar-auth-secret        # K8s Secret containing the HMAC key
   existingSecretKey: auth-secret            # Key within the Secret (default)
   oidc:
     issuerURL: https://accounts.google.com
     clientID: your-client-id
-    clientSecret: your-client-secret
+    # OIDC client secret from a K8s Secret
+    existingSecret: radar-oidc-credentials  # K8s Secret containing the client secret
+    clientSecretKey: client-secret           # Key within the Secret (default)
     redirectURL: https://radar.example.com/auth/callback
 ```
+
+You can also mix approaches — use `existingSecret` for the client secret but pass `clientID` as a plain value (it's not sensitive).
+
+**TLS configuration for self-signed certificates:**
+
+If your OIDC provider uses a self-signed or internal CA certificate (e.g., on-prem Keycloak), use one of:
+
+```yaml
+auth:
+  oidc:
+    caCert: /etc/radar/oidc-ca.crt          # Path to CA certificate file (secure)
+    # insecureSkipVerify: true              # Skip TLS verification (dev/test only)
+```
+
+When using `caCert` in Kubernetes, mount the CA certificate into the pod via a ConfigMap or Secret volume.
 
 ## Setting Up User Permissions
 
@@ -316,9 +334,13 @@ Radar uses stateless HMAC-SHA256 signed cookies for sessions. The cookie contain
 | OIDC issuer | `--auth-oidc-issuer` | `auth.oidc.issuerURL` | — |
 | OIDC client ID | `--auth-oidc-client-id` | `auth.oidc.clientID` | — |
 | OIDC client secret | `--auth-oidc-client-secret` | `auth.oidc.clientSecret` | — |
+| OIDC client secret (K8s Secret) | — | `auth.oidc.existingSecret` | — |
+| OIDC client secret key | — | `auth.oidc.clientSecretKey` | `client-secret` |
 | OIDC redirect URL | `--auth-oidc-redirect-url` | `auth.oidc.redirectURL` | — |
 | OIDC groups claim | `--auth-oidc-groups-claim` | `auth.oidc.groupsClaim` | `groups` |
 | OIDC post-logout redirect | `--auth-oidc-post-logout-redirect-url` | `auth.oidc.postLogoutRedirectURL` | — |
+| OIDC CA certificate | `--auth-oidc-ca-cert` | `auth.oidc.caCert` | — |
+| OIDC skip TLS verify | `--auth-oidc-insecure-skip-verify` | `auth.oidc.insecureSkipVerify` | `false` |
 
 ## Troubleshooting
 
