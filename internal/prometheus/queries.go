@@ -108,11 +108,22 @@ func CategoriesForKind(kind string) []MetricCategory {
 // For Pods it uses exact name matching.
 // For Nodes it matches the node_exporter "instance" label.
 func BuildQuery(kind, namespace, name string, category MetricCategory) string {
+	return buildQueryInner(kind, namespace, name, category, true)
+}
+
+// BuildQueryNoContainerFilter builds the same query as BuildQuery but without
+// the container!='' filter. This is used as a fallback for clusters where cAdvisor
+// metrics lack the container label (e.g. cri-docker setups).
+func BuildQueryNoContainerFilter(kind, namespace, name string, category MetricCategory) string {
+	return buildQueryInner(kind, namespace, name, category, false)
+}
+
+func buildQueryInner(kind, namespace, name string, category MetricCategory, filterContainer bool) string {
 	switch strings.ToLower(kind) {
 	case "pod":
-		return buildPodQuery(namespace, name, category)
+		return buildPodQuery(namespace, name, category, filterContainer)
 	case "deployment", "statefulset", "daemonset", "replicaset", "job", "cronjob":
-		return buildWorkloadQuery(namespace, name, category)
+		return buildWorkloadQuery(namespace, name, category, filterContainer)
 	case "node":
 		return buildNodeQuery(name, category)
 	default:
@@ -122,12 +133,25 @@ func BuildQuery(kind, namespace, name string, category MetricCategory) string {
 
 // BuildNamespaceQuery builds a PromQL query for namespace-level aggregation.
 func BuildNamespaceQuery(namespace string, category MetricCategory) string {
+	return buildNamespaceQueryInner(namespace, category, true)
+}
+
+// BuildNamespaceQueryNoContainerFilter is the fallback variant without container!='' filter.
+func BuildNamespaceQueryNoContainerFilter(namespace string, category MetricCategory) string {
+	return buildNamespaceQueryInner(namespace, category, false)
+}
+
+func buildNamespaceQueryInner(namespace string, category MetricCategory, filterContainer bool) string {
 	ns := SanitizeLabelValue(namespace)
+	cf := ""
+	if filterContainer {
+		cf = "container!='',"
+	}
 	switch category {
 	case CategoryCPU:
-		return fmt.Sprintf(`sum(rate(container_cpu_usage_seconds_total{container!='',namespace='%s'}[5m]))`, ns)
+		return fmt.Sprintf(`sum(rate(container_cpu_usage_seconds_total{%snamespace='%s'}[5m]))`, cf, ns)
 	case CategoryMemory:
-		return fmt.Sprintf(`sum(container_memory_working_set_bytes{container!='',namespace='%s'})`, ns)
+		return fmt.Sprintf(`sum(container_memory_working_set_bytes{%snamespace='%s'})`, cf, ns)
 	case CategoryNetworkRX:
 		return fmt.Sprintf(`sum(rate(container_network_receive_bytes_total{namespace='%s'}[5m]))`, ns)
 	case CategoryNetworkTX:
@@ -139,11 +163,30 @@ func BuildNamespaceQuery(namespace string, category MetricCategory) string {
 
 // BuildClusterQuery builds a PromQL query for cluster-level aggregation.
 func BuildClusterQuery(category MetricCategory) string {
+	return buildClusterQueryInner(category, true)
+}
+
+// BuildClusterQueryNoContainerFilter is the fallback variant without container!='' filter.
+func BuildClusterQueryNoContainerFilter(category MetricCategory) string {
+	return buildClusterQueryInner(category, false)
+}
+
+func buildClusterQueryInner(category MetricCategory, filterContainer bool) string {
+	cf := ""
+	if filterContainer {
+		cf = "container!=''"
+	}
 	switch category {
 	case CategoryCPU:
-		return `sum(rate(container_cpu_usage_seconds_total{container!=''}[5m]))`
+		if cf != "" {
+			return fmt.Sprintf(`sum(rate(container_cpu_usage_seconds_total{%s}[5m]))`, cf)
+		}
+		return `sum(rate(container_cpu_usage_seconds_total[5m]))`
 	case CategoryMemory:
-		return `sum(container_memory_working_set_bytes{container!=''})`
+		if cf != "" {
+			return fmt.Sprintf(`sum(container_memory_working_set_bytes{%s})`, cf)
+		}
+		return `sum(container_memory_working_set_bytes)`
 	case CategoryNetworkRX:
 		return `sum(rate(container_network_receive_bytes_total[5m]))`
 	case CategoryNetworkTX:
@@ -153,19 +196,29 @@ func BuildClusterQuery(category MetricCategory) string {
 	}
 }
 
-func buildPodQuery(namespace, podName string, category MetricCategory) string {
+// categoryUsesContainerFilter returns true if the category's queries include
+// the container!='' filter that may need fallback on cri-docker clusters.
+func categoryUsesContainerFilter(category MetricCategory) bool {
+	return category == CategoryCPU || category == CategoryMemory
+}
+
+func buildPodQuery(namespace, podName string, category MetricCategory, filterContainer bool) string {
 	ns := SanitizeLabelValue(namespace)
 	pod := SanitizeLabelValue(podName)
+	cf := ""
+	if filterContainer {
+		cf = "container!='',"
+	}
 
 	switch category {
 	case CategoryCPU:
 		return fmt.Sprintf(
-			`sum(rate(container_cpu_usage_seconds_total{container!='',namespace='%s',pod='%s'}[5m])) by (pod,namespace)`,
-			ns, pod)
+			`sum(rate(container_cpu_usage_seconds_total{%snamespace='%s',pod='%s'}[5m])) by (pod,namespace)`,
+			cf, ns, pod)
 	case CategoryMemory:
 		return fmt.Sprintf(
-			`sum(container_memory_working_set_bytes{container!='',namespace='%s',pod='%s'}) by (pod,namespace)`,
-			ns, pod)
+			`sum(container_memory_working_set_bytes{%snamespace='%s',pod='%s'}) by (pod,namespace)`,
+			cf, ns, pod)
 	case CategoryNetworkRX:
 		return fmt.Sprintf(
 			`sum(rate(container_network_receive_bytes_total{namespace='%s',pod='%s'}[5m])) by (pod,namespace)`,
@@ -183,20 +236,24 @@ func buildPodQuery(namespace, podName string, category MetricCategory) string {
 	}
 }
 
-func buildWorkloadQuery(namespace, workloadName string, category MetricCategory) string {
+func buildWorkloadQuery(namespace, workloadName string, category MetricCategory, filterContainer bool) string {
 	ns := SanitizeLabelValue(namespace)
 	// Sanitize then escape regex metacharacters so e.g. "my.app" matches literally
 	podPattern := fmt.Sprintf("%s-.*", escapeRegexMeta(SanitizeLabelValue(workloadName)))
+	cf := ""
+	if filterContainer {
+		cf = "container!='',"
+	}
 
 	switch category {
 	case CategoryCPU:
 		return fmt.Sprintf(
-			`sum(rate(container_cpu_usage_seconds_total{container!='',namespace='%s',pod=~'%s'}[5m])) by (pod,namespace)`,
-			ns, podPattern)
+			`sum(rate(container_cpu_usage_seconds_total{%snamespace='%s',pod=~'%s'}[5m])) by (pod,namespace)`,
+			cf, ns, podPattern)
 	case CategoryMemory:
 		return fmt.Sprintf(
-			`sum(container_memory_working_set_bytes{container!='',namespace='%s',pod=~'%s'}) by (pod,namespace)`,
-			ns, podPattern)
+			`sum(container_memory_working_set_bytes{%snamespace='%s',pod=~'%s'}) by (pod,namespace)`,
+			cf, ns, podPattern)
 	case CategoryNetworkRX:
 		return fmt.Sprintf(
 			`sum(rate(container_network_receive_bytes_total{namespace='%s',pod=~'%s'}[5m])) by (pod,namespace)`,

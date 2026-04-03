@@ -203,6 +203,21 @@ func handleResourceMetrics(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Fallback: if the primary query returned no data and this category uses
+	// container!='' filtering, retry without it. This handles cri-docker and
+	// other setups where cAdvisor metrics lack the container label entirely.
+	if len(result.Series) == 0 && categoryUsesContainerFilter(category) {
+		fallbackQuery := BuildQueryNoContainerFilter(kind, namespace, name, category)
+		if fallbackQuery != "" && fallbackQuery != query {
+			fallbackResult, fallbackErr := client.QueryRange(r.Context(), fallbackQuery, start, end, step)
+			if fallbackErr == nil && len(fallbackResult.Series) > 0 {
+				log.Printf("[prometheus] Primary query empty for %s/%s/%s (%s), fallback without container filter succeeded", kind, namespace, name, category)
+				result = fallbackResult
+				query = fallbackQuery
+			}
+		}
+	}
+
 	resp := ResourceMetricsResponse{
 		Kind:      kind,
 		Namespace: namespace,
@@ -332,6 +347,17 @@ func handleNamespaceMetrics(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if len(result.Series) == 0 && categoryUsesContainerFilter(category) {
+		fallbackQuery := BuildNamespaceQueryNoContainerFilter(namespace, category)
+		if fallbackQuery != "" && fallbackQuery != query {
+			fallbackResult, fallbackErr := client.QueryRange(r.Context(), fallbackQuery, start, end, step)
+			if fallbackErr == nil && len(fallbackResult.Series) > 0 {
+				log.Printf("[prometheus] Namespace query empty for %s (%s), fallback without container filter succeeded", namespace, category)
+				result = fallbackResult
+			}
+		}
+	}
+
 	writeJSON(w, http.StatusOK, NamespaceMetricsResponse{
 		Namespace: namespace,
 		Category:  category,
@@ -377,6 +403,17 @@ func handleClusterMetrics(w http.ResponseWriter, r *http.Request) {
 		errorlog.Record("prometheus", "error", "cluster query failed (%s): %v", category, err)
 		writeError(w, http.StatusBadGateway, "Prometheus query failed: "+err.Error())
 		return
+	}
+
+	if len(result.Series) == 0 && categoryUsesContainerFilter(category) {
+		fallbackQuery := BuildClusterQueryNoContainerFilter(category)
+		if fallbackQuery != "" && fallbackQuery != query {
+			fallbackResult, fallbackErr := client.QueryRange(r.Context(), fallbackQuery, start, end, step)
+			if fallbackErr == nil && len(fallbackResult.Series) > 0 {
+				log.Printf("[prometheus] Cluster query empty (%s), fallback without container filter succeeded", category)
+				result = fallbackResult
+			}
+		}
 	}
 
 	writeJSON(w, http.StatusOK, ClusterMetricsResponse{
