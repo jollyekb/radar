@@ -151,6 +151,13 @@ func (rc *ResourceCache) PodDisruptionBudgets() listerspolicyv1.PodDisruptionBud
 	return rc.factory.Policy().V1().PodDisruptionBudgets().Lister()
 }
 
+func (rc *ResourceCache) NetworkPolicies() listersnetworkingv1.NetworkPolicyLister {
+	if rc == nil || !rc.isReady(NetworkPolicies) {
+		return nil
+	}
+	return rc.factory.Networking().V1().NetworkPolicies().Lister()
+}
+
 func (rc *ResourceCache) ServiceAccounts() listerscorev1.ServiceAccountLister {
 	if rc == nil || !rc.isEnabled(ServiceAccounts) {
 		return nil
@@ -238,6 +245,9 @@ func listCountInNamespace(lister any, ns string) int {
 	case listerspolicyv1.PodDisruptionBudgetLister:
 		items, _ := l.PodDisruptionBudgets(ns).List(labels.Everything())
 		return len(items)
+	case listersnetworkingv1.NetworkPolicyLister:
+		items, _ := l.NetworkPolicies(ns).List(labels.Everything())
+		return len(items)
 	}
 	return 0
 }
@@ -314,6 +324,9 @@ func listCount(lister any) int {
 		items, _ := l.List(labels.Everything())
 		return len(items)
 	case listerspolicyv1.PodDisruptionBudgetLister:
+		items, _ := l.List(labels.Everything())
+		return len(items)
+	case listersnetworkingv1.NetworkPolicyLister:
 		items, _ := l.List(labels.Everything())
 		return len(items)
 	}

@@ -73,7 +73,7 @@ const LARGE_CLUSTER_NS_THRESHOLD = 5
 
 // Build edges, handling collapsed groups
 function buildEdges(
-  topologyEdges: { id: string; source: string; target: string; type: string }[],
+  topologyEdges: TopologyEdge[],
   collapsedGroups: Set<string>,
   groupMap: Map<string, string[]>,
   groupingMode: GroupingMode,

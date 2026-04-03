@@ -650,6 +650,9 @@ func (s *Server) handleTopology(w http.ResponseWriter, r *http.Request) {
 	if viewMode == "traffic" {
 		opts.ViewMode = topology.ViewModeTraffic
 	}
+	if r.URL.Query().Get("policyEffect") == "true" {
+		opts.ShowPolicyEffect = true
+	}
 
 	builder := topology.NewBuilder(k8s.NewTopologyResourceProvider(k8s.GetResourceCache())).WithDynamic(k8s.NewTopologyDynamicProvider(k8s.GetDynamicResourceCache(), k8s.GetResourceDiscovery()))
 	topo, err := builder.Build(opts)
@@ -980,6 +983,17 @@ func (s *Server) handleListResources(w http.ResponseWriter, r *http.Request) {
 				return cache.PodDisruptionBudgets().PodDisruptionBudgets(ns).List(labels.Everything())
 			},
 		)
+	case "networkpolicies", "netpol":
+		if cache.NetworkPolicies() == nil {
+			forbiddenMsg("networkpolicies")
+			return
+		}
+		result, err = listPerNs(
+			func() (any, error) { return cache.NetworkPolicies().List(labels.Everything()) },
+			func(ns string) (any, error) {
+				return cache.NetworkPolicies().NetworkPolicies(ns).List(labels.Everything())
+			},
+		)
 	default:
 		// Fall back to dynamic cache for CRDs and other unknown resources
 		if len(namespaces) > 0 {
@@ -1222,6 +1236,12 @@ func (s *Server) handleGetResource(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		resource, err = cache.PodDisruptionBudgets().PodDisruptionBudgets(namespace).Get(name)
+	case "networkpolicies", "networkpolicy", "netpol":
+		if cache.NetworkPolicies() == nil {
+			forbiddenGet("networkpolicies")
+			return
+		}
+		resource, err = cache.NetworkPolicies().NetworkPolicies(namespace).Get(name)
 	default:
 		// Fall back to dynamic cache for CRDs and other unknown resources
 		// Use group to disambiguate when multiple API groups have similar resource names

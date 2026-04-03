@@ -44,14 +44,16 @@ type SSEBroadcaster struct {
 
 // ClientInfo stores information about a connected client
 type ClientInfo struct {
-	Namespaces []string // Filter to specific namespaces (empty = all)
-	ViewMode   string   // "full" or "traffic"
+	Namespaces       []string // Filter to specific namespaces (empty = all)
+	ViewMode         string   // "full" or "traffic"
+	ShowPolicyEffect bool     // Evaluate NetworkPolicies on edges
 }
 
 type clientRegistration struct {
-	ch         chan SSEEvent
-	namespaces []string
-	viewMode   string
+	ch               chan SSEEvent
+	namespaces       []string
+	viewMode         string
+	showPolicyEffect bool
 }
 
 // SSEEvent represents an event to send to clients
@@ -311,7 +313,7 @@ func (b *SSEBroadcaster) run() {
 				close(reg.ch) // Signal rejection by closing the channel
 				continue
 			}
-			b.clients[reg.ch] = ClientInfo{Namespaces: reg.namespaces, ViewMode: reg.viewMode}
+			b.clients[reg.ch] = ClientInfo{Namespaces: reg.namespaces, ViewMode: reg.viewMode, ShowPolicyEffect: reg.showPolicyEffect}
 			b.mu.Unlock()
 			log.Printf("SSE client connected (namespaces=%v, view=%s), total clients: %d", reg.namespaces, reg.viewMode, len(b.clients))
 
@@ -526,19 +528,21 @@ func (b *SSEBroadcaster) broadcastTopologyUpdate() {
 	// Use comma-separated namespaces string as map key since slices aren't comparable
 	// Note: namespaces are pre-sorted at subscription time for consistent grouping
 	type clientKey struct {
-		namespacesKey string // comma-separated sorted namespaces
-		viewMode      string
+		namespacesKey    string // comma-separated sorted namespaces
+		viewMode         string
+		showPolicyEffect bool
 	}
 	type clientGroup struct {
-		namespaces []string
-		channels   []chan SSEEvent
+		namespaces       []string
+		showPolicyEffect bool
+		channels         []chan SSEEvent
 	}
 	clientGroups := make(map[clientKey]*clientGroup)
 	for ch, info := range clients {
 		nsKey := strings.Join(info.Namespaces, ",") // namespaces already sorted at subscribe time
-		key := clientKey{namespacesKey: nsKey, viewMode: info.ViewMode}
+		key := clientKey{namespacesKey: nsKey, viewMode: info.ViewMode, showPolicyEffect: info.ShowPolicyEffect}
 		if clientGroups[key] == nil {
-			clientGroups[key] = &clientGroup{namespaces: info.Namespaces}
+			clientGroups[key] = &clientGroup{namespaces: info.Namespaces, showPolicyEffect: info.ShowPolicyEffect}
 		}
 		clientGroups[key].channels = append(clientGroups[key].channels, ch)
 	}
@@ -550,6 +554,7 @@ func (b *SSEBroadcaster) broadcastTopologyUpdate() {
 		if key.viewMode == "traffic" {
 			opts.ViewMode = topology.ViewModeTraffic
 		}
+		opts.ShowPolicyEffect = group.showPolicyEffect
 
 		topo, err := builder.Build(opts)
 		if err != nil {
@@ -599,7 +604,7 @@ func (b *SSEBroadcaster) Broadcast(event SSEEvent) {
 }
 
 // Subscribe adds a new SSE client. Returns nil if max clients reached.
-func (b *SSEBroadcaster) Subscribe(namespaces []string, viewMode string) chan SSEEvent {
+func (b *SSEBroadcaster) Subscribe(namespaces []string, viewMode string, showPolicyEffect ...bool) chan SSEEvent {
 	// Check client count before creating the channel to fail fast
 	b.mu.RLock()
 	clientCount := len(b.clients)
@@ -619,8 +624,9 @@ func (b *SSEBroadcaster) Subscribe(namespaces []string, viewMode string) chan SS
 		sort.Strings(sortedNs)
 	}
 
+	policyEffect := len(showPolicyEffect) > 0 && showPolicyEffect[0]
 	ch := make(chan SSEEvent, 10)
-	b.register <- clientRegistration{ch: ch, namespaces: sortedNs, viewMode: viewMode}
+	b.register <- clientRegistration{ch: ch, namespaces: sortedNs, viewMode: viewMode, showPolicyEffect: policyEffect}
 	return ch
 }
 
@@ -719,6 +725,7 @@ func (b *SSEBroadcaster) HandleSSE(w http.ResponseWriter, r *http.Request) {
 	if viewMode == "" {
 		viewMode = "full"
 	}
+	policyEffect := r.URL.Query().Get("policyEffect") == "true"
 
 	// Ensure we can flush
 	flusher, ok := w.(http.Flusher)
@@ -728,7 +735,7 @@ func (b *SSEBroadcaster) HandleSSE(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Subscribe to events
-	eventCh := b.Subscribe(namespaces, viewMode)
+	eventCh := b.Subscribe(namespaces, viewMode, policyEffect)
 	if eventCh == nil {
 		http.Error(w, "Too many SSE connections", http.StatusServiceUnavailable)
 		return
@@ -758,6 +765,7 @@ func (b *SSEBroadcaster) HandleSSE(w http.ResponseWriter, r *http.Request) {
 		if viewMode == "traffic" {
 			opts.ViewMode = topology.ViewModeTraffic
 		}
+		opts.ShowPolicyEffect = policyEffect
 		if topo, err := builder.Build(opts); err == nil {
 			data, marshalErr := json.Marshal(topo)
 			if marshalErr != nil {

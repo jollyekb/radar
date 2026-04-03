@@ -1,4 +1,4 @@
-import { FolderTree } from 'lucide-react'
+import { FolderTree, ShieldCheck } from 'lucide-react'
 import type { TopologyMode, GroupingMode } from '../../types/core'
 
 interface TopologyControlsProps {
@@ -7,6 +7,8 @@ interface TopologyControlsProps {
   groupingMode: GroupingMode
   onGroupingModeChange: (mode: GroupingMode) => void
   showNoGrouping?: boolean
+  showPolicyEffect?: boolean
+  onShowPolicyEffectChange?: (show: boolean) => void
 }
 
 export function TopologyControls({
@@ -15,9 +17,27 @@ export function TopologyControls({
   groupingMode,
   onGroupingModeChange,
   showNoGrouping = true,
+  showPolicyEffect = false,
+  onShowPolicyEffectChange,
 }: TopologyControlsProps) {
   return (
     <div className="absolute top-4 right-4 z-10 flex items-center gap-2">
+      {/* Policy effect toggle */}
+      {onShowPolicyEffectChange && (
+        <button
+          onClick={() => onShowPolicyEffectChange(!showPolicyEffect)}
+          className={`flex items-center gap-1.5 px-2.5 py-1.5 text-xs rounded-lg border transition-colors ${
+            showPolicyEffect
+              ? 'bg-indigo-600 text-white border-indigo-600'
+              : 'bg-theme-surface/90 backdrop-blur text-theme-text-secondary border-theme-border hover:text-theme-text-primary'
+          }`}
+          title="Show NetworkPolicy effects on edges"
+        >
+          <ShieldCheck className="w-3.5 h-3.5" />
+          Policies
+        </button>
+      )}
+
       {/* Grouping selector */}
       <div className="flex items-center gap-1.5 px-2 py-1.5 bg-theme-surface/90 backdrop-blur border border-theme-border rounded-lg">
         <FolderTree className="w-3.5 h-3.5 text-theme-text-secondary" />

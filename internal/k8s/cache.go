@@ -58,6 +58,7 @@ var deferredResources = map[string]bool{
 	"persistentvolumes":        true,
 	"storageclasses":           true,
 	"poddisruptionbudgets":     true,
+	"networkpolicies":          true,
 	"replicasets":              true, // topology-only (Deployment→RS→Pod); can be very large
 	"horizontalpodautoscalers": true, // problems detection, not critical for first render
 }
@@ -123,6 +124,7 @@ func InitResourceCache(ctx context.Context) error {
 			"persistentvolumes":        perms.PersistentVolumes,
 			"storageclasses":           perms.StorageClasses,
 			"poddisruptionbudgets":     perms.PodDisruptionBudgets,
+			"networkpolicies":          perms.NetworkPolicies,
 		}
 
 		cfg := k8score.CacheConfig{
@@ -577,6 +579,7 @@ var knownKinds = map[string]bool{
 	"persistentvolume": true, "persistentvolumes": true, "pv": true, "pvs": true,
 	"storageclass": true, "storageclasses": true, "sc": true,
 	"poddisruptionbudget": true, "poddisruptionbudgets": true, "pdb": true, "pdbs": true,
+	"networkpolicy": true, "networkpolicies": true, "netpol": true,
 }
 
 // IsKnownKind returns true if the kind is handled by the typed cache
@@ -988,6 +991,18 @@ func (c *ResourceCache) GetResourceStatus(kind, namespace, name string) *Resourc
 		return &ResourceStatus{
 			Status: "Active",
 			Ready:  fmt.Sprintf("%d/%d", pdb.Status.CurrentHealthy, pdb.Status.DesiredHealthy),
+		}
+
+	case "networkpolicy", "networkpolicies", "netpol":
+		if c.NetworkPolicies() == nil {
+			return nil
+		}
+		_, err := c.NetworkPolicies().NetworkPolicies(namespace).Get(name)
+		if err != nil {
+			return nil
+		}
+		return &ResourceStatus{
+			Status: "Active",
 		}
 
 	default:

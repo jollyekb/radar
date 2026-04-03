@@ -151,6 +151,14 @@ func (a *topologyResourceProvider) PodDisruptionBudgets() ([]*policyv1.PodDisrup
 	return lister.List(labels.Everything())
 }
 
+func (a *topologyResourceProvider) NetworkPolicies() ([]*networkingv1.NetworkPolicy, error) {
+	lister := a.cache.NetworkPolicies()
+	if lister == nil {
+		return nil, fmt.Errorf("networkpolicies not available (RBAC not granted)")
+	}
+	return lister.List(labels.Everything())
+}
+
 func (a *topologyResourceProvider) Nodes() ([]*corev1.Node, error) {
 	lister := a.cache.Nodes()
 	if lister == nil {

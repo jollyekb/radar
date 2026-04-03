@@ -302,6 +302,7 @@ export const K8sResourceNode = memo(function K8sResourceNode({
   const canCollapse = isPodGroup && onCollapse && isExpanded
   const statusIssue = nodeData.statusIssue as string | undefined
   const issueTooltip = getIssueTooltip(statusIssue)
+  const policyStatus = nodeData.policyStatus as string | undefined
 
   // CSS class for icon (replaces Lucide SVG - saves ~5 DOM elements per node)
   const iconClass = `topology-icon topology-icon-${kind.toLowerCase()}`
@@ -416,6 +417,20 @@ export const K8sResourceNode = memo(function K8sResourceNode({
               />
             )}
           </div>
+
+          {/* Network Policy coverage indicator */}
+          {policyStatus && (
+            <Tooltip content={policyStatus === 'protected' ? 'Protected by NetworkPolicy' : 'No NetworkPolicy coverage'} position="right">
+              <span className={clsx(
+                'inline-flex items-center justify-center w-3.5 h-3.5 rounded-sm text-[8px] font-bold cursor-help',
+                policyStatus === 'protected'
+                  ? 'bg-green-500/20 text-green-500 border border-green-500/30'
+                  : 'bg-yellow-500/20 text-yellow-500 border border-yellow-500/30',
+              )}>
+                {policyStatus === 'protected' ? '✓' : '!'}
+              </span>
+            </Tooltip>
+          )}
 
           {/* Name */}
           <div className="text-sm font-medium text-theme-text-primary truncate pr-1">

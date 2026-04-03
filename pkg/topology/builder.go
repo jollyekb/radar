@@ -2887,7 +2887,235 @@ func (b *Builder) buildResourcesTopology(opts BuildOptions) (*Topology, error) {
 		}
 	}
 
-	// 11c. Add VPA nodes (CRD - fetched via dynamic cache)
+	// 11c. Add NetworkPolicy nodes
+	netpols, npErr := b.provider.NetworkPolicies()
+	if npErr != nil {
+		log.Printf("WARNING [topology] Failed to list NetworkPolicies: %v", npErr)
+		warnings = append(warnings, fmt.Sprintf("Failed to list NetworkPolicies: %v", npErr))
+	}
+	for _, np := range netpols {
+		if !opts.MatchesNamespaceFilter(np.Namespace) {
+			continue
+		}
+
+		npID := fmt.Sprintf("networkpolicy/%s/%s", np.Namespace, np.Name)
+
+		policyTypes := make([]string, 0, 2)
+		for _, pt := range np.Spec.PolicyTypes {
+			policyTypes = append(policyTypes, string(pt))
+		}
+
+		nodeData := map[string]any{
+			"namespace":   np.Namespace,
+			"policyTypes": policyTypes,
+			"labels":      np.Labels,
+		}
+
+		nodes = append(nodes, Node{
+			ID:     npID,
+			Kind:   KindNetworkPolicy,
+			Name:   np.Name,
+			Status: StatusHealthy,
+			Data:   nodeData,
+		})
+
+		// Connect to target workloads by matching policy's podSelector against workload pod template labels.
+		// Empty selector (matches all pods) skips edges to avoid topology clutter from default-deny policies.
+		if np.Spec.PodSelector.Size() == 0 {
+			nodeData["matchesAllPods"] = true
+			continue
+		}
+
+		sel, selErr := metav1.LabelSelectorAsSelector(&np.Spec.PodSelector)
+		if selErr != nil {
+			continue
+		}
+
+		for _, d := range deployments {
+			if d.Namespace != np.Namespace {
+				continue
+			}
+			if sel.Matches(labels.Set(d.Spec.Template.Labels)) {
+				if targetID := deploymentIDs[d.Namespace+"/"+d.Name]; targetID != "" {
+					edges = append(edges, Edge{
+						ID:     fmt.Sprintf("%s-to-%s", npID, targetID),
+						Source: npID,
+						Target: targetID,
+						Type:   EdgeProtects,
+					})
+				}
+			}
+		}
+		for _, s := range statefulsets {
+			if s.Namespace != np.Namespace {
+				continue
+			}
+			if sel.Matches(labels.Set(s.Spec.Template.Labels)) {
+				if targetID := statefulSetIDs[s.Namespace+"/"+s.Name]; targetID != "" {
+					edges = append(edges, Edge{
+						ID:     fmt.Sprintf("%s-to-%s", npID, targetID),
+						Source: npID,
+						Target: targetID,
+						Type:   EdgeProtects,
+					})
+				}
+			}
+		}
+		for _, d := range daemonsets {
+			if d.Namespace != np.Namespace {
+				continue
+			}
+			if sel.Matches(labels.Set(d.Spec.Template.Labels)) {
+				dsID := fmt.Sprintf("daemonset/%s/%s", d.Namespace, d.Name)
+				edges = append(edges, Edge{
+					ID:     fmt.Sprintf("%s-to-%s", npID, dsID),
+					Source: npID,
+					Target: dsID,
+					Type:   EdgeProtects,
+				})
+			}
+		}
+	}
+
+	// 11d. Add CiliumNetworkPolicy nodes (CRD - fetched via dynamic cache)
+	var cnpGVR schema.GroupVersionResource
+	hasCNPs := false
+	if resourceDiscovery != nil {
+		cnpGVR, hasCNPs = resourceDiscovery.GetGVR("CiliumNetworkPolicy")
+	}
+	if hasCNPs && dynamicCache != nil {
+		cnps, cnpErr := dynamicCache.List(cnpGVR, opts.NamespaceFilter())
+		if cnpErr != nil {
+			log.Printf("WARNING [topology] Failed to list CiliumNetworkPolicies: %v", cnpErr)
+			warnings = append(warnings, fmt.Sprintf("Failed to list CiliumNetworkPolicies: %v", cnpErr))
+		}
+		for _, cnp := range cnps {
+			ns := cnp.GetNamespace()
+			if !opts.MatchesNamespaceFilter(ns) {
+				continue
+			}
+			name := cnp.GetName()
+			cnpID := fmt.Sprintf("ciliumnetworkpolicy/%s/%s", ns, name)
+
+			nodeData := map[string]any{
+				"namespace": ns,
+				"labels":    cnp.GetLabels(),
+			}
+
+			nodes = append(nodes, Node{
+				ID:     cnpID,
+				Kind:   KindCiliumNetworkPolicy,
+				Name:   name,
+				Status: StatusHealthy,
+				Data:   nodeData,
+			})
+
+			// Connect via endpointSelector (equivalent to podSelector)
+			selectorMap, _, _ := unstructured.NestedMap(cnp.Object, "spec", "endpointSelector", "matchLabels")
+			if len(selectorMap) == 0 {
+				nodeData["matchesAllPods"] = true
+				continue
+			}
+
+			for _, d := range deployments {
+				if d.Namespace != ns {
+					continue
+				}
+				if matchesStringMap(d.Spec.Template.Labels, selectorMap) {
+					if targetID := deploymentIDs[d.Namespace+"/"+d.Name]; targetID != "" {
+						edges = append(edges, Edge{
+							ID: fmt.Sprintf("%s-to-%s", cnpID, targetID), Source: cnpID, Target: targetID, Type: EdgeProtects,
+						})
+					}
+				}
+			}
+			for _, s := range statefulsets {
+				if s.Namespace != ns {
+					continue
+				}
+				if matchesStringMap(s.Spec.Template.Labels, selectorMap) {
+					if targetID := statefulSetIDs[s.Namespace+"/"+s.Name]; targetID != "" {
+						edges = append(edges, Edge{
+							ID: fmt.Sprintf("%s-to-%s", cnpID, targetID), Source: cnpID, Target: targetID, Type: EdgeProtects,
+						})
+					}
+				}
+			}
+			for _, d := range daemonsets {
+				if d.Namespace != ns {
+					continue
+				}
+				if matchesStringMap(d.Spec.Template.Labels, selectorMap) {
+					dsID := fmt.Sprintf("daemonset/%s/%s", d.Namespace, d.Name)
+					edges = append(edges, Edge{
+						ID: fmt.Sprintf("%s-to-%s", cnpID, dsID), Source: cnpID, Target: dsID, Type: EdgeProtects,
+					})
+				}
+			}
+		}
+	}
+
+	// 11e. Add CiliumClusterwideNetworkPolicy nodes (CRD - cluster-scoped)
+	var ccnpGVR schema.GroupVersionResource
+	hasCCNPs := false
+	if resourceDiscovery != nil {
+		ccnpGVR, hasCCNPs = resourceDiscovery.GetGVR("CiliumClusterwideNetworkPolicy")
+	}
+	if hasCCNPs && dynamicCache != nil {
+		ccnps, ccnpErr := dynamicCache.List(ccnpGVR, "")
+		if ccnpErr != nil {
+			log.Printf("WARNING [topology] Failed to list CiliumClusterwideNetworkPolicies: %v", ccnpErr)
+			warnings = append(warnings, fmt.Sprintf("Failed to list CiliumClusterwideNetworkPolicies: %v", ccnpErr))
+		}
+		for _, ccnp := range ccnps {
+			name := ccnp.GetName()
+			ccnpID := fmt.Sprintf("ciliumclusterwidenetworkpolicy/%s", name)
+
+			nodes = append(nodes, Node{
+				ID:     ccnpID,
+				Kind:   KindCiliumClusterwideNetworkPolicy,
+				Name:   name,
+				Status: StatusHealthy,
+				Data: map[string]any{
+					"labels": ccnp.GetLabels(),
+				},
+			})
+			// Cluster-wide policies use endpointSelector or nodeSelector across all namespaces.
+			// Edges are complex (cross-namespace matching) — skip for now, node presence is the value.
+		}
+	}
+
+	// 11f. Add ClusterNetworkPolicy nodes (CRD - cluster-scoped, policy.networking.k8s.io)
+	var cnpolicyGVR schema.GroupVersionResource
+	hasCNPolicies := false
+	if resourceDiscovery != nil {
+		cnpolicyGVR, hasCNPolicies = resourceDiscovery.GetGVRWithGroup("ClusterNetworkPolicy", "policy.networking.k8s.io")
+	}
+	if hasCNPolicies && dynamicCache != nil {
+		cnpolicies, cnpErr := dynamicCache.List(cnpolicyGVR, "")
+		if cnpErr != nil {
+			log.Printf("WARNING [topology] Failed to list ClusterNetworkPolicies: %v", cnpErr)
+			warnings = append(warnings, fmt.Sprintf("Failed to list ClusterNetworkPolicies: %v", cnpErr))
+		}
+		for _, cnp := range cnpolicies {
+			name := cnp.GetName()
+			cnpID := fmt.Sprintf("clusternetworkpolicy/%s", name)
+
+			nodes = append(nodes, Node{
+				ID:     cnpID,
+				Kind:   KindClusterNetworkPolicy,
+				Name:   name,
+				Status: StatusHealthy,
+				Data: map[string]any{
+					"labels": cnp.GetLabels(),
+				},
+			})
+			// ClusterNetworkPolicy uses spec.subject with namespace/pod selectors.
+			// Cross-namespace matching is complex — skip edges for now, node presence is the value.
+		}
+	}
+
+	// 11g. Add VPA nodes (CRD - fetched via dynamic cache)
 	var vpaGVR schema.GroupVersionResource
 	hasVPAs := false
 	if resourceDiscovery != nil {
@@ -4468,6 +4696,11 @@ func (b *Builder) buildResourcesTopology(opts BuildOptions) (*Topology, error) {
 	// Only includes CRDs already being watched and with owner refs to existing nodes
 	if opts.IncludeGenericCRDs {
 		nodes, edges = b.addGenericCRDNodes(nodes, edges, opts)
+	}
+
+	// 17. Annotate workload nodes with NetworkPolicy coverage (optional)
+	if opts.ShowPolicyEffect {
+		annotateNodePolicyCoverage(nodes, netpols, deployments, statefulsets, daemonsets)
 	}
 
 	topo := &Topology{Nodes: nodes, Edges: edges, Warnings: warnings}
@@ -6886,6 +7119,70 @@ func (b *Builder) addGenericCRDNodes(nodes []Node, edges []Edge, opts BuildOptio
 	}
 
 	return nodes, edges
+}
+
+// annotateNodePolicyCoverage adds "policyStatus" to workload node Data
+// indicating whether the workload is selected by at least one NetworkPolicy.
+// Values: "protected" (has a selecting policy) or "unprotected" (no policy).
+func annotateNodePolicyCoverage(
+	nodes []Node,
+	netpols []*networkingv1.NetworkPolicy,
+	deployments []*appsv1.Deployment,
+	statefulsets []*appsv1.StatefulSet,
+	daemonsets []*appsv1.DaemonSet,
+) {
+	// Build set of covered workload node IDs
+	coveredWorkloads := make(map[string]bool)
+
+	for _, np := range netpols {
+		sel, err := metav1.LabelSelectorAsSelector(&np.Spec.PodSelector)
+		if err != nil {
+			continue
+		}
+		for _, d := range deployments {
+			if d.Namespace == np.Namespace && sel.Matches(labels.Set(d.Spec.Template.Labels)) {
+				coveredWorkloads[fmt.Sprintf("deployment/%s/%s", d.Namespace, d.Name)] = true
+			}
+		}
+		for _, s := range statefulsets {
+			if s.Namespace == np.Namespace && sel.Matches(labels.Set(s.Spec.Template.Labels)) {
+				coveredWorkloads[fmt.Sprintf("statefulset/%s/%s", s.Namespace, s.Name)] = true
+			}
+		}
+		for _, d := range daemonsets {
+			if d.Namespace == np.Namespace && sel.Matches(labels.Set(d.Spec.Template.Labels)) {
+				coveredWorkloads[fmt.Sprintf("daemonset/%s/%s", d.Namespace, d.Name)] = true
+			}
+		}
+	}
+
+	// Annotate workload nodes
+	for i := range nodes {
+		n := &nodes[i]
+		switch n.Kind {
+		case KindDeployment, KindStatefulSet, KindDaemonSet:
+			if coveredWorkloads[n.ID] {
+				n.Data["policyStatus"] = "protected"
+			} else {
+				n.Data["policyStatus"] = "unprotected"
+			}
+		}
+	}
+}
+
+// matchesStringMap checks if all key-value pairs in selector exist in labels.
+// Used for CRD endpointSelector matching where the selector comes from unstructured data.
+func matchesStringMap(labels map[string]string, selector map[string]any) bool {
+	for k, v := range selector {
+		sv, ok := v.(string)
+		if !ok {
+			return false // non-string selector value cannot match string labels
+		}
+		if labels[k] != sv {
+			return false
+		}
+	}
+	return true
 }
 
 // Unused but needed for imports

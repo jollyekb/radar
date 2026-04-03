@@ -30,8 +30,9 @@ type mockProvider struct {
 	pvcs         []*corev1.PersistentVolumeClaim
 	pvs          []*corev1.PersistentVolume
 	hpas         []*autoscalingv2.HorizontalPodAutoscaler
-	pdbs         []*policyv1.PodDisruptionBudget
-	nodes        []*corev1.Node
+	pdbs             []*policyv1.PodDisruptionBudget
+	networkPolicies  []*networkingv1.NetworkPolicy
+	nodes            []*corev1.Node
 }
 
 func (m *mockProvider) Pods() ([]*corev1.Pod, error)                   { return m.pods, nil }
@@ -54,6 +55,9 @@ func (m *mockProvider) HorizontalPodAutoscalers() ([]*autoscalingv2.HorizontalPo
 }
 func (m *mockProvider) PodDisruptionBudgets() ([]*policyv1.PodDisruptionBudget, error) {
 	return m.pdbs, nil
+}
+func (m *mockProvider) NetworkPolicies() ([]*networkingv1.NetworkPolicy, error) {
+	return m.networkPolicies, nil
 }
 func (m *mockProvider) Nodes() ([]*corev1.Node, error) { return m.nodes, nil }
 func (m *mockProvider) GetResourceStatus(kind, namespace, name string) *ResourceStatus {
@@ -346,5 +350,245 @@ func TestNamespaceFilterReducesEstimate(t *testing.T) {
 	isLarge, _ = b.detectLargeClusterAndOptimize(&filteredOpts)
 	if isLarge {
 		t.Error("single namespace (100 deployments) should NOT be detected as large")
+	}
+}
+
+func TestNetworkPolicyTopologyNodes(t *testing.T) {
+	provider := &mockProvider{
+		deployments: []*appsv1.Deployment{
+			{
+				ObjectMeta: metav1.ObjectMeta{Name: "frontend", Namespace: "demo"},
+				Spec: appsv1.DeploymentSpec{
+					Template: corev1.PodTemplateSpec{
+						ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": "frontend"}},
+					},
+				},
+			},
+			{
+				ObjectMeta: metav1.ObjectMeta{Name: "backend", Namespace: "demo"},
+				Spec: appsv1.DeploymentSpec{
+					Template: corev1.PodTemplateSpec{
+						ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": "backend"}},
+					},
+				},
+			},
+		},
+		networkPolicies: []*networkingv1.NetworkPolicy{
+			{
+				// Specific selector — should create edge to frontend deployment
+				ObjectMeta: metav1.ObjectMeta{Name: "allow-frontend", Namespace: "demo"},
+				Spec: networkingv1.NetworkPolicySpec{
+					PodSelector: metav1.LabelSelector{
+						MatchLabels: map[string]string{"app": "frontend"},
+					},
+					PolicyTypes: []networkingv1.PolicyType{networkingv1.PolicyTypeIngress},
+				},
+			},
+			{
+				// Empty selector — should NOT create edges (matchesAllPods)
+				ObjectMeta: metav1.ObjectMeta{Name: "default-deny", Namespace: "demo"},
+				Spec: networkingv1.NetworkPolicySpec{
+					PodSelector: metav1.LabelSelector{},
+					PolicyTypes: []networkingv1.PolicyType{networkingv1.PolicyTypeIngress},
+				},
+			},
+			{
+				// Different namespace — should not match demo deployments
+				ObjectMeta: metav1.ObjectMeta{Name: "other-ns-policy", Namespace: "other"},
+				Spec: networkingv1.NetworkPolicySpec{
+					PodSelector: metav1.LabelSelector{
+						MatchLabels: map[string]string{"app": "frontend"},
+					},
+					PolicyTypes: []networkingv1.PolicyType{networkingv1.PolicyTypeIngress},
+				},
+			},
+		},
+	}
+
+	b := NewBuilder(provider)
+	opts := DefaultBuildOptions()
+	topo, err := b.Build(opts)
+	if err != nil {
+		t.Fatalf("Build() error: %v", err)
+	}
+
+	// Check NetworkPolicy nodes exist
+	npNodes := make(map[string]Node)
+	for _, n := range topo.Nodes {
+		if n.Kind == KindNetworkPolicy {
+			npNodes[n.Name] = n
+		}
+	}
+
+	if len(npNodes) != 3 {
+		t.Errorf("expected 3 NetworkPolicy nodes, got %d", len(npNodes))
+	}
+
+	// Check allow-frontend node exists and is healthy
+	if n, ok := npNodes["allow-frontend"]; !ok {
+		t.Error("missing allow-frontend NetworkPolicy node")
+	} else if n.Status != StatusHealthy {
+		t.Errorf("allow-frontend status = %s, want healthy", n.Status)
+	}
+
+	// Check default-deny has matchesAllPods flag
+	if n, ok := npNodes["default-deny"]; !ok {
+		t.Error("missing default-deny NetworkPolicy node")
+	} else if n.Data["matchesAllPods"] != true {
+		t.Error("default-deny should have matchesAllPods=true")
+	}
+
+	// Check edges: allow-frontend should have edge to frontend deployment
+	var npEdges []Edge
+	for _, e := range topo.Edges {
+		if e.Type == EdgeProtects {
+			for _, n := range npNodes {
+				if e.Source == n.ID {
+					npEdges = append(npEdges, e)
+				}
+			}
+		}
+	}
+
+	// Only allow-frontend should create edges (default-deny has empty selector, other-ns is different namespace)
+	if len(npEdges) != 1 {
+		t.Errorf("expected 1 NetworkPolicy edge, got %d", len(npEdges))
+		for _, e := range npEdges {
+			t.Logf("  edge: %s → %s", e.Source, e.Target)
+		}
+	}
+
+	if len(npEdges) == 1 {
+		if npEdges[0].Source != "networkpolicy/demo/allow-frontend" {
+			t.Errorf("edge source = %s, want networkpolicy/demo/allow-frontend", npEdges[0].Source)
+		}
+		if npEdges[0].Target != "deployment/demo/frontend" {
+			t.Errorf("edge target = %s, want deployment/demo/frontend", npEdges[0].Target)
+		}
+	}
+}
+
+func TestNetworkPolicyNamespaceIsolation(t *testing.T) {
+	// Policy in ns-a should NOT create edges to deployments in ns-b
+	provider := &mockProvider{
+		deployments: []*appsv1.Deployment{
+			{
+				ObjectMeta: metav1.ObjectMeta{Name: "web", Namespace: "ns-b"},
+				Spec: appsv1.DeploymentSpec{
+					Template: corev1.PodTemplateSpec{
+						ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": "web"}},
+					},
+				},
+			},
+		},
+		networkPolicies: []*networkingv1.NetworkPolicy{
+			{
+				ObjectMeta: metav1.ObjectMeta{Name: "web-policy", Namespace: "ns-a"},
+				Spec: networkingv1.NetworkPolicySpec{
+					PodSelector: metav1.LabelSelector{
+						MatchLabels: map[string]string{"app": "web"},
+					},
+					PolicyTypes: []networkingv1.PolicyType{networkingv1.PolicyTypeIngress},
+				},
+			},
+		},
+	}
+
+	b := NewBuilder(provider)
+	opts := DefaultBuildOptions()
+	topo, err := b.Build(opts)
+	if err != nil {
+		t.Fatalf("Build() error: %v", err)
+	}
+
+	// Should have the NetworkPolicy node but NO edges (different namespace)
+	var npEdges int
+	for _, e := range topo.Edges {
+		if e.Source == "networkpolicy/ns-a/web-policy" {
+			npEdges++
+		}
+	}
+	if npEdges != 0 {
+		t.Errorf("expected 0 cross-namespace edges, got %d", npEdges)
+	}
+}
+
+func TestMatchesStringMap(t *testing.T) {
+	tests := []struct {
+		name     string
+		labels   map[string]string
+		selector map[string]any
+		want     bool
+	}{
+		{"exact match", map[string]string{"app": "web"}, map[string]any{"app": "web"}, true},
+		{"subset match", map[string]string{"app": "web", "tier": "frontend"}, map[string]any{"app": "web"}, true},
+		{"mismatch value", map[string]string{"app": "web"}, map[string]any{"app": "api"}, false},
+		{"missing key", map[string]string{"app": "web"}, map[string]any{"tier": "frontend"}, false},
+		{"empty selector", map[string]string{"app": "web"}, map[string]any{}, true},
+		{"empty labels", map[string]string{}, map[string]any{"app": "web"}, false},
+		{"non-string value rejects", map[string]string{"app": "web"}, map[string]any{"app": 123}, false},
+		{"nil labels", nil, map[string]any{"app": "web"}, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := matchesStringMap(tt.labels, tt.selector); got != tt.want {
+				t.Errorf("matchesStringMap() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestAnnotateNodePolicyCoverage(t *testing.T) {
+	deployments := []*appsv1.Deployment{
+		{
+			ObjectMeta: metav1.ObjectMeta{Name: "web", Namespace: "demo"},
+			Spec: appsv1.DeploymentSpec{
+				Template: corev1.PodTemplateSpec{
+					ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": "web"}},
+				},
+			},
+		},
+		{
+			ObjectMeta: metav1.ObjectMeta{Name: "api", Namespace: "demo"},
+			Spec: appsv1.DeploymentSpec{
+				Template: corev1.PodTemplateSpec{
+					ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": "api"}},
+				},
+			},
+		},
+	}
+
+	netpols := []*networkingv1.NetworkPolicy{
+		{
+			ObjectMeta: metav1.ObjectMeta{Name: "web-policy", Namespace: "demo"},
+			Spec: networkingv1.NetworkPolicySpec{
+				PodSelector: metav1.LabelSelector{
+					MatchLabels: map[string]string{"app": "web"},
+				},
+			},
+		},
+	}
+
+	nodes := []Node{
+		{ID: "deployment/demo/web", Kind: KindDeployment, Name: "web", Data: map[string]any{"namespace": "demo"}},
+		{ID: "deployment/demo/api", Kind: KindDeployment, Name: "api", Data: map[string]any{"namespace": "demo"}},
+		{ID: "service/demo/web", Kind: KindService, Name: "web", Data: map[string]any{"namespace": "demo"}},
+	}
+
+	annotateNodePolicyCoverage(nodes, netpols, deployments, nil, nil)
+
+	// web deployment should be protected
+	if nodes[0].Data["policyStatus"] != "protected" {
+		t.Errorf("web deployment: got policyStatus=%v, want protected", nodes[0].Data["policyStatus"])
+	}
+
+	// api deployment should be unprotected (no matching policy)
+	if nodes[1].Data["policyStatus"] != "unprotected" {
+		t.Errorf("api deployment: got policyStatus=%v, want unprotected", nodes[1].Data["policyStatus"])
+	}
+
+	// service should have no policyStatus (not a workload)
+	if _, ok := nodes[2].Data["policyStatus"]; ok {
+		t.Errorf("service should not have policyStatus, got %v", nodes[2].Data["policyStatus"])
 	}
 }
