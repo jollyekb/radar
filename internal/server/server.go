@@ -303,6 +303,9 @@ func (s *Server) setupRoutes() {
 			r.Get("/debug/events/diagnose", s.handleDebugEventsDiagnose)
 			r.Get("/debug/informers", s.handleDebugInformers)
 
+			// Network policy evaluation
+			r.Get("/network-policies/evaluate", s.handleEvaluateNetworkPolicies)
+
 			// Traffic routes (non-streaming)
 			r.Get("/traffic/sources", s.handleGetTrafficSources)
 			r.Get("/traffic/flows", s.handleGetTrafficFlows)

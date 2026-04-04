@@ -1,9 +1,11 @@
 import { useState, useMemo } from 'react'
 import type { TrafficFlow } from '../../types'
 import { clsx } from 'clsx'
-import { ChevronDown, ChevronUp } from 'lucide-react'
+import { ChevronDown, ChevronUp, ShieldCheck } from 'lucide-react'
 import { SEVERITY_BADGE, SEVERITY_TEXT } from '@skyhook-io/k8s-ui/utils/badge-colors'
 import { useFlowSearch } from './TrafficFlowListContext'
+import { useQuery } from '@tanstack/react-query'
+import { fetchJSON } from '../../api/client'
 
 // DNS response code names
 const DNS_RCODES: Record<number, string> = {
@@ -300,11 +302,14 @@ export function TrafficFlowList({ flows }: TrafficFlowListProps) {
                       </div>
                     )}
 
-                    {/* Drop reason */}
+                    {/* Drop reason + policy correlation */}
                     {flow.dropReasonDesc && (
                       <div className="pt-1 border-t border-theme-border/50">
                         <span className={SEVERITY_TEXT.error}>Drop reason: {flow.dropReasonDesc}</span>
                       </div>
+                    )}
+                    {flow.verdict === 'dropped' && flow.destination?.namespace && (
+                      <PolicyCorrelation flow={flow} />
                     )}
                   </div>
                 )}
@@ -319,6 +324,72 @@ export function TrafficFlowList({ flows }: TrafficFlowListProps) {
         {sorted.length} flow{sorted.length !== 1 ? 's' : ''}
         {search && ` (filtered from ${flows.length})`}
       </div>
+    </div>
+  )
+}
+
+interface PolicyEvaluation {
+  selectingPolicies: { name: string; namespace?: string; kind: string; effect: string; reason: string }[]
+  verdict: string
+}
+
+function PolicyCorrelation({ flow }: { flow: TrafficFlow }) {
+  const destLabels = flow.destination?.labels
+  const srcLabels = flow.source?.labels
+  const destNs = flow.destination?.namespace || ''
+  const srcNs = flow.source?.namespace || ''
+
+  const labelsParam = destLabels ? Object.entries(destLabels).map(([k, v]) => `${k}=${v}`).join(',') : ''
+  const srcLabelsParam = srcLabels ? Object.entries(srcLabels).map(([k, v]) => `${k}=${v}`).join(',') : ''
+
+  const { data, isLoading } = useQuery<PolicyEvaluation>({
+    queryKey: ['policy-evaluate', destNs, labelsParam, srcNs, srcLabelsParam],
+    queryFn: () => {
+      const params = new URLSearchParams({ namespace: destNs, labels: labelsParam })
+      if (srcNs) params.set('sourceNamespace', srcNs)
+      if (srcLabelsParam) params.set('sourceLabels', srcLabelsParam)
+      return fetchJSON(`/network-policies/evaluate?${params}`)
+    },
+    enabled: !!destNs && !!labelsParam,
+    staleTime: 30000,
+  })
+
+  if (!destNs || !labelsParam) return null
+  if (isLoading) return (
+    <div className="pt-1 border-t border-theme-border/50 text-theme-text-tertiary text-[10px]">
+      Evaluating policies...
+    </div>
+  )
+  if (!data || data.selectingPolicies.length === 0) return (
+    <div className="pt-1 border-t border-theme-border/50">
+      <div className="flex items-center gap-1 text-theme-text-tertiary">
+        <ShieldCheck className="w-3 h-3" />
+        <span className="text-[10px]">No NetworkPolicy selects this destination</span>
+      </div>
+    </div>
+  )
+
+  return (
+    <div className="pt-1 border-t border-theme-border/50 space-y-1">
+      <div className="flex items-center gap-1 text-theme-text-secondary">
+        <ShieldCheck className="w-3 h-3" />
+        <span className="text-[10px] font-medium">
+          {data.selectingPolicies.length} selecting {data.selectingPolicies.length === 1 ? 'policy' : 'policies'}
+        </span>
+      </div>
+      {data.selectingPolicies.map((p, i) => (
+        <div key={i} className="flex items-start gap-1.5 ml-4">
+          <span className={clsx(
+            'shrink-0 mt-0.5 w-1.5 h-1.5 rounded-full',
+            p.effect === 'allow' ? 'bg-green-500' : 'bg-red-500',
+          )} />
+          <div className="min-w-0">
+            <span className="text-[10px] text-theme-text-primary font-medium">{p.name}</span>
+            <span className="text-[10px] text-theme-text-tertiary ml-1">({p.kind})</span>
+            <div className="text-[10px] text-theme-text-tertiary">{p.reason}</div>
+          </div>
+        </div>
+      ))}
     </div>
   )
 }
