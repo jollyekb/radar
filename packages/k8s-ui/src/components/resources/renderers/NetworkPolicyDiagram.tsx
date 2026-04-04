@@ -1,4 +1,5 @@
 import { clsx } from 'clsx'
+import { Tooltip } from '../../ui/Tooltip'
 
 interface NetworkPolicyDiagramProps {
   spec: any
@@ -195,32 +196,38 @@ function FlowRow({
           {i > 0 && (
             <div className="text-[9px] text-theme-text-tertiary uppercase tracking-widest text-center my-0.5">or</div>
           )}
-          <div className={clsx(
-            'rounded-md border px-2 py-1.5',
-            PEER_STYLES[peer.type],
-          )}>
-            <div className="flex items-center gap-1.5">
-              <span className={clsx('w-1.5 h-1.5 rounded-full shrink-0', PEER_DOT[peer.type])} />
-              <span className={clsx('text-[11px] font-medium truncate', denied && 'line-through text-red-400')}>
-                {peer.label}
-              </span>
+          <Tooltip content={peer.sublabel ? `${peer.label}\n${peer.sublabel}` : peer.label} position="top">
+            <div
+              className={clsx(
+                'rounded-md border px-2 py-1.5',
+                PEER_STYLES[peer.type],
+              )}
+            >
+              <div className="flex items-center gap-1.5">
+                <span className={clsx('w-1.5 h-1.5 rounded-full shrink-0', PEER_DOT[peer.type])} />
+                <span className={clsx('text-[11px] font-medium truncate', denied && 'line-through text-red-400')}>
+                  {peer.label}
+                </span>
+              </div>
+              {peer.sublabel && (
+                <div className="text-[10px] text-theme-text-tertiary ml-3 truncate">{peer.sublabel}</div>
+              )}
             </div>
-            {peer.sublabel && (
-              <div className="text-[10px] text-theme-text-tertiary ml-3 truncate">{peer.sublabel}</div>
-            )}
-          </div>
+          </Tooltip>
         </div>
       ))}
     </div>
   )
 
   const targetNode = (
-    <div className="rounded-md border border-indigo-500/30 bg-indigo-500/8 px-2 py-1.5 flex-1 min-w-0">
-      <div className="flex items-center gap-1.5">
-        <span className="w-1.5 h-1.5 rounded-full shrink-0 bg-indigo-500" />
-        <span className="text-[11px] font-medium truncate">{target}</span>
+    <Tooltip content={target} position="top">
+      <div className="rounded-md border border-indigo-500/30 bg-indigo-500/8 px-2 py-1.5 flex-1 min-w-0">
+        <div className="flex items-center gap-1.5">
+          <span className="w-1.5 h-1.5 rounded-full shrink-0 bg-indigo-500" />
+          <span className="text-[11px] font-medium truncate">{target}</span>
+        </div>
       </div>
-    </div>
+    </Tooltip>
   )
 
   const arrow = (
