@@ -337,24 +337,32 @@ function PolicyCorrelation({ flow }: { flow: TrafficFlow }) {
   const destLabels = flow.destination?.labels
   const srcLabels = flow.source?.labels
   const destNs = flow.destination?.namespace || ''
+  const destName = flow.destination?.name || ''
   const srcNs = flow.source?.namespace || ''
+  const srcName = flow.source?.name || ''
 
   const labelsParam = destLabels ? Object.entries(destLabels).map(([k, v]) => `${k}=${v}`).join(',') : ''
   const srcLabelsParam = srcLabels ? Object.entries(srcLabels).map(([k, v]) => `${k}=${v}`).join(',') : ''
 
+  // Need either labels or pod name to resolve
+  const canQuery = !!destNs && (!!labelsParam || !!destName)
+
   const { data, isLoading } = useQuery<PolicyEvaluation>({
-    queryKey: ['policy-evaluate', destNs, labelsParam, srcNs, srcLabelsParam],
+    queryKey: ['policy-evaluate', destNs, destName, labelsParam, srcNs, srcName, srcLabelsParam],
     queryFn: () => {
-      const params = new URLSearchParams({ namespace: destNs, labels: labelsParam })
+      const params = new URLSearchParams({ namespace: destNs })
+      if (labelsParam) params.set('labels', labelsParam)
+      if (!labelsParam && destName) params.set('podName', destName)
       if (srcNs) params.set('sourceNamespace', srcNs)
       if (srcLabelsParam) params.set('sourceLabels', srcLabelsParam)
+      else if (srcName && srcNs) params.set('sourcePodName', srcName)
       return fetchJSON(`/network-policies/evaluate?${params}`)
     },
-    enabled: !!destNs && !!labelsParam,
+    enabled: canQuery,
     staleTime: 30000,
   })
 
-  if (!destNs || !labelsParam) return null
+  if (!canQuery) return null
   if (isLoading) return (
     <div className="pt-1 border-t border-theme-border/50 text-theme-text-tertiary text-[10px]">
       Evaluating policies...

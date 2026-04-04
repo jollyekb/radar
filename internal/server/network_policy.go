@@ -60,9 +60,23 @@ func (s *Server) handleEvaluateNetworkPolicies(w http.ResponseWriter, r *http.Re
 	labelsParam := r.URL.Query().Get("labels")
 	destLabels := parseLabelsParam(labelsParam)
 
+	// If no labels provided but podName is, resolve labels from the pod cache
+	if len(destLabels) == 0 {
+		if podName := r.URL.Query().Get("podName"); podName != "" {
+			destLabels = resolvePodLabels(cache, ns, podName)
+		}
+	}
+
 	srcNs := r.URL.Query().Get("sourceNamespace")
 	srcLabelsParam := r.URL.Query().Get("sourceLabels")
 	srcLabels := parseLabelsParam(srcLabelsParam)
+
+	// Resolve source labels from pod name if needed
+	if len(srcLabels) == 0 {
+		if srcPodName := r.URL.Query().Get("sourcePodName"); srcPodName != "" && srcNs != "" {
+			srcLabels = resolvePodLabels(cache, srcNs, srcPodName)
+		}
+	}
 
 	// Collect selecting policies
 	var matches []PolicyMatch
@@ -265,6 +279,16 @@ func formatLabels(l map[string]string) string {
 		parts = append(parts, k+"="+v)
 	}
 	return strings.Join(parts, ", ")
+}
+
+func resolvePodLabels(cache *k8s.ResourceCache, namespace, podName string) map[string]string {
+	if podLister := cache.Pods(); podLister != nil {
+		pod, err := podLister.Pods(namespace).Get(podName)
+		if err == nil && pod != nil {
+			return pod.Labels
+		}
+	}
+	return nil
 }
 
 func parseLabelsParam(param string) map[string]string {
