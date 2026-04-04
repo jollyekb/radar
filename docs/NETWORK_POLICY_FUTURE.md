@@ -1,81 +1,47 @@
-# NetworkPolicy Visualization — Future Ideas
+# NetworkPolicy — Future Ideas
 
-Advanced visualization features explored during planning, deferred from the initial implementation. The foundation is in place: typed cache, topology nodes, dashboard coverage card, renderers for standard NetworkPolicy + CiliumNetworkPolicy + CiliumClusterwideNetworkPolicy + AdminNetworkPolicy + BaselineAdminNetworkPolicy.
+Features explored during planning but not yet implemented. Current implementation covers: typed cache, topology nodes/edges, dashboard coverage card, renderers (NetworkPolicy, CiliumNetworkPolicy, CiliumClusterwideNetworkPolicy, ClusterNetworkPolicy), policy coverage overlay on topology, visual flow diagram in renderer, and drop correlation with policy evaluation in traffic view.
 
-## 1. Policy Effect Overlay on Traffic/Resource Topology
+## 1. Highlight Unprotected Flows in Traffic View
 
-**Effort: ~5-7 hours MVP**
+Mark traffic edges between workloads where neither side has a NetworkPolicy. Answers "which traffic paths are unprotected?" — the visual version of the dashboard coverage card applied to actual observed flows.
 
-Color-code existing topology edges based on whether NetworkPolicy allows or blocks that traffic path:
-
-- **Green**: explicitly allowed by a policy's ingress `from` rules
-- **Red/dashed**: blocked (target has a selecting policy but source not in allow list)
-- **Gray**: no policy on target (default-allow, unprotected)
-
-Toggle in TopologyControls: "Show policy effect" checkbox. Best fit for the traffic topology view.
-
-**Backend**: Extend `Edge` struct (`pkg/topology/types.go`) with optional `PolicyEffect` field. For each Service-to-Workload edge, evaluate target's selecting NetworkPolicies against source's labels/namespace using `LabelSelectorAsSelector()` (already available).
-
-**MVP simplifications**: Ingress only (skip egress), skip port-specific rules, skip CIDR matching, binary verdict per edge.
-
-**Key files**: `pkg/topology/types.go`, `pkg/topology/builder.go`, `packages/k8s-ui/src/components/topology/TopologyGraph.tsx` (`EDGE_COLORS`), `TopologyControls.tsx`.
-
-## 2. Visual Policy Diagram in Renderer
-
-**Effort: ~1-2 days**
-
-Inside the NetworkPolicy detail drawer, render a mini-diagram using `@xyflow/react` (already a dependency):
-
-```
-[Sources] --ingress--> [Target Pods] --egress--> [Destinations]
-```
-
-Ingress sources on left, target pods center, egress destinations right. Clear AND/OR grouping. Reference UX: editor.networkpolicy.io but cluster-connected.
-
-**Design-intensive**: AND/OR grouping, CIDR blocks, namespace selectors, port ranges all need thoughtful layout.
-
-## 3. Dedicated "Security" Top-Level View
-
-**Effort: larger scope**
+## 2. Dedicated "Security" Top-Level View
 
 A top-level nav tab combining:
 
 - Network Policy coverage overview (pods/namespaces without policies)
-- AdminNetworkPolicy (K8s 1.32+ GA) visualization with priority ordering
+- ClusterNetworkPolicy (policy.networking.k8s.io) visualization with priority/tier ordering
 - CNI-specific policies (CiliumNetworkPolicy, Calico GlobalNetworkPolicy)
 - RBAC visualization, PodSecurityAdmission status
 
 Makes sense when there's enough security surface area to warrant a dedicated view.
 
-## 4. Structured Policy Editor
-
-**Effort: ~2-3 days**
+## 3. Structured Policy Editor
 
 Form-based create/edit for NetworkPolicies: select pods visually, add rules with dropdowns, preview affected pods before applying. Like editor.networkpolicy.io but connected to the live cluster.
 
 Audience is narrow: most users writing NetworkPolicies are comfortable with YAML. The YAML editor already exists in the drawer.
 
-## 5. Hubble Flow + Policy Correlation
+## 4. Port-Specific Policy Evaluation
 
-**Effort: ~1-2 days**
+The current policy evaluation endpoint checks whether ingress/egress rules match the source/destination by labels and namespace, but does not evaluate port-specific rules. Adding port matching would give more precise verdicts (e.g., "allowed on TCP/9898 but this flow is on TCP/5432").
 
-Since Radar already ingests Hubble traffic flows, overlay observed traffic against declared policy rules: "Here's what your policy allows, and here's what's actually flowing." Highlight dropped traffic (Hubble reports verdict: FORWARDED/DROPPED).
+## 5. Detailed Cilium Policy Rule Evaluation
 
-This is what Calico Enterprise charges for. Only works when Hubble is available.
+CiliumNetworkPolicy evaluation currently shows "selects this endpoint" without evaluating individual rules (entities, fromEndpoints, toPorts). Full rule evaluation would provide the same level of detail as standard NetworkPolicy correlation.
 
 ## Competitor Landscape (as of April 2026)
 
-No free/OSS tool does live cluster-connected policy visualization:
+No free/OSS tool combines live cluster data with network policy visualization and drop correlation:
 
-| Tool | Visual Graph | Edit | Impact Analysis | Flow Overlay |
-|------|-------------|------|-----------------|--------------|
+| Tool | Visual Graph | Edit | Drop Correlation | Coverage |
+|------|-------------|------|-----------------|----------|
 | Headlamp | No | YAML only | No | No |
 | Lens/Freelens | No | YAML only | No | No |
 | K8s Dashboard | No | YAML only | No | No |
 | K9s | No | $EDITOR | No | No |
-| editor.networkpolicy.io | Yes (static) | Yes | No (not cluster-connected) | No |
-| np-viewer/netfetch | No (CLI) | No | Coverage audit | No |
-| Hubble UI | Traffic graph | No | Partial (dropped flows) | No |
+| editor.networkpolicy.io | Yes (static) | Yes | No | No |
+| Hubble UI | Traffic graph | No | No | No |
 | Calico Enterprise | Yes (Policy Board) | Yes | Yes | Yes |
-
-**Gap**: No OSS tool combines live cluster data with network policy visualization. Radar's foundation work positions it to fill this gap.
+| **Radar** | **Yes (topology + flow diagram)** | **YAML** | **Yes (per-flow)** | **Yes (dashboard + overlay)** |
