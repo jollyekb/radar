@@ -1,6 +1,7 @@
-import { Shield, ArrowDownToLine, ArrowUpFromLine } from 'lucide-react'
+import { Shield, ArrowDownToLine, ArrowUpFromLine, GitFork } from 'lucide-react'
 import { clsx } from 'clsx'
 import { Section, PropertyList, Property } from '../../ui/drawer-components'
+import { NetworkPolicyDiagram } from './NetworkPolicyDiagram'
 
 interface NetworkPolicyRendererProps {
   data: any
@@ -18,8 +19,16 @@ export function NetworkPolicyRenderer({ data }: NetworkPolicyRendererProps) {
   const hasIngress = policyTypes.includes('Ingress')
   const hasEgress = policyTypes.includes('Egress')
 
+  const hasDiagramContent = hasIngress || hasEgress
+
   return (
     <>
+      {hasDiagramContent && (
+        <Section title="Policy Flow" icon={GitFork} defaultExpanded>
+          <NetworkPolicyDiagram spec={spec} />
+        </Section>
+      )}
+
       <Section title="Target" icon={Shield}>
         <PropertyList>
           <Property
