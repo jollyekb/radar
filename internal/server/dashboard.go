@@ -6,11 +6,13 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"slices"
 	"sort"
 	"sync"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/labels"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
@@ -1297,6 +1299,42 @@ func (s *Server) getDashboardNetworkPolicyCoverage(cache *k8s.ResourceCache, nam
 					continue
 				}
 				allNPs = append(allNPs, npSelector{np.Namespace, sel})
+			}
+		}
+	}
+
+	// Also count CiliumNetworkPolicy selectors (from dynamic cache)
+	if dynamicCache := k8s.GetDynamicResourceCache(); dynamicCache != nil {
+		if discovery := k8s.GetResourceDiscovery(); discovery != nil {
+			if cnpGVR, ok := discovery.GetGVR("CiliumNetworkPolicy"); ok {
+				nsFilter := ""
+				if len(namespaces) == 1 {
+					nsFilter = namespaces[0]
+				}
+				cnps, err := dynamicCache.List(cnpGVR, nsFilter)
+				if err == nil {
+					for _, cnp := range cnps {
+						ns := cnp.GetNamespace()
+						if len(namespaces) > 1 && !slices.Contains(namespaces, ns) {
+							continue
+						}
+						selectorMap, _, _ := unstructured.NestedMap(cnp.Object, "spec", "endpointSelector", "matchLabels")
+						if len(selectorMap) == 0 {
+							// Empty selector matches all pods in namespace
+							allNPs = append(allNPs, npSelector{ns, labels.Everything()})
+						} else {
+							selectorLabels := make(map[string]string)
+							for k, v := range selectorMap {
+								if sv, ok := v.(string); ok {
+									selectorLabels[k] = sv
+								}
+							}
+							if sel, err := metav1.LabelSelectorAsSelector(&metav1.LabelSelector{MatchLabels: selectorLabels}); err == nil {
+								allNPs = append(allNPs, npSelector{ns, sel})
+							}
+						}
+					}
+				}
 			}
 		}
 	}

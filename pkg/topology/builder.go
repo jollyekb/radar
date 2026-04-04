@@ -4700,7 +4700,7 @@ func (b *Builder) buildResourcesTopology(opts BuildOptions) (*Topology, error) {
 
 	// 17. Annotate workload nodes with NetworkPolicy coverage (optional)
 	if opts.ShowPolicyEffect {
-		annotateNodePolicyCoverage(nodes, netpols, deployments, statefulsets, daemonsets)
+		annotateNodePolicyCoverage(nodes, edges, netpols, deployments, statefulsets, daemonsets)
 	}
 
 	topo := &Topology{Nodes: nodes, Edges: edges, Warnings: warnings}
@@ -7122,36 +7122,67 @@ func (b *Builder) addGenericCRDNodes(nodes []Node, edges []Edge, opts BuildOptio
 }
 
 // annotateNodePolicyCoverage adds "policyStatus" to workload node Data
-// indicating whether the workload is selected by at least one NetworkPolicy.
-// Values: "protected" (has a selecting policy) or "unprotected" (no policy).
+// indicating whether the workload is selected by at least one network policy
+// (standard NetworkPolicy, CiliumNetworkPolicy, or ClusterNetworkPolicy).
+// Uses EdgeProtects edges — these are already computed for all policy types.
+// Also checks standard NetworkPolicies with empty selectors (matchesAllPods)
+// which don't create edges but still protect workloads.
 func annotateNodePolicyCoverage(
 	nodes []Node,
+	edges []Edge,
 	netpols []*networkingv1.NetworkPolicy,
 	deployments []*appsv1.Deployment,
 	statefulsets []*appsv1.StatefulSet,
 	daemonsets []*appsv1.DaemonSet,
 ) {
-	// Build set of covered workload node IDs
+	// Collect workloads covered by EdgeProtects edges (from any policy type)
 	coveredWorkloads := make(map[string]bool)
+	for _, e := range edges {
+		if e.Type == EdgeProtects {
+			coveredWorkloads[e.Target] = true
+		}
+	}
 
+	// Also check standard NetworkPolicies with empty selectors (matchesAllPods).
+	// These skip edge creation but still protect all workloads in their namespace.
 	for _, np := range netpols {
-		sel, err := metav1.LabelSelectorAsSelector(&np.Spec.PodSelector)
-		if err != nil {
-			continue
-		}
-		for _, d := range deployments {
-			if d.Namespace == np.Namespace && sel.Matches(labels.Set(d.Spec.Template.Labels)) {
-				coveredWorkloads[fmt.Sprintf("deployment/%s/%s", d.Namespace, d.Name)] = true
+		if np.Spec.PodSelector.Size() == 0 {
+			for _, d := range deployments {
+				if d.Namespace == np.Namespace {
+					coveredWorkloads[fmt.Sprintf("deployment/%s/%s", d.Namespace, d.Name)] = true
+				}
+			}
+			for _, s := range statefulsets {
+				if s.Namespace == np.Namespace {
+					coveredWorkloads[fmt.Sprintf("statefulset/%s/%s", s.Namespace, s.Name)] = true
+				}
+			}
+			for _, d := range daemonsets {
+				if d.Namespace == np.Namespace {
+					coveredWorkloads[fmt.Sprintf("daemonset/%s/%s", d.Namespace, d.Name)] = true
+				}
 			}
 		}
-		for _, s := range statefulsets {
-			if s.Namespace == np.Namespace && sel.Matches(labels.Set(s.Spec.Template.Labels)) {
-				coveredWorkloads[fmt.Sprintf("statefulset/%s/%s", s.Namespace, s.Name)] = true
+	}
+
+	// Check CiliumNetworkPolicy/CiliumClusterwideNetworkPolicy nodes with matchesAllPods flag
+	for _, n := range nodes {
+		if (n.Kind == KindCiliumNetworkPolicy || n.Kind == KindCiliumClusterwideNetworkPolicy) && n.Data["matchesAllPods"] == true {
+			ns, _ := n.Data["namespace"].(string)
+			for _, d := range deployments {
+				if ns == "" || d.Namespace == ns {
+					coveredWorkloads[fmt.Sprintf("deployment/%s/%s", d.Namespace, d.Name)] = true
+				}
 			}
-		}
-		for _, d := range daemonsets {
-			if d.Namespace == np.Namespace && sel.Matches(labels.Set(d.Spec.Template.Labels)) {
-				coveredWorkloads[fmt.Sprintf("daemonset/%s/%s", d.Namespace, d.Name)] = true
+			for _, s := range statefulsets {
+				if ns == "" || s.Namespace == ns {
+					coveredWorkloads[fmt.Sprintf("statefulset/%s/%s", s.Namespace, s.Name)] = true
+				}
+			}
+			for _, d := range daemonsets {
+				if ns == "" || d.Namespace == ns {
+					coveredWorkloads[fmt.Sprintf("daemonset/%s/%s", d.Namespace, d.Name)] = true
+				}
 			}
 		}
 	}
