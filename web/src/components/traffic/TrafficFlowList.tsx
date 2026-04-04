@@ -308,7 +308,7 @@ export function TrafficFlowList({ flows }: TrafficFlowListProps) {
                         <span className={SEVERITY_TEXT.error}>Drop reason: {flow.dropReasonDesc}</span>
                       </div>
                     )}
-                    {flow.verdict === 'dropped' && flow.destination?.namespace && (
+                    {flow.verdict === 'dropped' && (
                       <PolicyCorrelation flow={flow} />
                     )}
                   </div>
@@ -344,11 +344,17 @@ function PolicyCorrelation({ flow }: { flow: TrafficFlow }) {
   const labelsParam = destLabels ? Object.entries(destLabels).map(([k, v]) => `${k}=${v}`).join(',') : ''
   const srcLabelsParam = srcLabels ? Object.entries(srcLabels).map(([k, v]) => `${k}=${v}`).join(',') : ''
 
-  // Need either labels or pod name to resolve
-  const canQuery = !!destNs && (!!labelsParam || !!destName)
+  const direction = flow.trafficDirection || 'ingress'
+  // For egress: the evaluated pod is the source. For ingress: the destination.
+  const evalNs = direction === 'egress' ? srcNs : destNs
+  const evalName = direction === 'egress' ? srcName : destName
+  const evalLabels = direction === 'egress' ? srcLabelsParam : labelsParam
+
+  // Need either labels or pod name to resolve the evaluated pod
+  const canQuery = !!evalNs && (!!evalLabels || !!evalName)
 
   const { data, isLoading } = useQuery<PolicyEvaluation>({
-    queryKey: ['policy-evaluate', destNs, destName, labelsParam, srcNs, srcName, srcLabelsParam],
+    queryKey: ['policy-evaluate', destNs, destName, labelsParam, srcNs, srcName, srcLabelsParam, direction],
     queryFn: () => {
       const params = new URLSearchParams({ namespace: destNs })
       if (labelsParam) params.set('labels', labelsParam)
@@ -356,6 +362,7 @@ function PolicyCorrelation({ flow }: { flow: TrafficFlow }) {
       if (srcNs) params.set('sourceNamespace', srcNs)
       if (srcLabelsParam) params.set('sourceLabels', srcLabelsParam)
       else if (srcName && srcNs) params.set('sourcePodName', srcName)
+      if (direction === 'egress') params.set('direction', 'egress')
       return fetchJSON(`/network-policies/evaluate?${params}`)
     },
     enabled: canQuery,
@@ -368,7 +375,7 @@ function PolicyCorrelation({ flow }: { flow: TrafficFlow }) {
       Evaluating policies...
     </div>
   )
-  if (!data || data.selectingPolicies.length === 0) return (
+  if (!data || !data.selectingPolicies || data.selectingPolicies.length === 0) return (
     <div className="pt-1 border-t border-theme-border/50">
       <div className="flex items-center gap-1 text-theme-text-tertiary">
         <ShieldCheck className="w-3 h-3" />

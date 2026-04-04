@@ -53,10 +53,6 @@ func (s *Server) handleEvaluateNetworkPolicies(w http.ResponseWriter, r *http.Re
 
 	// Parse params
 	ns := r.URL.Query().Get("namespace")
-	if ns == "" {
-		s.writeError(w, http.StatusBadRequest, "namespace is required")
-		return
-	}
 	labelsParam := r.URL.Query().Get("labels")
 	destLabels := parseLabelsParam(labelsParam)
 
@@ -78,26 +74,50 @@ func (s *Server) handleEvaluateNetworkPolicies(w http.ResponseWriter, r *http.Re
 		}
 	}
 
+	// Direction: for egress drops, evaluate policies on the source pod
+	direction := r.URL.Query().Get("direction") // "ingress" (default) or "egress"
+	if direction == "" {
+		direction = "ingress"
+	}
+
+	// For egress: the "target" is the source pod (policies select it),
+	// and the "peer" is the destination (egress rules check where it can go)
+	evalNs := ns
+	evalLabels := destLabels
+	peerNs := srcNs
+	peerLabels := srcLabels
+	if direction == "egress" {
+		evalNs = srcNs
+		evalLabels = srcLabels
+		peerNs = ns
+		peerLabels = destLabels
+	}
+
+	if evalNs == "" {
+		s.writeError(w, http.StatusBadRequest, "cannot determine namespace for policy evaluation")
+		return
+	}
+
 	// Collect selecting policies
 	var matches []PolicyMatch
 	anyAllows := false
 
-	// 1. Standard NetworkPolicies
-	if npLister := cache.NetworkPolicies(); npLister != nil {
-		nps, err := npLister.NetworkPolicies(ns).List(labels.Everything())
+	// 1. Standard NetworkPolicies — match against the evaluated pod (source for egress, dest for ingress)
+	if npLister := cache.NetworkPolicies(); npLister != nil && evalNs != "" {
+		nps, err := npLister.NetworkPolicies(evalNs).List(labels.Everything())
 		if err != nil {
-			log.Printf("[network-policy] Failed to list NetworkPolicies in %s: %v", ns, err)
+			log.Printf("[network-policy] Failed to list NetworkPolicies in %s: %v", evalNs, err)
 		}
 		for _, np := range nps {
 			sel, err := metav1.LabelSelectorAsSelector(&np.Spec.PodSelector)
 			if err != nil {
 				continue
 			}
-			if !sel.Matches(labels.Set(destLabels)) {
+			if !sel.Matches(labels.Set(evalLabels)) {
 				continue
 			}
 
-			effect, reason := evaluateStandardPolicy(np, srcNs, srcLabels)
+			effect, reason := evaluateStandardPolicy(np, direction, peerNs, peerLabels)
 			matches = append(matches, PolicyMatch{
 				Name:      np.Name,
 				Namespace: np.Namespace,
@@ -115,11 +135,11 @@ func (s *Server) handleEvaluateNetworkPolicies(w http.ResponseWriter, r *http.Re
 	if dynamicCache := k8s.GetDynamicResourceCache(); dynamicCache != nil {
 		if discovery := k8s.GetResourceDiscovery(); discovery != nil {
 			if cnpGVR, ok := discovery.GetGVR("CiliumNetworkPolicy"); ok {
-				cnps, err := dynamicCache.List(cnpGVR, ns)
+				cnps, err := dynamicCache.List(cnpGVR, evalNs)
 				if err == nil {
 					for _, cnp := range cnps {
 						selectorMap, _, _ := unstructured.NestedMap(cnp.Object, "spec", "endpointSelector", "matchLabels")
-						if !matchesCRDSelector(destLabels, selectorMap) {
+						if !matchesCRDSelector(evalLabels, selectorMap) {
 							continue
 						}
 						matches = append(matches, PolicyMatch{
@@ -151,9 +171,16 @@ func (s *Server) handleEvaluateNetworkPolicies(w http.ResponseWriter, r *http.Re
 	})
 }
 
-// evaluateStandardPolicy checks if a NetworkPolicy's ingress rules allow
-// traffic from the given source. Returns effect ("allow"/"deny") and reason.
-func evaluateStandardPolicy(np *networkingv1.NetworkPolicy, srcNs string, srcLabels map[string]string) (string, string) {
+// evaluateStandardPolicy checks if a NetworkPolicy's rules allow the given traffic.
+// direction is "ingress" or "egress". peerNs/peerLabels is the other end of the flow.
+func evaluateStandardPolicy(np *networkingv1.NetworkPolicy, direction string, peerNs string, peerLabels map[string]string) (string, string) {
+	if direction == "egress" {
+		return evaluateEgressPolicy(np, peerNs, peerLabels)
+	}
+	return evaluateIngressPolicy(np, peerNs, peerLabels)
+}
+
+func evaluateIngressPolicy(np *networkingv1.NetworkPolicy, srcNs string, srcLabels map[string]string) (string, string) {
 	hasIngress := false
 	for _, pt := range np.Spec.PolicyTypes {
 		if pt == networkingv1.PolicyTypeIngress {
@@ -181,6 +208,36 @@ func evaluateStandardPolicy(np *networkingv1.NetworkPolicy, srcNs string, srcLab
 	}
 
 	return "deny", fmt.Sprintf("no ingress rule matches source %s", formatLabels(srcLabels))
+}
+
+func evaluateEgressPolicy(np *networkingv1.NetworkPolicy, destNs string, destLabels map[string]string) (string, string) {
+	hasEgress := false
+	for _, pt := range np.Spec.PolicyTypes {
+		if pt == networkingv1.PolicyTypeEgress {
+			hasEgress = true
+			break
+		}
+	}
+	if !hasEgress {
+		return "deny", "no Egress policy type (ingress-only policy)"
+	}
+
+	if len(np.Spec.Egress) == 0 {
+		return "deny", "denies all egress (no rules)"
+	}
+
+	for _, rule := range np.Spec.Egress {
+		if len(rule.To) == 0 {
+			return "allow", "allows all destinations (empty to)"
+		}
+		for _, peer := range rule.To {
+			if matchesPeer(peer, destNs, destLabels, np.Namespace) {
+				return "allow", formatPeerMatch(peer)
+			}
+		}
+	}
+
+	return "deny", fmt.Sprintf("no egress rule matches destination %s", formatLabels(destLabels))
 }
 
 // matchesPeer checks if a source matches a NetworkPolicyPeer.
