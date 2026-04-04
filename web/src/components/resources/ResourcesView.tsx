@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useCallback } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { ApiError, fetchJSON, isForbiddenError, useSecretCertExpiry, useTopPodMetrics, useTopNodeMetrics } from '../../api/client'
@@ -12,6 +12,8 @@ import {
 import type { ResourceQueryResult } from '@skyhook-io/k8s-ui'
 import type { SelectedResource } from '../../types'
 import type { NavigateToResource } from '../../utils/navigation'
+import { CreateResourceDialog } from '../shared/CreateResourceDialog'
+import { getSkeletonYaml } from '../../utils/skeleton-yaml'
 
 interface ResourceCountsResponse {
   counts: Record<string, number>
@@ -115,7 +117,24 @@ export function ResourcesView({ namespaces, selectedResource, onResourceClick, o
     }
   }, [navigate])
 
+  // Create resource dialog
+  const [createDialogOpen, setCreateDialogOpen] = useState(false)
+  const [createDialogYaml, setCreateDialogYaml] = useState('')
+  const [createDialogTitle, setCreateDialogTitle] = useState<string | undefined>()
+
+  const handleCreateResource = useCallback((kind: { name: string; kind: string; group: string } | null) => {
+    if (kind?.kind) {
+      setCreateDialogYaml(getSkeletonYaml(kind.kind, kind.group))
+      setCreateDialogTitle(`Create ${kind.kind}`)
+    } else {
+      setCreateDialogYaml('')
+      setCreateDialogTitle(undefined)
+    }
+    setCreateDialogOpen(true)
+  }, [])
+
   return (
+    <>
     <BaseResourcesView
       namespaces={namespaces}
       selectedResource={selectedResource}
@@ -144,6 +163,18 @@ export function ResourcesView({ namespaces, selectedResource, onResourceClick, o
       // Dock actions
       onOpenLogs={openLogs}
       onOpenWorkloadLogs={openWorkloadLogs}
+      // Create resource
+      onCreateResource={handleCreateResource}
     />
+    <CreateResourceDialog
+      open={createDialogOpen}
+      onClose={() => setCreateDialogOpen(false)}
+      initialYaml={createDialogYaml}
+      title={createDialogTitle}
+      onCreated={(result) => {
+        onResourceClick?.({ kind: result.kind, namespace: result.namespace, name: result.name, group: '' })
+      }}
+    />
+    </>
   )
 }

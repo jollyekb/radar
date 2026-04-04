@@ -1203,6 +1203,44 @@ export function useDeleteResource() {
   })
 }
 
+// Apply (create or update) a resource from YAML
+export interface ApplyResourceResult {
+  name: string
+  namespace: string
+  kind: string
+  created: boolean
+}
+
+export function useApplyResource() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: async ({ yaml, mode = 'apply', dryRun = false }: { yaml: string; mode?: 'apply' | 'create'; dryRun?: boolean }) => {
+      const url = new URL(`${API_BASE}/resources/apply`, window.location.origin)
+      url.searchParams.set('mode', mode)
+      if (dryRun) {
+        url.searchParams.set('dryRun', 'true')
+      }
+      const response = await apiFetch(url.toString(), {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain' },
+        body: yaml,
+      })
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({ error: 'Unknown error' }))
+        throw new Error(error.error || `HTTP ${response.status}`)
+      }
+      return response.json() as Promise<ApplyResourceResult[]>
+    },
+    // No meta errorMessage/successMessage — the CreateResourceDialog
+    // handles all feedback inline to avoid duplicate toasts.
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['resources'] })
+      queryClient.invalidateQueries({ queryKey: ['topology'] })
+    },
+  })
+}
+
 // ============================================================================
 // CronJob operations
 // ============================================================================

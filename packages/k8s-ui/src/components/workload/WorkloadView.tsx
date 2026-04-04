@@ -122,6 +122,10 @@ interface WorkloadViewProps {
   /** Whether metrics are available for this resource kind */
   isMetricsAvailable?: (kind: string, resource: any) => boolean
 
+  // ── Duplicate ────────────────────────────────────────────────────────────
+  /** Duplicate handler — opens create dialog with this resource's YAML */
+  onDuplicate?: (params: { kind: string; namespace: string; name: string; yaml: string }) => void
+
   // ── ResourceActionsBar props (passed through) ────────────────────────────
   /** All props for the actions bar (forwarded as-is) */
   actionsBarProps?: Record<string, any>
@@ -166,6 +170,8 @@ export function WorkloadView({
   renderLogsTab,
   renderMetricsTab,
   isMetricsAvailable,
+  // Duplicate
+  onDuplicate,
   // Actions bar
   actionsBarProps,
   // Renderer overrides
@@ -430,6 +436,7 @@ export function WorkloadView({
               onSave={onUpdateResource}
               isSaving={isUpdatingResource}
               saveError={updateResourceError}
+              onDuplicate={onDuplicate}
             />
           ) : (
             <ResourceRendererDispatch
@@ -635,6 +642,7 @@ export function WorkloadView({
                 onSave={onUpdateResource}
                 isSaving={isUpdatingResource}
                 saveError={updateResourceError}
+                onDuplicate={onDuplicate}
               />
             )}
           </div>

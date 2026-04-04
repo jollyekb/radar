@@ -7,6 +7,7 @@ import (
 	"log"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -42,6 +43,22 @@ type DeleteResourceOptions struct {
 	Namespace string
 	Name      string
 	Force     bool // Force delete with grace period 0
+}
+
+// ApplyResourceOptions contains options for creating or applying a resource.
+type ApplyResourceOptions struct {
+	YAML              string // Raw YAML manifest
+	Mode              string // "apply" (server-side apply, default) or "create" (strict create)
+	DryRun            bool   // Validate without persisting
+	NamespaceOverride string // If set, overrides the namespace in the YAML
+}
+
+// ApplyResourceResult contains the result of a create/apply operation.
+type ApplyResourceResult struct {
+	Name      string `json:"name"`
+	Namespace string `json:"namespace"`
+	Kind      string `json:"kind"`
+	Created   bool   `json:"created"` // true if newly created, false if updated
 }
 
 // WorkloadManager provides workload lifecycle operations using injected clients.
@@ -94,6 +111,114 @@ func (m *WorkloadManager) UpdateResource(ctx context.Context, opts UpdateResourc
 
 	return result, nil
 }
+
+// ApplyResource creates or updates a Kubernetes resource from YAML.
+// In "apply" mode (default), uses server-side apply (idempotent create-or-update).
+// In "create" mode, uses strict create (fails if resource exists).
+func (m *WorkloadManager) ApplyResource(ctx context.Context, opts ApplyResourceOptions) (*ApplyResourceResult, error) {
+	if m.discovery == nil {
+		return nil, fmt.Errorf("resource discovery not initialized")
+	}
+	if m.dynClient == nil {
+		return nil, fmt.Errorf("dynamic client not initialized")
+	}
+
+	obj := &unstructured.Unstructured{}
+	if err := yaml.Unmarshal([]byte(opts.YAML), &obj.Object); err != nil {
+		return nil, fmt.Errorf("invalid YAML: %w", err)
+	}
+
+	kind := obj.GetKind()
+	if kind == "" {
+		return nil, fmt.Errorf("YAML must include 'kind'")
+	}
+	apiVersion := obj.GetAPIVersion()
+	if apiVersion == "" {
+		return nil, fmt.Errorf("YAML must include 'apiVersion'")
+	}
+	name := obj.GetName()
+	if name == "" {
+		return nil, fmt.Errorf("YAML must include 'metadata.name'")
+	}
+
+	// Apply namespace override if provided
+	if opts.NamespaceOverride != "" {
+		obj.SetNamespace(opts.NamespaceOverride)
+	}
+
+	// Resolve GVR using group from apiVersion for disambiguation
+	group := ""
+	if parts := strings.SplitN(apiVersion, "/", 2); len(parts) == 2 {
+		group = parts[0]
+	}
+
+	var gvr schema.GroupVersionResource
+	var ok bool
+	if group != "" {
+		gvr, ok = m.discovery.GetGVRWithGroup(kind, group)
+	} else {
+		gvr, ok = m.discovery.GetGVR(kind)
+	}
+	if !ok {
+		return nil, fmt.Errorf("unknown resource kind: %s (apiVersion: %s)", kind, apiVersion)
+	}
+
+	ns := obj.GetNamespace()
+	mode := opts.Mode
+	if mode == "" {
+		mode = "apply"
+	}
+
+	dryRun := []string{}
+	if opts.DryRun {
+		dryRun = []string{metav1.DryRunAll}
+	}
+
+	result := &ApplyResourceResult{
+		Name:      name,
+		Namespace: ns,
+		Kind:      kind,
+	}
+
+	var client dynamic.ResourceInterface
+	if ns != "" {
+		client = m.dynClient.Resource(gvr).Namespace(ns)
+	} else {
+		client = m.dynClient.Resource(gvr)
+	}
+
+	if mode == "create" {
+		_, err := client.Create(ctx, obj, metav1.CreateOptions{DryRun: dryRun})
+		if err != nil {
+			return nil, fmt.Errorf("failed to create resource: %w", err)
+		}
+		result.Created = true
+		return result, nil
+	}
+
+	// Apply mode: server-side apply
+	objJSON, err := json.Marshal(obj.Object)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal resource: %w", err)
+	}
+
+	_, err = client.Patch(ctx, name, types.ApplyPatchType, objJSON, metav1.PatchOptions{
+		FieldManager: "radar",
+		Force:        boolPtr(true),
+		DryRun:       dryRun,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to apply resource: %w", err)
+	}
+
+	// Determine if this was a create or update by checking if the resource existed before.
+	// With server-side apply we can't easily distinguish, so we default to false (updated).
+	// The caller can check if the resource was newly created by other means if needed.
+	result.Created = false
+	return result, nil
+}
+
+func boolPtr(b bool) *bool { return &b }
 
 // DeleteResource deletes a Kubernetes resource.
 func (m *WorkloadManager) DeleteResource(ctx context.Context, opts DeleteResourceOptions) error {

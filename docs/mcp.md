@@ -181,6 +181,7 @@ Add to `~/.gemini/settings.json`:
 
 | Tool | Description | Parameters |
 |------|-------------|------------|
+| `apply_resource` | Create or update a Kubernetes resource from YAML. Supports multi-document YAML and server-side dry run. | `yaml` (required), `mode` (optional: `apply` or `create`, default `apply`), `dry_run` (optional, default false), `namespace` (optional, override) |
 | `manage_workload` | Restart, scale, or rollback a Deployment, StatefulSet, or DaemonSet. Note: `scale` is not supported for DaemonSets. | `action` (required: `restart`, `scale`, `rollback`), `kind` (required), `namespace` (required), `name` (required), `replicas` (for scale), `revision` (for rollback) |
 | `manage_cronjob` | Trigger, suspend, or resume a CronJob | `action` (required: `trigger`, `suspend`, `resume`), `namespace` (required), `name` (required) |
 | `manage_gitops` | Manage ArgoCD and FluxCD resources — sync, reconcile, suspend, resume | `action` (required), `tool` (required: `argocd` or `fluxcd`), `namespace` (required), `name` (required), `kind` (FluxCD only) |

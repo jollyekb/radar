@@ -1,4 +1,4 @@
-import { useMemo, useEffect, useCallback } from 'react'
+import { useMemo, useEffect, useCallback, useState } from 'react'
 import { useQueries } from '@tanstack/react-query'
 import { useNavigate, useLocation, useSearchParams } from 'react-router-dom'
 import { clsx } from 'clsx'
@@ -30,6 +30,8 @@ import { PodRenderer } from '../resources/renderers/PodRenderer'
 import { NodeRenderer } from '../resources/renderers/NodeRenderer'
 import { ServiceRenderer } from '../resources/renderers/ServiceRenderer'
 import { WorkloadRenderer } from '../resources/renderers/WorkloadRenderer'
+import { CreateResourceDialog } from '../shared/CreateResourceDialog'
+import { cleanYamlForDuplicate } from '../../utils/skeleton-yaml'
 
 type TabType = 'overview' | 'timeline' | 'logs' | 'metrics' | 'yaml'
 
@@ -305,7 +307,17 @@ export function WorkloadView({
     await updateResource.mutateAsync(params)
   }, [updateResource])
 
+  // Duplicate dialog
+  const [duplicateDialogOpen, setDuplicateDialogOpen] = useState(false)
+  const [duplicateYaml, setDuplicateYaml] = useState('')
+
+  const handleDuplicate = useCallback((params: { kind: string; namespace: string; name: string; yaml: string }) => {
+    setDuplicateYaml(cleanYamlForDuplicate(params.yaml))
+    setDuplicateDialogOpen(true)
+  }, [])
+
   return (
+    <>
     <BaseWorkloadView
       kind={kindProp}
       namespace={namespace}
@@ -339,10 +351,21 @@ export function WorkloadView({
       isMetricsAvailable={(kind, res) =>
         isPrometheusSupported(kind) && !(kind === 'Pod' && res?.status?.phase === 'Pending')
       }
+      onDuplicate={handleDuplicate}
       actionsBarProps={actionsBarProps}
       rendererOverrides={rendererOverrides}
       resolvedEnvFrom={resolvedEnvFrom}
     />
+    <CreateResourceDialog
+      open={duplicateDialogOpen}
+      onClose={() => setDuplicateDialogOpen(false)}
+      initialYaml={duplicateYaml}
+      title="Duplicate Resource"
+      onCreated={(result) => {
+        rest.onNavigateToResource?.({ kind: result.kind, namespace: result.namespace, name: result.name, group: '' })
+      }}
+    />
+    </>
   )
 }
 
