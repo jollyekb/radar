@@ -178,15 +178,9 @@ func buildClusterQueryInner(category MetricCategory, filterContainer bool) strin
 	}
 	switch category {
 	case CategoryCPU:
-		if cf != "" {
-			return fmt.Sprintf(`sum(rate(container_cpu_usage_seconds_total{%s}[5m]))`, cf)
-		}
-		return `sum(rate(container_cpu_usage_seconds_total[5m]))`
+		return fmt.Sprintf(`sum(rate(container_cpu_usage_seconds_total{%s}[5m]))`, cf)
 	case CategoryMemory:
-		if cf != "" {
-			return fmt.Sprintf(`sum(container_memory_working_set_bytes{%s})`, cf)
-		}
-		return `sum(container_memory_working_set_bytes)`
+		return fmt.Sprintf(`sum(container_memory_working_set_bytes{%s})`, cf)
 	case CategoryNetworkRX:
 		return `sum(rate(container_network_receive_bytes_total[5m]))`
 	case CategoryNetworkTX:

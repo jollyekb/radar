@@ -1,7 +1,9 @@
 package prometheus
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"net/url"
@@ -203,20 +205,9 @@ func handleResourceMetrics(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Fallback: if the primary query returned no data and this category uses
-	// container!='' filtering, retry without it. This handles cri-docker and
-	// other setups where cAdvisor metrics lack the container label entirely.
-	if len(result.Series) == 0 && categoryUsesContainerFilter(category) {
-		fallbackQuery := BuildQueryNoContainerFilter(kind, namespace, name, category)
-		if fallbackQuery != "" && fallbackQuery != query {
-			fallbackResult, fallbackErr := client.QueryRange(r.Context(), fallbackQuery, start, end, step)
-			if fallbackErr == nil && len(fallbackResult.Series) > 0 {
-				log.Printf("[prometheus] Primary query empty for %s/%s/%s (%s), fallback without container filter succeeded", kind, namespace, name, category)
-				result = fallbackResult
-				query = fallbackQuery
-			}
-		}
-	}
+	result, query = retryWithoutContainerFilter(r.Context(), client, result, query, category, start, end, step,
+		func() string { return BuildQueryNoContainerFilter(kind, namespace, name, category) },
+		fmt.Sprintf("Primary query empty for %s/%s/%s (%s)", kind, namespace, name, category))
 
 	resp := ResourceMetricsResponse{
 		Kind:      kind,
@@ -347,16 +338,9 @@ func handleNamespaceMetrics(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if len(result.Series) == 0 && categoryUsesContainerFilter(category) {
-		fallbackQuery := BuildNamespaceQueryNoContainerFilter(namespace, category)
-		if fallbackQuery != "" && fallbackQuery != query {
-			fallbackResult, fallbackErr := client.QueryRange(r.Context(), fallbackQuery, start, end, step)
-			if fallbackErr == nil && len(fallbackResult.Series) > 0 {
-				log.Printf("[prometheus] Namespace query empty for %s (%s), fallback without container filter succeeded", namespace, category)
-				result = fallbackResult
-			}
-		}
-	}
+	result, _ = retryWithoutContainerFilter(r.Context(), client, result, query, category, start, end, step,
+		func() string { return BuildNamespaceQueryNoContainerFilter(namespace, category) },
+		fmt.Sprintf("Namespace query empty for %s (%s)", namespace, category))
 
 	writeJSON(w, http.StatusOK, NamespaceMetricsResponse{
 		Namespace: namespace,
@@ -405,16 +389,9 @@ func handleClusterMetrics(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if len(result.Series) == 0 && categoryUsesContainerFilter(category) {
-		fallbackQuery := BuildClusterQueryNoContainerFilter(category)
-		if fallbackQuery != "" && fallbackQuery != query {
-			fallbackResult, fallbackErr := client.QueryRange(r.Context(), fallbackQuery, start, end, step)
-			if fallbackErr == nil && len(fallbackResult.Series) > 0 {
-				log.Printf("[prometheus] Cluster query empty (%s), fallback without container filter succeeded", category)
-				result = fallbackResult
-			}
-		}
-	}
+	result, _ = retryWithoutContainerFilter(r.Context(), client, result, query, category, start, end, step,
+		func() string { return BuildClusterQueryNoContainerFilter(category) },
+		fmt.Sprintf("Cluster query empty (%s)", category))
 
 	writeJSON(w, http.StatusOK, ClusterMetricsResponse{
 		Category: category,
@@ -464,6 +441,30 @@ func handleRawQuery(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, result)
+}
+
+// retryWithoutContainerFilter re-runs the query without the container!='' filter
+// when the primary result is empty and the category uses that filter. This handles
+// cri-docker and other setups where cAdvisor metrics lack the container label.
+// Returns the updated result (original or fallback) and the query that produced it.
+func retryWithoutContainerFilter(ctx context.Context, client *Client, result *QueryResult, query string, category MetricCategory, start, end time.Time, step time.Duration, buildFallback func() string, logPrefix string) (*QueryResult, string) {
+	if len(result.Series) > 0 || !categoryUsesContainerFilter(category) {
+		return result, query
+	}
+	fallbackQuery := buildFallback()
+	if fallbackQuery == "" || fallbackQuery == query {
+		return result, query
+	}
+	fallbackResult, err := client.QueryRange(ctx, fallbackQuery, start, end, step)
+	if err != nil {
+		log.Printf("[prometheus] %s, fallback query also failed: %v", logPrefix, err)
+		return result, query
+	}
+	if len(fallbackResult.Series) == 0 {
+		return result, query
+	}
+	log.Printf("[prometheus] %s, fallback without container filter succeeded", logPrefix)
+	return fallbackResult, fallbackQuery
 }
 
 const criDockerHint = "This pod's node uses the Docker container runtime (cri-docker), which is known to cause missing pod and namespace labels in cAdvisor metrics. " +
