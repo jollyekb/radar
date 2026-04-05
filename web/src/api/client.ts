@@ -218,6 +218,12 @@ export interface DashboardCertificateHealth {
   expired: number
 }
 
+export interface DashboardNetworkPolicyCoverage {
+  totalPolicies: number
+  coveredWorkloads: number
+  totalWorkloads: number
+}
+
 export interface DashboardResponse {
   cluster: DashboardCluster
   health: DashboardHealth
@@ -230,6 +236,7 @@ export interface DashboardResponse {
   metrics: DashboardMetrics | null
   metricsServerAvailable: boolean
   certificateHealth: DashboardCertificateHealth | null
+  networkPolicyCoverage: DashboardNetworkPolicyCoverage | null
   nodeVersionSkew: { versions: Record<string, string[]>; minVersion: string; maxVersion: string } | null
   deferredLoading?: boolean // True while deferred informers (secrets, events, etc.) are still syncing
   accessRestricted?: boolean // True when user has no namespace access (RBAC)

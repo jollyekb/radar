@@ -568,9 +568,25 @@ export function RelatedResourcesSection({ relationships, onNavigate }: RelatedRe
         {relationships.scalers && relationships.scalers.length > 0 && (
           <RelationshipGroup label="Autoscaler" refs={dedupeRefs(relationships.scalers)} onNavigate={onNavigate} />
         )}
-        {relationships.policies && relationships.policies.length > 0 && (
-          <RelationshipGroup label="Disruption Budget" refs={dedupeRefs(relationships.policies)} onNavigate={onNavigate} />
-        )}
+        {relationships.policies && relationships.policies.length > 0 && (() => {
+          const policyKinds = new Set(['NetworkPolicy', 'CiliumNetworkPolicy', 'CiliumClusterwideNetworkPolicy', 'ClusterNetworkPolicy'])
+          const pdbs = relationships.policies.filter(r => r.kind === 'PodDisruptionBudget')
+          const netpols = relationships.policies.filter(r => policyKinds.has(r.kind))
+          const other = relationships.policies.filter(r => r.kind !== 'PodDisruptionBudget' && !policyKinds.has(r.kind))
+          return (
+            <>
+              {pdbs.length > 0 && (
+                <RelationshipGroup label="Disruption Budget" refs={dedupeRefs(pdbs)} onNavigate={onNavigate} />
+              )}
+              {netpols.length > 0 && (
+                <RelationshipGroup label="Network Policies" refs={dedupeRefs(netpols)} onNavigate={onNavigate} />
+              )}
+              {other.length > 0 && (
+                <RelationshipGroup label="Policies" refs={dedupeRefs(other)} onNavigate={onNavigate} />
+              )}
+            </>
+          )
+        })()}
         {relationships.scaleTarget && (
           <RelationshipGroup label="Scale Target" refs={[relationships.scaleTarget]} onNavigate={onNavigate} />
         )}

@@ -35,7 +35,9 @@ export function useEventSource(
   viewMode: ViewMode = 'resources',
   options?: UseEventSourceOptions,
   /** When set, SSE reconnects with this namespace filter (for large clusters that require server-side filtering) */
-  forceNamespaceFilter?: string[]
+  forceNamespaceFilter?: string[],
+  /** When true, evaluates NetworkPolicies and annotates edges with allow/block/unprotected */
+  showPolicyEffect?: boolean,
 ): UseEventSourceReturn {
   const [topology, setTopology] = useState<Topology | null>(null)
   const [events, setEvents] = useState<K8sEvent[]>([])
@@ -80,6 +82,9 @@ export function useEventSource(
     }
     if (viewMode && viewMode !== 'resources') {
       params.set('view', viewMode)
+    }
+    if (showPolicyEffect) {
+      params.set('policyEffect', 'true')
     }
     const url = `/api/events/stream${params.toString() ? `?${params}` : ''}`
 
@@ -215,7 +220,7 @@ export function useEventSource(
         console.error('Failed to parse connection_state event:', e)
       }
     })
-  }, [sseNamespaceFilter, viewMode])
+  }, [sseNamespaceFilter, viewMode, showPolicyEffect])
 
   // Reconnect function for manual reconnection
   const reconnect = useCallback(() => {

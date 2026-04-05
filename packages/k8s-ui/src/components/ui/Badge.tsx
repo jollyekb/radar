@@ -73,6 +73,10 @@ const KIND: Record<string, string> = {
   HorizontalPodAutoscaler: 'bg-pink-100 text-pink-800 border-pink-300 dark:bg-pink-950/50 dark:text-pink-300 dark:border-pink-700/40',
   PersistentVolumeClaim:   'bg-cyan-100 text-cyan-800 border-cyan-300 dark:bg-cyan-950/50 dark:text-cyan-400 dark:border-cyan-700/40',
   PodDisruptionBudget:     'bg-orange-100 text-orange-800 border-orange-300 dark:bg-orange-950/50 dark:text-orange-300 dark:border-orange-700/40',
+  NetworkPolicy:                      'bg-indigo-100 text-indigo-800 border-indigo-300 dark:bg-indigo-950/50 dark:text-indigo-300 dark:border-indigo-700/40',
+  CiliumNetworkPolicy:                'bg-indigo-100 text-indigo-800 border-indigo-300 dark:bg-indigo-950/50 dark:text-indigo-300 dark:border-indigo-700/40',
+  CiliumClusterwideNetworkPolicy:     'bg-indigo-100 text-indigo-800 border-indigo-300 dark:bg-indigo-950/50 dark:text-indigo-300 dark:border-indigo-700/40',
+  ClusterNetworkPolicy:               'bg-violet-100 text-violet-800 border-violet-300 dark:bg-violet-950/50 dark:text-violet-300 dark:border-violet-700/40',
 
   // Cluster-scoped
   Node:          'bg-sky-100 text-sky-700 border-sky-300 dark:bg-sky-950/50 dark:text-sky-400 dark:border-sky-700/40',
@@ -147,6 +151,10 @@ export function getKindColorClass(kind: string): string {
     horizontalpodautoscalers: 'HorizontalPodAutoscaler',
     persistentvolumeclaims: 'PersistentVolumeClaim',
     poddisruptionbudgets: 'PodDisruptionBudget',
+    networkpolicies: 'NetworkPolicy',
+    ciliumnetworkpolicies: 'CiliumNetworkPolicy',
+    ciliumclusterwidenetworkpolicies: 'CiliumClusterwideNetworkPolicy',
+    clusternetworkpolicies: 'ClusterNetworkPolicy',
     rollouts: 'Rollout', httproutes: 'HTTPRoute', grpcroutes: 'GRPCRoute',
     events: 'Event', helmreleases: 'HelmRelease',
   }

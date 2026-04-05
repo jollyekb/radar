@@ -506,6 +506,7 @@ func buildInformerSetups(factory informers.SharedInformerFactory) []informerSetu
 		}, false},
 		{StorageClasses, "StorageClass", func() cache.SharedIndexInformer { return factory.Storage().V1().StorageClasses().Informer() }, false},
 		{PodDisruptionBudgets, "PodDisruptionBudget", func() cache.SharedIndexInformer { return factory.Policy().V1().PodDisruptionBudgets().Informer() }, false},
+		{NetworkPolicies, "NetworkPolicy", func() cache.SharedIndexInformer { return factory.Networking().V1().NetworkPolicies().Informer() }, false},
 		{ServiceAccounts, "ServiceAccount", func() cache.SharedIndexInformer { return factory.Core().V1().ServiceAccounts().Informer() }, false},
 	}
 }
@@ -883,6 +884,7 @@ var allKindListers = []kindLister{
 	{"HorizontalPodAutoscaler", "autoscaling", func(rc *ResourceCache) any { return rc.HorizontalPodAutoscalers() }},
 	{"StorageClass", "storage.k8s.io", func(rc *ResourceCache) any { return rc.StorageClasses() }},
 	{"PodDisruptionBudget", "policy", func(rc *ResourceCache) any { return rc.PodDisruptionBudgets() }},
+	{"NetworkPolicy", "networking.k8s.io", func(rc *ResourceCache) any { return rc.NetworkPolicies() }},
 	{"ServiceAccount", "", func(rc *ResourceCache) any { return rc.ServiceAccounts() }},
 }
 

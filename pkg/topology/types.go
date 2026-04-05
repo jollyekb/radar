@@ -91,8 +91,12 @@ const (
 	KindPVC           NodeKind = "PersistentVolumeClaim"
 	KindPV            NodeKind = "PersistentVolume"
 	KindStorageClass  NodeKind = "StorageClass"
-	KindPDB           NodeKind = "PodDisruptionBudget"
-	KindVPA           NodeKind = "VerticalPodAutoscaler"
+	KindPDB                          NodeKind = "PodDisruptionBudget"
+	KindNetworkPolicy                NodeKind = "NetworkPolicy"
+	KindCiliumNetworkPolicy          NodeKind = "CiliumNetworkPolicy"
+	KindCiliumClusterwideNetworkPolicy NodeKind = "CiliumClusterwideNetworkPolicy"
+	KindClusterNetworkPolicy           NodeKind = "ClusterNetworkPolicy"
+	KindVPA                          NodeKind = "VerticalPodAutoscaler"
 	KindNamespace     NodeKind = "Namespace"
 )
 
@@ -135,7 +139,15 @@ type Edge struct {
 	Type              EdgeType `json:"type"`
 	Label             string   `json:"label,omitempty"`
 	SkipIfKindVisible string   `json:"skipIfKindVisible,omitempty"` // Hide this edge if this kind is visible (for shortcut edges)
+	PolicyEffect      string   `json:"policyEffect,omitempty"`      // "allowed", "blocked", or "unprotected" — set when ShowPolicyEffect is true
 }
+
+// PolicyEffect constants for edge annotation
+const (
+	PolicyEffectAllowed     = "allowed"     // Traffic explicitly allowed by a NetworkPolicy ingress rule
+	PolicyEffectBlocked     = "blocked"     // Target has a selecting policy but source is not in any allow list
+	PolicyEffectUnprotected = "unprotected" // Target has no selecting NetworkPolicy (default-allow)
+)
 
 // Topology represents the complete graph
 type Topology struct {
@@ -170,6 +182,7 @@ type BuildOptions struct {
 	IncludeReplicaSets bool     // Include ReplicaSet nodes (noisy intermediate objects)
 	IncludeGenericCRDs     bool // Include CRDs with owner refs to topology nodes (default: true)
 	ForRelationshipCache   bool // Skip large cluster guard — used for internal relationship cache builds
+	ShowPolicyEffect       bool // Evaluate NetworkPolicies and annotate edges with allow/block/unprotected
 }
 
 // MatchesNamespace returns true if ns is in the allowed list.
@@ -298,6 +311,7 @@ type ResourceProvider interface {
 	PersistentVolumes() ([]*corev1.PersistentVolume, error)
 	HorizontalPodAutoscalers() ([]*autoscalingv2.HorizontalPodAutoscaler, error)
 	PodDisruptionBudgets() ([]*policyv1.PodDisruptionBudget, error)
+	NetworkPolicies() ([]*networkingv1.NetworkPolicy, error)
 	Nodes() ([]*corev1.Node, error)
 	// GetResourceStatus returns health status for a resource; nil if unknown.
 	GetResourceStatus(kind, namespace, name string) *ResourceStatus

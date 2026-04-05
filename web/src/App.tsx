@@ -215,6 +215,7 @@ function AppInner() {
   const [selectedHelmRelease, setSelectedHelmRelease] = useState<SelectedHelmRelease | null>(null)
   const [topologyMode, setTopologyMode] = useState<'resources' | 'traffic'>(getInitialState().topologyMode)
   const [groupingMode, setGroupingMode] = useState<GroupingMode>(getInitialState().grouping)
+  const [showPolicyEffect, setShowPolicyEffect] = useState(false)
   // Topology filter state
   const [visibleKinds, setVisibleKinds] = useState<Set<NodeKind>>(() => new Set(DEFAULT_VISIBLE_KINDS))
   const [filterSidebarCollapsed, setFilterSidebarCollapsed] = useState(false)
@@ -472,7 +473,7 @@ function AppInner() {
       queryClient.invalidateQueries({ queryKey: ['dashboard'] })
     },
     onK8sEvent: handleK8sEvent,
-  }, forceNamespaceFilter)
+  }, forceNamespaceFilter, showPolicyEffect)
   const [reconnect, isReconnecting] = useRefreshAnimation(reconnectSSE)
 
   // Apply live topology updates only when not paused. While paused, buffer the
@@ -1055,6 +1056,8 @@ function AppInner() {
                     groupingMode={groupingMode}
                     onGroupingModeChange={setGroupingMode}
                     showNoGrouping={hasNamespaceFilter}
+                    showPolicyEffect={showPolicyEffect}
+                    onShowPolicyEffectChange={setShowPolicyEffect}
                   />
                 </div>
               </>

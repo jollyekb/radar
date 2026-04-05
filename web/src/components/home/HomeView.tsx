@@ -7,6 +7,7 @@ import { HelmSummary } from './HelmSummary'
 import { ActivitySummary } from './ActivitySummary'
 import { TrafficSummary } from './TrafficSummary'
 import { CertificateHealthCard } from './CertificateHealthCard'
+import { NetworkPolicyCoverageCard } from './NetworkPolicyCoverageCard'
 import { CostCard } from './CostCard'
 import { ClusterHealthCard } from './ClusterHealthCard'
 import { AlertTriangle, Loader2, Shield } from 'lucide-react'
@@ -111,6 +112,12 @@ export function HomeView({ namespaces, topology, onNavigateToView, onNavigateToR
               <CertificateHealthCard
                 data={data.certificateHealth}
                 onNavigate={() => onNavigateToResourceKind('secrets', undefined, { type: ['TLS'] })}
+              />
+            )}
+            {data.networkPolicyCoverage && (
+              <NetworkPolicyCoverageCard
+                data={data.networkPolicyCoverage}
+                onNavigate={() => onNavigateToResourceKind('networkpolicies', 'networking.k8s.io')}
               />
             )}
             <CostCard onNavigate={() => onNavigateToView('cost')} />

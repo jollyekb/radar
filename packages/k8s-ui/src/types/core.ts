@@ -145,6 +145,7 @@ export interface TopologyEdge {
   type: EdgeType
   label?: string
   skipIfKindVisible?: string // Hide this edge if this kind is visible (for shortcut edges)
+  policyEffect?: 'allowed' | 'blocked' | 'unprotected'
 }
 
 export interface Topology {

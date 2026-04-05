@@ -6,12 +6,15 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"slices"
 	"sort"
 	"sync"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/labels"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/skyhook-io/radar/internal/helm"
 	"github.com/skyhook-io/radar/internal/k8s"
@@ -32,7 +35,8 @@ type DashboardResponse struct {
 	TrafficSummary         *DashboardTrafficSummary    `json:"trafficSummary"`
 	Metrics                *DashboardMetrics           `json:"metrics"`
 	MetricsServerAvailable bool                        `json:"metricsServerAvailable"`
-	CertificateHealth      *DashboardCertificateHealth `json:"certificateHealth,omitempty"`
+	CertificateHealth      *DashboardCertificateHealth     `json:"certificateHealth,omitempty"`
+	NetworkPolicyCoverage  *DashboardNetworkPolicyCoverage `json:"networkPolicyCoverage,omitempty"`
 	NodeVersionSkew        *k8s.VersionSkew            `json:"nodeVersionSkew,omitempty"`
 	DeferredLoading        bool                        `json:"deferredLoading,omitempty"`  // True while deferred informers (secrets, events, etc.) are still syncing
 	PartialData            []string                    `json:"partialData,omitempty"`      // Resource kinds that timed out during critical sync (e.g. ["Pod", "Deployment"])
@@ -285,6 +289,7 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 	k8s.LogTiming("  [dashboard] topology: %v", time.Since(t))
 
 	resp.CertificateHealth = s.getDashboardCertificateHealth(namespace)
+	resp.NetworkPolicyCoverage = s.getDashboardNetworkPolicyCoverage(cache, namespaces)
 
 	if nodeLister := cache.Nodes(); nodeLister != nil {
 		nodes, _ := nodeLister.List(labels.Everything())
@@ -1246,5 +1251,164 @@ func (s *Server) getDashboardCRDCounts(_ context.Context, namespace string) []Da
 	}
 
 	return counts
+}
+
+// DashboardNetworkPolicyCoverage reports how many workloads are covered by at least one NetworkPolicy.
+type DashboardNetworkPolicyCoverage struct {
+	TotalPolicies    int `json:"totalPolicies"`
+	CoveredWorkloads int `json:"coveredWorkloads"`
+	TotalWorkloads   int `json:"totalWorkloads"`
+}
+
+type npSelector struct {
+	namespace string
+	selector  labels.Selector
+}
+
+func (s *Server) getDashboardNetworkPolicyCoverage(cache *k8s.ResourceCache, namespaces []string) *DashboardNetworkPolicyCoverage {
+	npLister := cache.NetworkPolicies()
+	if npLister == nil {
+		return nil
+	}
+
+	// Collect all NetworkPolicy selectors
+	var allNPs []npSelector
+	if len(namespaces) == 0 {
+		nps, err := npLister.List(labels.Everything())
+		if err != nil {
+			log.Printf("[dashboard] Failed to list NetworkPolicies: %v", err)
+			return nil
+		}
+		for _, np := range nps {
+			sel, err := metav1.LabelSelectorAsSelector(&np.Spec.PodSelector)
+			if err != nil {
+				continue
+			}
+			allNPs = append(allNPs, npSelector{np.Namespace, sel})
+		}
+	} else {
+		for _, ns := range namespaces {
+			nps, err := npLister.NetworkPolicies(ns).List(labels.Everything())
+			if err != nil {
+				log.Printf("[dashboard] Failed to list NetworkPolicies in namespace %s: %v", ns, err)
+				continue
+			}
+			for _, np := range nps {
+				sel, err := metav1.LabelSelectorAsSelector(&np.Spec.PodSelector)
+				if err != nil {
+					continue
+				}
+				allNPs = append(allNPs, npSelector{np.Namespace, sel})
+			}
+		}
+	}
+
+	// Also count CiliumNetworkPolicy selectors (from dynamic cache)
+	if dynamicCache := k8s.GetDynamicResourceCache(); dynamicCache != nil {
+		if discovery := k8s.GetResourceDiscovery(); discovery != nil {
+			if cnpGVR, ok := discovery.GetGVR("CiliumNetworkPolicy"); ok {
+				nsFilter := ""
+				if len(namespaces) == 1 {
+					nsFilter = namespaces[0]
+				}
+				cnps, err := dynamicCache.List(cnpGVR, nsFilter)
+				if err == nil {
+					for _, cnp := range cnps {
+						ns := cnp.GetNamespace()
+						if len(namespaces) > 1 && !slices.Contains(namespaces, ns) {
+							continue
+						}
+						selectorMap, _, _ := unstructured.NestedMap(cnp.Object, "spec", "endpointSelector", "matchLabels")
+						if len(selectorMap) == 0 {
+							// Empty selector matches all pods in namespace
+							allNPs = append(allNPs, npSelector{ns, labels.Everything()})
+						} else {
+							selectorLabels := make(map[string]string)
+							for k, v := range selectorMap {
+								if sv, ok := v.(string); ok {
+									selectorLabels[k] = sv
+								}
+							}
+							if sel, err := metav1.LabelSelectorAsSelector(&metav1.LabelSelector{MatchLabels: selectorLabels}); err == nil {
+								allNPs = append(allNPs, npSelector{ns, sel})
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// Count workloads and which are covered by at least one policy
+	covered := make(map[string]bool)
+	totalWorkloads := 0
+
+	checkCoverage := func(kind, ns, name string, templateLabels map[string]string) {
+		key := kind + "/" + ns + "/" + name
+		totalWorkloads++
+		for _, np := range allNPs {
+			if np.namespace != ns {
+				continue
+			}
+			if np.selector.Matches(labels.Set(templateLabels)) {
+				covered[key] = true
+				break
+			}
+		}
+	}
+
+	if depLister := cache.Deployments(); depLister != nil {
+		if len(namespaces) == 0 {
+			deps, _ := depLister.List(labels.Everything())
+			for _, d := range deps {
+				checkCoverage("Deployment", d.Namespace, d.Name, d.Spec.Template.Labels)
+			}
+		} else {
+			for _, ns := range namespaces {
+				deps, _ := depLister.Deployments(ns).List(labels.Everything())
+				for _, d := range deps {
+					checkCoverage("Deployment", d.Namespace, d.Name, d.Spec.Template.Labels)
+				}
+			}
+		}
+	}
+
+	if stsLister := cache.StatefulSets(); stsLister != nil {
+		if len(namespaces) == 0 {
+			stss, _ := stsLister.List(labels.Everything())
+			for _, s := range stss {
+				checkCoverage("StatefulSet", s.Namespace, s.Name, s.Spec.Template.Labels)
+			}
+		} else {
+			for _, ns := range namespaces {
+				stss, _ := stsLister.StatefulSets(ns).List(labels.Everything())
+				for _, s := range stss {
+					checkCoverage("StatefulSet", s.Namespace, s.Name, s.Spec.Template.Labels)
+				}
+			}
+		}
+	}
+
+	if dsLister := cache.DaemonSets(); dsLister != nil {
+		if len(namespaces) == 0 {
+			dss, _ := dsLister.List(labels.Everything())
+			for _, d := range dss {
+				checkCoverage("DaemonSet", d.Namespace, d.Name, d.Spec.Template.Labels)
+			}
+		} else {
+			for _, ns := range namespaces {
+				dss, _ := dsLister.DaemonSets(ns).List(labels.Everything())
+				for _, d := range dss {
+					checkCoverage("DaemonSet", d.Namespace, d.Name, d.Spec.Template.Labels)
+				}
+			}
+		}
+	}
+
+	return &DashboardNetworkPolicyCoverage{
+		TotalPolicies:    len(allNPs),
+		CoveredWorkloads: len(covered),
+		TotalWorkloads:   totalWorkloads,
+	}
 }
 

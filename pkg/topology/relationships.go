@@ -372,6 +372,11 @@ func buildNodeID(kind, namespace, name string, dp DynamicProvider) string {
 		"storageclasses":           "storageclass",
 		"poddisruptionbudgets":     "poddisruptionbudget",
 		"pdbs":                     "poddisruptionbudget",
+		"networkpolicies":                     "networkpolicy",
+		"netpol":                              "networkpolicy",
+		"ciliumnetworkpolicies":               "ciliumnetworkpolicy",
+		"ciliumclusterwidenetworkpolicies":    "ciliumclusterwidenetworkpolicy",
+		"clusternetworkpolicies":              "clusternetworkpolicy",
 		"verticalpodautoscalers":   "verticalpodautoscaler",
 		"vpas":                     "verticalpodautoscaler",
 		"nodes":                    "node",
@@ -496,7 +501,11 @@ func normalizeKind(kind string, dp DynamicProvider) string {
 		"persistentvolume":        "PersistentVolume",
 		"storageclass":            "StorageClass",
 		"poddisruptionbudget":     "PodDisruptionBudget",
-		"verticalpodautoscaler":   "VerticalPodAutoscaler",
+		"networkpolicy":                      "NetworkPolicy",
+		"ciliumnetworkpolicy":                "CiliumNetworkPolicy",
+		"ciliumclusterwidenetworkpolicy":     "CiliumClusterwideNetworkPolicy",
+		"clusternetworkpolicy":               "ClusterNetworkPolicy",
+		"verticalpodautoscaler":              "VerticalPodAutoscaler",
 	}
 
 	if normalized, ok := kindMap[strings.ToLower(kind)]; ok {

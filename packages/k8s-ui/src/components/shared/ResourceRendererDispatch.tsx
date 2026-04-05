@@ -97,6 +97,8 @@ import {
   SealedSecretRenderer,
   WorkflowTemplateRenderer,
   NetworkPolicyRenderer,
+  CiliumNetworkPolicyRenderer,
+  ClusterNetworkPolicyRenderer,
   PodDisruptionBudgetRenderer,
   ServiceAccountRenderer,
   RoleRenderer,
@@ -212,7 +214,10 @@ const KNOWN_KINDS = new Set([
   'storageclasses', 'certificaterequests', 'clusterissuers', 'issuers',
   'orders', 'challenges',
   'gateways', 'gatewayclasses', 'httproutes', 'grpcroutes', 'tcproutes', 'tlsroutes', 'sealedsecrets', 'workflowtemplates',
-  'networkpolicies', 'poddisruptionbudgets', 'serviceaccounts',
+  'networkpolicies', 'networkpolicy',
+  'ciliumnetworkpolicies', 'ciliumnetworkpolicy', 'ciliumclusterwidenetworkpolicies', 'ciliumclusterwidenetworkpolicy',
+  'clusternetworkpolicies', 'clusternetworkpolicy',
+  'poddisruptionbudgets', 'serviceaccounts',
   'roles', 'clusterroles', 'rolebindings', 'clusterrolebindings',
   'events', 'gitrepositories', 'ocirepositories', 'helmrepositories',
   'kustomizations', 'helmreleases', 'alerts', 'applications',
@@ -350,7 +355,9 @@ export function ResourceRendererDispatch({
         {kind === 'tlsroutes' && <SimpleRouteRenderer data={data} kind="TLSRoute" onNavigate={onNavigate} />}
         {kind === 'sealedsecrets' && <SealedSecretRenderer data={data} />}
         {kind === 'workflowtemplates' && <WorkflowTemplateRenderer data={data} />}
-        {kind === 'networkpolicies' && <NetworkPolicyRenderer data={data} />}
+        {(kind === 'networkpolicies' || kind === 'networkpolicy') && <NetworkPolicyRenderer data={data} />}
+        {(kind === 'ciliumnetworkpolicies' || kind === 'ciliumnetworkpolicy' || kind === 'ciliumclusterwidenetworkpolicies' || kind === 'ciliumclusterwidenetworkpolicy') && <CiliumNetworkPolicyRenderer data={data} />}
+        {(kind === 'clusternetworkpolicies' || kind === 'clusternetworkpolicy') && <ClusterNetworkPolicyRenderer data={data} />}
         {kind === 'poddisruptionbudgets' && <PodDisruptionBudgetRenderer data={data} />}
         {kind === 'serviceaccounts' && <ServiceAccountRenderer data={data} />}
         {(kind === 'roles' || kind === 'clusterroles') && <RoleRenderer data={data} />}

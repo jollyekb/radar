@@ -44,6 +44,7 @@ type ResourcePermissions struct {
 	PersistentVolumes        bool `json:"persistentVolumes"`
 	StorageClasses           bool `json:"storageClasses"`
 	PodDisruptionBudgets     bool `json:"podDisruptionBudgets"`
+	NetworkPolicies          bool `json:"networkPolicies"`
 	Gateways                 bool `json:"gateways"`
 	HTTPRoutes               bool `json:"httpRoutes"`
 }
@@ -563,6 +564,8 @@ func CheckResourcePermissions(ctx context.Context) *PermissionCheckResult {
 		{"storage.k8s.io", "storageclasses", &perms.StorageClasses},
 		// policy group
 		{"policy", "poddisruptionbudgets", &perms.PodDisruptionBudgets},
+		// networking.k8s.io group
+		{"networking.k8s.io", "networkpolicies", &perms.NetworkPolicies},
 	}
 
 	// Phase 1: Check all resources cluster-wide

@@ -40,6 +40,7 @@ const (
 	HorizontalPodAutoscalers ResourceType = "horizontalpodautoscalers"
 	StorageClasses           ResourceType = "storageclasses"
 	PodDisruptionBudgets     ResourceType = "poddisruptionbudgets"
+	NetworkPolicies          ResourceType = "networkpolicies"
 	ServiceAccounts          ResourceType = "serviceaccounts"
 )
 
