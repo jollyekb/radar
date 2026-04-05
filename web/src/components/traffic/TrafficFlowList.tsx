@@ -353,7 +353,7 @@ function PolicyCorrelation({ flow }: { flow: TrafficFlow }) {
   // Need either labels or pod name to resolve the evaluated pod
   const canQuery = !!evalNs && (!!evalLabels || !!evalName)
 
-  const { data, isLoading } = useQuery<PolicyEvaluation>({
+  const { data, isLoading, isError } = useQuery<PolicyEvaluation>({
     queryKey: ['policy-evaluate', destNs, destName, labelsParam, srcNs, srcName, srcLabelsParam, direction],
     queryFn: () => {
       const params = new URLSearchParams({ namespace: destNs })
@@ -373,6 +373,11 @@ function PolicyCorrelation({ flow }: { flow: TrafficFlow }) {
   if (isLoading) return (
     <div className="pt-1 border-t border-theme-border/50 text-theme-text-tertiary text-[10px]">
       Evaluating policies...
+    </div>
+  )
+  if (isError) return (
+    <div className="pt-1 border-t border-theme-border/50 text-theme-text-tertiary text-[10px]">
+      Unable to evaluate policies
     </div>
   )
   if (!data || !data.selectingPolicies || data.selectingPolicies.length === 0) return (
@@ -396,7 +401,7 @@ function PolicyCorrelation({ flow }: { flow: TrafficFlow }) {
         <div key={i} className="flex items-start gap-1.5 ml-4">
           <span className={clsx(
             'shrink-0 mt-0.5 w-1.5 h-1.5 rounded-full',
-            p.effect === 'allow' ? 'bg-green-500' : 'bg-red-500',
+            p.effect === 'allow' ? 'bg-green-500' : p.effect === 'unknown' ? 'bg-yellow-500' : 'bg-red-500',
           )} />
           <div className="min-w-0">
             <span className="text-[10px] text-theme-text-primary font-medium">{p.name}</span>

@@ -118,6 +118,9 @@ func (s *Server) handleEvaluateNetworkPolicies(w http.ResponseWriter, r *http.Re
 			}
 
 			effect, reason := evaluateStandardPolicy(np, direction, peerNs, peerLabels)
+			if effect == "skip" {
+				continue
+			}
 			matches = append(matches, PolicyMatch{
 				Name:      np.Name,
 				Namespace: np.Namespace,
@@ -136,20 +139,21 @@ func (s *Server) handleEvaluateNetworkPolicies(w http.ResponseWriter, r *http.Re
 		if discovery := k8s.GetResourceDiscovery(); discovery != nil {
 			if cnpGVR, ok := discovery.GetGVR("CiliumNetworkPolicy"); ok {
 				cnps, err := dynamicCache.List(cnpGVR, evalNs)
-				if err == nil {
-					for _, cnp := range cnps {
-						selectorMap, _, _ := unstructured.NestedMap(cnp.Object, "spec", "endpointSelector", "matchLabels")
-						if !matchesCRDSelector(evalLabels, selectorMap) {
-							continue
-						}
-						matches = append(matches, PolicyMatch{
-							Name:      cnp.GetName(),
-							Namespace: cnp.GetNamespace(),
-							Kind:      "CiliumNetworkPolicy",
-							Effect:    "deny",
-							Reason:    "Cilium policy selects this endpoint (detailed rule evaluation not yet supported)",
-						})
+				if err != nil {
+					log.Printf("[network-policy] Failed to list CiliumNetworkPolicies in %s: %v", evalNs, err)
+				}
+				for _, cnp := range cnps {
+					selectorMap, _, _ := unstructured.NestedMap(cnp.Object, "spec", "endpointSelector", "matchLabels")
+					if !matchesCRDSelector(evalLabels, selectorMap) {
+						continue
 					}
+					matches = append(matches, PolicyMatch{
+						Name:      cnp.GetName(),
+						Namespace: cnp.GetNamespace(),
+						Kind:      "CiliumNetworkPolicy",
+						Effect:    "unknown",
+						Reason:    "Cilium policy selects this endpoint (detailed rule evaluation not yet supported)",
+					})
 				}
 			}
 		}
@@ -161,7 +165,19 @@ func (s *Server) handleEvaluateNetworkPolicies(w http.ResponseWriter, r *http.Re
 		if anyAllows {
 			verdict = "allowed"
 		} else {
-			verdict = "denied"
+			// Check if all matches are "unknown" (e.g. only Cilium policies with no rule evaluation)
+			allUnknown := true
+			for _, m := range matches {
+				if m.Effect != "unknown" {
+					allUnknown = false
+					break
+				}
+			}
+			if allUnknown {
+				verdict = "unknown"
+			} else {
+				verdict = "denied"
+			}
 		}
 	}
 
@@ -189,7 +205,7 @@ func evaluateIngressPolicy(np *networkingv1.NetworkPolicy, srcNs string, srcLabe
 		}
 	}
 	if !hasIngress {
-		return "deny", "no Ingress policy type (egress-only policy)"
+		return "skip", "egress-only policy, does not affect ingress"
 	}
 
 	if len(np.Spec.Ingress) == 0 {
@@ -219,7 +235,7 @@ func evaluateEgressPolicy(np *networkingv1.NetworkPolicy, destNs string, destLab
 		}
 	}
 	if !hasEgress {
-		return "deny", "no Egress policy type (ingress-only policy)"
+		return "skip", "ingress-only policy, does not affect egress"
 	}
 
 	if len(np.Spec.Egress) == 0 {

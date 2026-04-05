@@ -819,6 +819,11 @@ OpenCost cost data is not CRD-based — no custom resources are required. Cost v
 
 **Traffic View Integration:** When Hubble is available, dropped flows are correlated with the network policies that caused them, showing which policy denied specific traffic in real time.
 
+<p align="center">
+  <img src="screenshots/integrations/netpol-traffic-correlation.png" alt="Traffic Drop Correlation" width="800">
+  <br><em>Traffic View — dropped flow with POLICY_DENIED reason and selecting policy correlation</em>
+</p>
+
 ### Supported Resources
 
 | Resource | Group | Topology | Detail View | AI Summary |
