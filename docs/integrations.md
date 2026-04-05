@@ -772,6 +772,63 @@ OpenCost cost data is not CRD-based — no custom resources are required. Cost v
 
 ---
 
+## Network Policies
+
+[Network Policies](https://kubernetes.io/docs/concepts/services-networking/network-policies/) control pod-to-pod and pod-to-external traffic at the network level. Radar supports standard Kubernetes NetworkPolicy as well as Cilium's CiliumNetworkPolicy and CiliumClusterwideNetworkPolicy CRDs, providing visibility into what traffic is allowed, denied, and which workloads are unprotected.
+
+### What Radar Shows
+
+**Topology:** NetworkPolicy and CiliumNetworkPolicy nodes appear in the topology graph with edges connecting them to the workloads they protect. See at a glance which deployments have network policies applied and which are exposed.
+
+<p align="center">
+  <img src="screenshots/integrations/netpol-topology.png" alt="Network Policy Topology" width="800">
+  <br><em>Network Policies in Topology View — policies connected to protected workloads</em>
+</p>
+
+**Policy Flow Diagram:** Each NetworkPolicy detail drawer includes a visual flow diagram showing ingress and egress rules as a directional graph — sources on the left, targets on the right, with ports and protocols labeled. Quickly understand what a policy allows without reading YAML.
+
+<p align="center">
+  <img src="screenshots/integrations/netpol-flow-diagram.png" alt="Policy Flow Diagram" width="600">
+  <br><em>Policy Flow Diagram — visual representation of ingress and egress rules</em>
+</p>
+
+**Dashboard Coverage Card:** The home dashboard includes a Network Policy Coverage card showing total policy count, the percentage of workloads covered by at least one policy, and a count of uncovered workloads. Click through to browse all policies.
+
+<p align="center">
+  <img src="screenshots/integrations/netpol-dashboard-card.png" alt="Network Policy Coverage Card" width="400">
+  <br><em>Dashboard Coverage Card — policy count, coverage percentage, and uncovered workloads</em>
+</p>
+
+**Cilium Policy Detail View:**
+- Endpoint selector targeting
+- Ingress/egress rules with allow and deny semantics
+- Cilium-specific entity selectors (world, cluster, host)
+- CIDR rules, port/protocol specifications
+- Related workloads with clickable links
+
+<p align="center">
+  <img src="screenshots/integrations/netpol-cilium-renderer.png" alt="CiliumNetworkPolicy Detail" width="400">
+  <br><em>CiliumNetworkPolicy Detail — endpoint selector, ingress deny from world, egress allow to cluster</em>
+</p>
+
+**Standard NetworkPolicy Detail View:**
+- Pod selector and namespace selector rules
+- Ingress and egress rules with CIDR blocks, ports, and protocols
+- Policy type indicators (Ingress, Egress, or both)
+- Related resources showing protected workloads
+
+**Traffic View Integration:** When Hubble is available, dropped flows are correlated with the network policies that caused them, showing which policy denied specific traffic in real time.
+
+### Supported Resources
+
+| Resource | Group | Topology | Detail View | AI Summary |
+|----------|-------|----------|-------------|------------|
+| NetworkPolicy | `networking.k8s.io/v1` | Yes | Yes | Yes |
+| CiliumNetworkPolicy | `cilium.io/v2` | Yes | Yes | Yes |
+| CiliumClusterwideNetworkPolicy | `cilium.io/v2` | Yes | Yes | Yes |
+
+---
+
 ## Any Other CRD
 
 Radar automatically discovers and displays **every** CRD installed in your cluster — no configuration or plugins required. Resources appear in the sidebar, can be filtered and searched, and show full YAML with syntax highlighting in the detail drawer. The integrations above add richer presentation, but every CRD is browsable out of the box.
