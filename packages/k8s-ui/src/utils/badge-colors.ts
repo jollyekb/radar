@@ -52,6 +52,13 @@ export const HELM_STATUS_COLORS: Record<string, string> = {
   uninstalled: BADGE_SEVERITY_COLORS.neutral,
 }
 
+// Best practices category colors
+export const BP_CATEGORY_BADGE: Record<string, string> = {
+  Security: 'bg-purple-50 text-purple-700 border-purple-200 dark:bg-purple-950/40 dark:text-purple-400 dark:border-purple-800/40',
+  Reliability: 'bg-sky-50 text-sky-700 border-sky-200 dark:bg-sky-950/40 dark:text-sky-400 dark:border-sky-800/40',
+  Efficiency: 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-400 dark:border-emerald-800/40',
+}
+
 // Default fallback color
 export const DEFAULT_BADGE_COLOR = 'bg-theme-elevated text-theme-text-secondary'
 

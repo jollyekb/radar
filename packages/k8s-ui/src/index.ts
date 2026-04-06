@@ -33,3 +33,6 @@ export * from './components/dock'
 
 // Topology (TopologyGraph, TopologySearch, TopologyFilterSidebar, layout utilities)
 export * from './components/topology'
+
+// Cluster audit (AuditCard, AuditAlerts, AuditFindingsTable)
+export * from './components/audit'

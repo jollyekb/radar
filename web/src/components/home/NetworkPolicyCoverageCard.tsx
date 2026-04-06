@@ -12,12 +12,13 @@ export function NetworkPolicyCoverageCard({ data, onNavigate }: NetworkPolicyCov
     ? Math.round((data.coveredWorkloads / data.totalWorkloads) * 100)
     : 0
   const hasPolicies = data.totalPolicies > 0
-  const fullCoverage = hasPolicies && percentage === 100
   const accentColor = !hasPolicies
     ? 'text-theme-text-tertiary'
-    : fullCoverage
+    : percentage >= 75
       ? 'text-green-500'
-      : 'text-yellow-500'
+      : percentage >= 40
+        ? 'text-yellow-500'
+        : 'text-red-500'
 
   return (
     <button
@@ -60,7 +61,7 @@ export function NetworkPolicyCoverageCard({ data, onNavigate }: NetworkPolicyCov
                     />
                   )}
                 </div>
-                <span className={clsx('text-sm font-semibold tabular-nums', fullCoverage ? 'text-green-400' : 'text-yellow-400')}>
+                <span className={clsx('text-sm font-semibold tabular-nums', accentColor)}>
                   {percentage}%
                 </span>
               </div>

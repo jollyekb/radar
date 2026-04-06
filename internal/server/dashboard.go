@@ -38,6 +38,7 @@ type DashboardResponse struct {
 	CertificateHealth      *DashboardCertificateHealth     `json:"certificateHealth,omitempty"`
 	NetworkPolicyCoverage  *DashboardNetworkPolicyCoverage `json:"networkPolicyCoverage,omitempty"`
 	NodeVersionSkew        *k8s.VersionSkew            `json:"nodeVersionSkew,omitempty"`
+	Audit          *DashboardAudit      `json:"audit,omitempty"`
 	DeferredLoading        bool                        `json:"deferredLoading,omitempty"`  // True while deferred informers (secrets, events, etc.) are still syncing
 	PartialData            []string                    `json:"partialData,omitempty"`      // Resource kinds that timed out during critical sync (e.g. ["Pod", "Deployment"])
 	AccessRestricted       bool                        `json:"accessRestricted,omitempty"` // True when user has no namespace access (RBAC)
@@ -290,6 +291,7 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 
 	resp.CertificateHealth = s.getDashboardCertificateHealth(namespace)
 	resp.NetworkPolicyCoverage = s.getDashboardNetworkPolicyCoverage(cache, namespaces)
+	resp.Audit = getDashboardAudit(cache, namespaces)
 
 	if nodeLister := cache.Nodes(); nodeLister != nil {
 		nodes, _ := nodeLister.List(labels.Everything())
@@ -1271,7 +1273,6 @@ func (s *Server) getDashboardNetworkPolicyCoverage(cache *k8s.ResourceCache, nam
 		return nil
 	}
 
-	// Collect all NetworkPolicy selectors
 	var allNPs []npSelector
 	if len(namespaces) == 0 {
 		nps, err := npLister.List(labels.Everything())
@@ -1303,7 +1304,6 @@ func (s *Server) getDashboardNetworkPolicyCoverage(cache *k8s.ResourceCache, nam
 		}
 	}
 
-	// Also count CiliumNetworkPolicy selectors (from dynamic cache)
 	if dynamicCache := k8s.GetDynamicResourceCache(); dynamicCache != nil {
 		if discovery := k8s.GetResourceDiscovery(); discovery != nil {
 			if cnpGVR, ok := discovery.GetGVR("CiliumNetworkPolicy"); ok {
@@ -1320,7 +1320,6 @@ func (s *Server) getDashboardNetworkPolicyCoverage(cache *k8s.ResourceCache, nam
 						}
 						selectorMap, _, _ := unstructured.NestedMap(cnp.Object, "spec", "endpointSelector", "matchLabels")
 						if len(selectorMap) == 0 {
-							// Empty selector matches all pods in namespace
 							allNPs = append(allNPs, npSelector{ns, labels.Everything()})
 						} else {
 							selectorLabels := make(map[string]string)
@@ -1339,7 +1338,6 @@ func (s *Server) getDashboardNetworkPolicyCoverage(cache *k8s.ResourceCache, nam
 		}
 	}
 
-	// Count workloads and which are covered by at least one policy
 	covered := make(map[string]bool)
 	totalWorkloads := 0
 
@@ -1409,6 +1407,42 @@ func (s *Server) getDashboardNetworkPolicyCoverage(cache *k8s.ResourceCache, nam
 		TotalPolicies:    len(allNPs),
 		CoveredWorkloads: len(covered),
 		TotalWorkloads:   totalWorkloads,
+	}
+}
+
+// DashboardAudit is the audit summary in the dashboard response.
+type DashboardAudit struct {
+	Passing    int                                `json:"passing"`
+	Warning    int                                `json:"warning"`
+	Danger     int                                `json:"danger"`
+	Categories map[string]DashboardCategorySummary `json:"categories"`
+}
+
+// DashboardCategorySummary provides per-category counts for the dashboard.
+type DashboardCategorySummary struct {
+	Passing int `json:"passing"`
+	Warning int `json:"warning"`
+	Danger  int `json:"danger"`
+}
+
+func getDashboardAudit(cache *k8s.ResourceCache, namespaces []string) *DashboardAudit {
+	results := applyAuditSettings(getCachedResults(cache, namespaces), getAuditConfig())
+	if results == nil {
+		return nil
+	}
+	cats := make(map[string]DashboardCategorySummary, len(results.Summary.Categories))
+	for k, v := range results.Summary.Categories {
+		cats[k] = DashboardCategorySummary{
+			Passing: v.Passing,
+			Warning: v.Warning,
+			Danger:  v.Danger,
+		}
+	}
+	return &DashboardAudit{
+		Passing:    results.Summary.Passing,
+		Warning:    results.Summary.Warning,
+		Danger:     results.Summary.Danger,
+		Categories: cats,
 	}
 }
 

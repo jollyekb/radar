@@ -136,11 +136,13 @@ document.execCommand = function (command: string, showUI?: boolean, value?: stri
   return _origExecCommand(command, showUI, value)
 } as typeof document.execCommand
 
-// Mouse back/forward button navigation for desktop webview.
-// On Windows (WebView2/Chromium), these events fire natively — this handles them.
-// On macOS (WKWebView), these events never reach JS — handled by native NSEvent monitor in mouse_darwin.go.
-// On Linux (webkit2gtk), behavior varies by version — this catches it when supported.
-window.addEventListener('auxclick', (e: MouseEvent) => {
+// Mouse back/forward button navigation (button 3 = back, button 4 = forward).
+// Uses 'mouseup' in capture phase to intercept before the browser's native handler.
+// This prevents double-navigation in browsers (where auxclick + native both fire)
+// and handles desktop WebView (Windows/Linux) where native handling varies.
+// On macOS WKWebView, mouse events don't reach JS — native NSEvent monitor in
+// mouse_darwin.go handles them via WKWebView.goBack()/goForward() directly.
+window.addEventListener('mouseup', (e: MouseEvent) => {
   if (e.button === 3) {
     e.preventDefault()
     window.history.back()
@@ -148,7 +150,7 @@ window.addEventListener('auxclick', (e: MouseEvent) => {
     e.preventDefault()
     window.history.forward()
   }
-})
+}, true)
 
 // Type the meta property for mutations
 declare module '@tanstack/react-query' {

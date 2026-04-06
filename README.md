@@ -265,6 +265,19 @@ Track Kubernetes spending with OpenCost integration — no additional configurat
 - Node costs with instance type and region pricing
 - Appears automatically when OpenCost metrics are detected in Prometheus
 
+### Cluster Audit
+
+Proactive best-practices scanner with 31 checks across security, reliability, and efficiency — inspired by Polaris, Kubescape, Trivy, and NSA/CISA guidelines. Runs instantly against cached data with zero cluster-side installation.
+
+- Security: privileged containers, privilege escalation, dangerous/insecure capabilities, host namespaces, container runtime socket mounts, sensitive host paths, secrets in ConfigMaps, auto-mounted service account tokens
+- Reliability: missing probes, image tag `latest`, single-replica deployments, missing PDB/topology spread, pod HA risk (all replicas on same node), orphan services/ingresses, deprecated API versions
+- Efficiency: missing CPU/memory requests and limits, orphan ConfigMaps/Secrets, resource utilization vs requests
+- Grouped-by-resource and by-namespace views with search, category/severity/framework filters
+- Each finding includes description and remediation guidance, with inline hide actions (per-check, per-category, per-namespace)
+- Configurable: ignored namespaces (with wildcard patterns), disabled checks, persisted across sessions
+- Framework labels: NSA/CISA, CIS benchmarks
+- MCP tool (`get_cluster_audit`) for AI-assisted cluster analysis
+
 ### AI Integration (MCP) <sup>beta</sup>
 
 Radar includes a built-in [Model Context Protocol](https://modelcontextprotocol.io) (MCP) server that lets AI assistants — Claude, Cursor, Copilot, and others — query your cluster through Radar.
