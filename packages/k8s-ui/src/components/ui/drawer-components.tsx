@@ -117,7 +117,7 @@ export function Property({ label, value, copyable, onCopy, copied }: PropertyPro
 
   return (
     <div className="flex items-start gap-2 text-sm">
-      <span className="text-theme-text-tertiary w-28 shrink-0">{label}</span>
+      <span className="text-theme-text-tertiary w-40 shrink-0">{label}</span>
       <span className="text-theme-text-primary break-all flex-1">{displayValue}</span>
       {copyable && onCopy && !isReactElement(value) && (
         <button

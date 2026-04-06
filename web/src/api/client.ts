@@ -210,6 +210,18 @@ export interface DashboardCRDCount {
   count: number
 }
 
+// Re-export shared types from k8s-ui — single source of truth
+import type { AuditCardData, AuditFinding, ResourceGroup, CheckMeta } from '@skyhook-io/k8s-ui'
+export type DashboardAudit = AuditCardData
+export type { AuditFinding, ResourceGroup, CheckMeta }
+
+export interface AuditResponse {
+  summary: DashboardAudit
+  findings: AuditFinding[]
+  groups: ResourceGroup[]
+  checks: Record<string, CheckMeta>
+}
+
 export interface DashboardCertificateHealth {
   total: number
   healthy: number
@@ -237,6 +249,7 @@ export interface DashboardResponse {
   metricsServerAvailable: boolean
   certificateHealth: DashboardCertificateHealth | null
   networkPolicyCoverage: DashboardNetworkPolicyCoverage | null
+  audit: DashboardAudit | null
   nodeVersionSkew: { versions: Record<string, string[]>; minVersion: string; maxVersion: string } | null
   deferredLoading?: boolean // True while deferred informers (secrets, events, etc.) are still syncing
   accessRestricted?: boolean // True when user has no namespace access (RBAC)
@@ -253,6 +266,66 @@ export function useDashboard(namespaces: string[] = []) {
     queryFn: () => fetchJSON(`/dashboard${params}`),
     staleTime: 15000, // 15 seconds
     refetchInterval: 30000, // Refresh every 30 seconds
+  })
+}
+
+// Best practices
+export function useAudit(namespaces: string[] = []) {
+  const params = namespaces.length > 0 ? `?namespaces=${namespaces.join(',')}` : ''
+  return useQuery<AuditResponse>({
+    queryKey: ['audit', namespaces],
+    queryFn: () => fetchJSON(`/audit${params}`),
+    staleTime: 30000,
+    refetchInterval: 60000,
+  })
+}
+
+export function useResourceAudit(kind: string, namespace: string, name: string) {
+  return useQuery<AuditFinding[]>({
+    queryKey: ['audit', 'resource', kind, namespace, name],
+    queryFn: () => fetchJSON(`/audit/resource/${kind}/${namespace}/${name}`),
+    staleTime: 30000,
+  })
+}
+
+// Audit settings
+export interface AuditSettings {
+  ignoredNamespaces: string[]
+  disabledChecks: string[]
+}
+
+export function useAuditSettings() {
+  return useQuery<AuditSettings>({
+    queryKey: ['audit-settings'],
+    queryFn: () => fetchJSON('/settings/audit'),
+    staleTime: 60000,
+  })
+}
+
+export function useUpdateAuditSettings() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async (settings: AuditSettings) => {
+      const resp = await apiFetch(`${API_BASE}/settings/audit`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(settings),
+      })
+      if (!resp.ok) {
+        const body = await resp.json().catch(() => ({ error: 'Unknown error' }))
+        throw new Error(body.error || `HTTP ${resp.status}`)
+      }
+      return resp.json()
+    },
+    meta: {
+      errorMessage: 'Failed to save audit settings',
+      successMessage: 'Audit settings saved',
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['audit-settings'] })
+      queryClient.invalidateQueries({ queryKey: ['audit'] })
+      queryClient.invalidateQueries({ queryKey: ['dashboard'] })
+    },
   })
 }
 

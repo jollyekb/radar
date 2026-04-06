@@ -106,6 +106,20 @@ func registerTools(server *mcp.Server) {
 		Annotations: readOnly,
 	}, logToolCall("get_changes", handleGetChanges))
 
+	// --- Audit tool (read-only) ---
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name: "get_cluster_audit",
+		Description: "Run best-practice checks against cluster resources and return findings " +
+			"with remediation guidance. Checks cover security (running as root, privileged " +
+			"containers, dangerous capabilities), reliability (missing probes, single replicas, " +
+			"no PDB), and efficiency (missing resource requests/limits). " +
+			"Each finding includes what's wrong and how to fix it. " +
+			"Respects user's audit settings (ignored namespaces, disabled checks). " +
+			"Filter by namespace, category, or severity.",
+		Annotations: readOnly,
+	}, logToolCall("get_cluster_audit", handleGetAudit))
+
 	// --- Helm tools (read-only) ---
 
 	mcp.AddTool(server, &mcp.Tool{

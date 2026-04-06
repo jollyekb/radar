@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with th
 
 ## Project Overview
 
-Radar is a modern Kubernetes visibility tool — local-first, no account required, no cloud dependency, fast. It provides topology visualization, event timeline, service traffic maps, resource browsing, and Helm management. Runs as a kubectl plugin (`kubectl-radar`) or standalone binary and opens a web UI in the browser. Open source, free forever. Built by Skyhook.
+Radar is a modern Kubernetes visibility tool — local-first, no account required, no cloud dependency, fast. It provides topology visualization, event timeline, service traffic maps, resource browsing, Helm management, and cluster audit (best-practices scanning). Runs as a kubectl plugin (`kubectl-radar`) or standalone binary and opens a web UI in the browser. Open source, free forever. Built by Skyhook.
 
 ## Reference Docs — MUST READ before making changes
 
@@ -57,6 +57,7 @@ radar/
 │   └── desktop/               # Desktop app entry point (Wails v2)
 ├── internal/
 │   ├── app/                   # Application lifecycle management
+│   ├── audit/                 # Radar-specific audit runner (cache → pkg/audit bridge)
 │   ├── config/                # Configuration management
 │   ├── errorlog/              # Error logging utilities
 │   ├── helm/                  # Helm client integration
@@ -129,6 +130,7 @@ radar/
 ├── pkg/
 │   ├── ai/
 │   │   └── context/           # AI context minification for LLM-friendly output
+│   ├── audit/                 # Shared cluster audit check engine (reusable by skyhook-connector)
 │   ├── gitops/                # GitOps operations abstraction
 │   ├── k8score/               # Shared K8s caching layer (informers, listers, transforms)
 │   ├── portforward/           # Port forwarding logic
@@ -143,6 +145,7 @@ radar/
 │   └── k8s-ui/                # Shared UI package (@skyhook-io/k8s-ui)
 │       └── src/
 │           ├── components/
+│           │   ├── audit/      # AuditCard, AuditAlerts, AuditFindingsTable (shared)
 │           │   ├── resources/  # ResourcesView, resource-utils, renderers
 │           │   ├── shared/     # ResourceRendererDispatch, ResourceActionsBar, EditableYamlView
 │           │   ├── gitops/     # ArgoCD/FluxCD panels
@@ -166,6 +169,7 @@ radar/
 │   │   │   ├── resource/      # Single resource detail page
 │   │   │   ├── resource-drawer/ # Resource drawer overlay
 │   │   │   ├── resources/     # Resource list panels (thin wrappers over @skyhook-io/k8s-ui)
+│   │   │   ├── audit/          # Cluster audit detail view
 │   │   │   ├── cost/           # Cost tracking and visualization
 │   │   │   ├── settings/      # Settings dialog
 │   │   │   ├── shared/        # Shared components (namespace picker, YAML editor)
@@ -273,6 +277,7 @@ make clean          # Remove build artifacts
 - Workloads: `/api/workloads/{kind}/{ns}/{name}/...` (logs, restart, scale, rollback)
 - GitOps: `/api/argo/applications/...`, `/api/flux/{kind}/...`
 - Nodes: `/api/nodes/{name}/...` (cordon, uncordon, drain, debug)
+- Audit: `/api/audit`, `/api/audit/resource/{kind}/{ns}/{name}`, `/api/settings/audit` (GET/PUT)
 
 ## Key Patterns
 
@@ -364,8 +369,9 @@ make clean          # Remove build artifacts
 
 ### MCP Server
 - Stateless HTTP handler mounted at `/mcp` (JSON-RPC over HTTP)
-- 16 tools organized into read and write categories:
+- 17 tools organized into read and write categories:
   - **Read tools** (8): `get_dashboard` (with problem-correlated changes), `list_resources`, `get_resource` (with optional `include`: events, relationships, metrics, logs), `get_topology` (with `format`: graph or summary), `get_events` (with optional `kind`/`name` resource filter), `get_pod_logs`, `list_namespaces`, `get_changes` (timeline of resource mutations)
+  - **Read tools — Audit** (1): `get_cluster_audit` (best-practice findings with remediation, filter by namespace/category/severity)
   - **Read tools — Helm** (2): `list_helm_releases`, `get_helm_release` (with optional values/history/diff)
   - **Read tools — Logs** (1): `get_workload_logs` (aggregated, AI-filtered logs across all pods)
   - **Write tools** (5): `apply_resource` (create or update from YAML, supports multi-doc and dry-run), `manage_workload` (restart/scale/rollback), `manage_cronjob` (trigger/suspend/resume), `manage_gitops` (ArgoCD sync/suspend/resume, FluxCD reconcile/suspend/resume), `manage_node` (cordon/uncordon/drain)

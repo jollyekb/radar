@@ -358,7 +358,7 @@ function NestedObjectViewer({ name, value, depth = 0 }: NestedObjectViewerProps)
           <div className="ml-5 mt-1 space-y-1">
             {simpleEntries.map(([k, v]) => (
               <div key={k} className="flex items-start gap-2 text-xs">
-                <span className="text-theme-text-tertiary w-28 shrink-0">{formatFieldName(k)}</span>
+                <span className="text-theme-text-tertiary w-40 shrink-0">{formatFieldName(k)}</span>
                 <span className="text-theme-text-secondary break-all">{formatValue(v)}</span>
               </div>
             ))}

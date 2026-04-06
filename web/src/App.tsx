@@ -14,6 +14,7 @@ import { WorkloadViewRoute } from './components/workload/WorkloadView'
 import { HelmView } from './components/helm/HelmView'
 import { TrafficView } from './components/traffic/TrafficView'
 import { CostView } from './components/cost/CostView'
+import { AuditView } from './components/audit/AuditView'
 import { HelmReleaseDrawer } from './components/helm/HelmReleaseDrawer'
 import { PortForwardManager, usePortForwardCount } from './components/portforward/PortForwardManager'
 import { DockProvider, BottomDock, useDock, useOpenLocalTerminal } from './components/dock'
@@ -91,7 +92,7 @@ function apiResourceToNodeIdPrefix(apiResource: string): string {
 }
 
 // Extended MainView type that includes traffic and cost
-type ExtendedMainView = MainView | 'traffic' | 'cost' | 'workload'
+type ExtendedMainView = MainView | 'traffic' | 'cost' | 'workload' | 'audit'
 
 // Extract view from URL path
 function getViewFromPath(pathname: string): ExtendedMainView {
@@ -104,6 +105,7 @@ function getViewFromPath(pathname: string): ExtendedMainView {
   if (path === 'traffic') return 'traffic'
   if (path === 'cost') return 'cost'
   if (path === 'workload') return 'workload'
+  if (path === 'audit') return 'audit'
   return 'home'
 }
 
@@ -1114,6 +1116,29 @@ function AppInner() {
         {/* Cost detail view */}
         {mainView === 'cost' && (
           <CostView onBack={() => setMainView('home')} />
+        )}
+
+        {/* Best practices detail view */}
+        {mainView === 'audit' && (
+          <AuditView
+            namespaces={namespaces}
+            onBack={() => setMainView('home')}
+            onNavigateToResource={(resource) => {
+              const pluralKind = kindToPlural(resource.kind)
+              setSelectedResource({ ...resource, kind: pluralKind })
+              const newParams = new URLSearchParams(searchParams)
+              newParams.delete('kind')
+              newParams.delete('mode')
+              newParams.delete('group')
+              newParams.delete('resource')
+              if (resource.group) {
+                newParams.set('apiGroup', resource.group)
+              } else {
+                newParams.delete('apiGroup')
+              }
+              navigate({ pathname: `/resources/${pluralKind}`, search: newParams.toString() })
+            }}
+          />
         )}
 
         {/* Workload full view (direct URL only — expand from drawer uses drawer's expanded state) */}

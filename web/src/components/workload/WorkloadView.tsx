@@ -20,6 +20,8 @@ import {
   fetchJSON,
 } from '../../api/client'
 import { PrometheusCharts, isPrometheusSupported } from '../resource/PrometheusCharts'
+import { useResourceAudit } from '../../api/client'
+import { AuditAlerts } from '@skyhook-io/k8s-ui'
 import { WorkloadLogsViewer } from '../logs/WorkloadLogsViewer'
 import { LogsViewer } from '../logs/LogsViewer'
 import { useCanUpdateSecrets, useCanNodeWrite, useNamespacedCapabilities } from '../../contexts/CapabilitiesContext'
@@ -355,6 +357,9 @@ export function WorkloadView({
       actionsBarProps={actionsBarProps}
       rendererOverrides={rendererOverrides}
       resolvedEnvFrom={resolvedEnvFrom}
+      renderOverviewExtra={({ kind: k, namespace: ns, name: n }) => (
+        <AuditSection kind={k} namespace={ns} name={n} />
+      )}
     />
     <CreateResourceDialog
       open={duplicateDialogOpen}
@@ -517,4 +522,11 @@ function MultiPodLogsTab({ pods, namespace, selectedPod, onSelectPod, initialCon
       )}
     </div>
   )
+}
+
+function AuditSection({ kind, namespace, name }: { kind: string; namespace: string; name: string }) {
+  const navigate = useNavigate()
+  const { data: findings } = useResourceAudit(kind, namespace, name)
+  if (!findings || findings.length === 0) return null
+  return <AuditAlerts findings={findings} onViewAll={() => navigate('/audit')} />
 }

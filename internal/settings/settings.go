@@ -15,10 +15,24 @@ type PinnedKind struct {
 	Group string `json:"group"`
 }
 
+// AuditConfig holds cluster audit preferences.
+type AuditConfig struct {
+	IgnoredNamespaces []string `json:"ignoredNamespaces"`
+	DisabledChecks    []string `json:"disabledChecks"`
+}
+
+// DefaultAuditConfig returns the default audit settings.
+func DefaultAuditConfig() AuditConfig {
+	return AuditConfig{
+		IgnoredNamespaces: []string{"kube-system", "kube-node-lease", "kube-public", "*-system"},
+	}
+}
+
 // Settings holds user preferences persisted across restarts.
 type Settings struct {
 	Theme       string       `json:"theme,omitempty"`
 	PinnedKinds []PinnedKind `json:"pinnedKinds,omitempty"`
+	Audit       *AuditConfig `json:"audit,omitempty"`
 }
 
 // mu serializes Load-mutate-Save cycles to prevent concurrent PUTs from

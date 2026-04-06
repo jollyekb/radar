@@ -121,6 +121,8 @@ interface WorkloadViewProps {
   renderMetricsTab?: (props: { kind: string; namespace: string; name: string }) => ReactNode
   /** Whether metrics are available for this resource kind */
   isMetricsAvailable?: (kind: string, resource: any) => boolean
+  /** Render extra content at the bottom of the overview tab (e.g. audit findings) */
+  renderOverviewExtra?: (props: { kind: string; namespace: string; name: string }) => ReactNode
 
   // ── Duplicate ────────────────────────────────────────────────────────────
   /** Duplicate handler — opens create dialog with this resource's YAML */
@@ -172,6 +174,7 @@ export function WorkloadView({
   isMetricsAvailable,
   // Duplicate
   onDuplicate,
+  renderOverviewExtra,
   // Actions bar
   actionsBarProps,
   // Renderer overrides
@@ -439,20 +442,27 @@ export function WorkloadView({
               onDuplicate={onDuplicate}
             />
           ) : (
-            <ResourceRendererDispatch
-              resource={selectedResource}
-              data={resource}
-              relationships={relationships}
-              certificateInfo={certificateInfo}
-              onCopy={copyToClipboard}
-              copied={copied}
-              onNavigate={onNavigateToResource ? (ref) => onNavigateToResource(refToSelectedResource(ref)) : undefined}
-              onSaveSecretValue={canUpdateSecrets ? handleSaveSecretValue : undefined}
-              isSavingSecret={isUpdatingResource}
-              rendererOverrides={rendererOverrides}
-              resolvedEnvFrom={resolvedEnvFrom}
-              renderMetrics={renderMetricsTab}
-            />
+            <>
+              <ResourceRendererDispatch
+                resource={selectedResource}
+                data={resource}
+                relationships={relationships}
+                certificateInfo={certificateInfo}
+                onCopy={copyToClipboard}
+                copied={copied}
+                onNavigate={onNavigateToResource ? (ref) => onNavigateToResource(refToSelectedResource(ref)) : undefined}
+                onSaveSecretValue={canUpdateSecrets ? handleSaveSecretValue : undefined}
+                isSavingSecret={isUpdatingResource}
+                rendererOverrides={rendererOverrides}
+                resolvedEnvFrom={resolvedEnvFrom}
+                renderMetrics={renderMetricsTab}
+              />
+              {renderOverviewExtra && (
+                <div className="px-4 pb-4">
+                  {renderOverviewExtra({ kind, namespace, name })}
+                </div>
+              )}
+            </>
           )}
         </div>
       </div>
@@ -578,21 +588,22 @@ export function WorkloadView({
       {/* Tab Content */}
       <div className="flex-1 overflow-hidden relative">
         {activeTab === 'overview' && (
-          <InfoTab
-            resource={resource}
-            selectedResource={selectedResource}
-            relationships={relationships}
-            isLoading={resourceLoading}
-            onNavigate={onNavigateToResource}
-            onCopy={copyToClipboard}
-            copied={copied}
-            onSaveSecretValue={canUpdateSecrets ? handleSaveSecretValue : undefined}
-            isSavingSecret={isUpdatingResource}
-            onOpenLogs={handleOpenLogs}
-            onSwitchToTimeline={() => handleSetTab('timeline')}
-            rendererOverrides={rendererOverrides}
-            resolvedEnvFrom={resolvedEnvFrom}
-          />
+            <InfoTab
+              resource={resource}
+              selectedResource={selectedResource}
+              relationships={relationships}
+              isLoading={resourceLoading}
+              onNavigate={onNavigateToResource}
+              onCopy={copyToClipboard}
+              copied={copied}
+              onSaveSecretValue={canUpdateSecrets ? handleSaveSecretValue : undefined}
+              isSavingSecret={isUpdatingResource}
+              onOpenLogs={handleOpenLogs}
+              onSwitchToTimeline={() => handleSetTab('timeline')}
+              rendererOverrides={rendererOverrides}
+              resolvedEnvFrom={resolvedEnvFrom}
+              extraContent={renderOverviewExtra && renderOverviewExtra({ kind, namespace, name })}
+            />
         )}
         {activeTab === 'timeline' && (
           <EventsTab
@@ -1076,6 +1087,7 @@ function InfoTab({
   onSwitchToTimeline,
   rendererOverrides,
   resolvedEnvFrom,
+  extraContent,
 }: {
   resource: any
   selectedResource: SelectedResource
@@ -1090,6 +1102,7 @@ function InfoTab({
   onSwitchToTimeline?: () => void
   rendererOverrides?: RendererOverrides
   resolvedEnvFrom?: ResolvedEnvFrom
+  extraContent?: ReactNode
 }) {
   if (isLoading) {
     return (
@@ -1140,6 +1153,11 @@ function InfoTab({
           </div>
         )}
       />
+      {extraContent && (
+        <div className="px-4 pb-4">
+          {extraContent}
+        </div>
+      )}
     </div>
   )
 }

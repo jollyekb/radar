@@ -16,11 +16,10 @@ export function ServiceRenderer({ data, onCopy, copied, renderPortAction }: Serv
   const namespace = data.metadata?.namespace
   const serviceName = data.metadata?.name
 
-  // Check for issues
   const isLoadBalancer = spec.type === 'LoadBalancer'
+  const isExternalName = spec.type === 'ExternalName'
   const lbPending = isLoadBalancer && lbIngress.length === 0
   const hasNoSelector = !spec.selector || Object.keys(spec.selector).length === 0
-  const isExternalName = spec.type === 'ExternalName'
 
   return (
     <>
@@ -46,47 +45,60 @@ export function ServiceRenderer({ data, onCopy, copied, renderPortAction }: Serv
       <Section title="Service" icon={Globe}>
         <PropertyList>
           <Property label="Type" value={spec.type || 'ClusterIP'} />
-          <Property label="Cluster IP" value={spec.clusterIP} copyable onCopy={onCopy} copied={copied} />
+          {isExternalName ? (
+            <Property label="External Name" value={spec.externalName} copyable onCopy={onCopy} copied={copied} />
+          ) : (
+            <Property label="Cluster IP" value={spec.clusterIP} copyable onCopy={onCopy} copied={copied} />
+          )}
           {spec.externalIPs?.length > 0 && (
             <Property label="External IPs" value={spec.externalIPs.join(', ')} copyable onCopy={onCopy} copied={copied} />
           )}
-          {lbIngress.length > 0 && (
+          {lbIngress.map((ing: any, i: number) => (
             <Property
-              label="Load Balancer"
-              value={lbIngress[0].ip || lbIngress[0].hostname}
+              key={i}
+              label={lbIngress.length > 1 ? `Load Balancer ${i + 1}` : 'Load Balancer'}
+              value={ing.ip || ing.hostname}
               copyable
               onCopy={onCopy}
               copied={copied}
             />
-          )}
+          ))}
           <Property label="Session Affinity" value={spec.sessionAffinity} />
           <Property label="External Traffic" value={spec.externalTrafficPolicy} />
+          <Property label="Internal Traffic" value={spec.internalTrafficPolicy} />
+          {spec.ipFamilyPolicy && <Property label="IP Family Policy" value={spec.ipFamilyPolicy} />}
+          {spec.ipFamilies?.length > 0 && <Property label="IP Families" value={spec.ipFamilies.join(', ')} />}
         </PropertyList>
       </Section>
 
-      <Section title="Ports" defaultExpanded>
-        <div className="space-y-2">
-          {ports.map((port: any, i: number) => (
-            <div key={`${port.port}-${port.protocol || 'TCP'}`} className="card-inner text-sm">
-              <div className="flex items-center justify-between">
-                <span className="text-theme-text-primary font-medium">{port.name || `port-${i + 1}`}</span>
-                <div className="flex items-center gap-2">
-                  {renderPortAction?.({
-                    namespace,
-                    serviceName,
-                    port: port.port,
-                    protocol: port.protocol || 'TCP',
-                  })}
+      {ports.length > 0 && (
+        <Section title="Ports" defaultExpanded>
+          <div className="space-y-2">
+            {ports.map((port: any, i: number) => (
+              <div key={`${port.port}-${port.protocol || 'TCP'}`} className="card-inner text-sm">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="text-theme-text-primary font-medium">{port.name || `port-${i + 1}`}</span>
+                    <span className="text-xs text-theme-text-tertiary">{port.protocol || 'TCP'}</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {renderPortAction?.({
+                      namespace,
+                      serviceName,
+                      port: port.port,
+                      protocol: port.protocol || 'TCP',
+                    })}
+                  </div>
+                </div>
+                <div className="text-xs text-theme-text-secondary mt-1">
+                  {port.port}{port.targetPort != null && port.targetPort !== port.port ? ` → ${port.targetPort}` : ''}
+                  {port.nodePort ? ` (NodePort: ${port.nodePort})` : ''}
                 </div>
               </div>
-              <div className="text-xs text-theme-text-secondary mt-1">
-                {port.port} {port.targetPort !== port.port && `→ ${port.targetPort}`}
-                {port.nodePort && ` (NodePort: ${port.nodePort})`}
-              </div>
-            </div>
-          ))}
-        </div>
-      </Section>
+            ))}
+          </div>
+        </Section>
+      )}
 
       {spec.selector && (
         <Section title="Selector">

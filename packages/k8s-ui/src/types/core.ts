@@ -847,7 +847,7 @@ export interface TrafficFilters {
 }
 
 // Main view type now includes 'traffic' and 'cost'
-export type ExtendedMainView = MainView | 'traffic' | 'cost'
+export type ExtendedMainView = MainView | 'traffic' | 'cost' | 'audit'
 
 // ============================================================================
 // Image Filesystem Types

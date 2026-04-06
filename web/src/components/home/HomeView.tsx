@@ -9,6 +9,7 @@ import { TrafficSummary } from './TrafficSummary'
 import { CertificateHealthCard } from './CertificateHealthCard'
 import { NetworkPolicyCoverageCard } from './NetworkPolicyCoverageCard'
 import { CostCard } from './CostCard'
+import { AuditCard } from '@skyhook-io/k8s-ui'
 import { ClusterHealthCard } from './ClusterHealthCard'
 import { AlertTriangle, Loader2, Shield } from 'lucide-react'
 import { clsx } from 'clsx'
@@ -88,39 +89,66 @@ export function HomeView({ namespaces, topology, onNavigateToView, onNavigateToR
           'grid gap-6',
           hasProblems ? 'grid-cols-1 lg:grid-cols-[1fr_420px]' : 'grid-cols-1'
         )}>
-          {/* Left column: teaser cards in 2-col grid */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 auto-rows-min">
-            <TopologyPreview
-              topology={topology}
-              summary={data.topologySummary}
-              onNavigate={() => onNavigateToView('topology')}
-            />
-            <HelmSummary
-              data={helmData}
-              onNavigate={() => onNavigateToView('helm')}
-            />
-            <ActivitySummary
-              namespaces={namespaces}
-              topology={topology}
-              onNavigate={() => onNavigateToView('timeline')}
-            />
-            <TrafficSummary
-              data={data.trafficSummary}
-              onNavigate={() => onNavigateToView('traffic')}
-            />
-            {data.certificateHealth && (
-              <CertificateHealthCard
-                data={data.certificateHealth}
-                onNavigate={() => onNavigateToResourceKind('secrets', undefined, { type: ['TLS'] })}
+          {/* Left column: teaser cards */}
+          <div className="flex flex-col gap-6 auto-rows-min">
+            {/* Primary cards — 2-col grid */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+              <TopologyPreview
+                topology={topology}
+                summary={data.topologySummary}
+                onNavigate={() => onNavigateToView('topology')}
               />
-            )}
-            {data.networkPolicyCoverage && (
-              <NetworkPolicyCoverageCard
-                data={data.networkPolicyCoverage}
-                onNavigate={() => onNavigateToResourceKind('networkpolicies', 'networking.k8s.io')}
+              <HelmSummary
+                data={helmData}
+                onNavigate={() => onNavigateToView('helm')}
               />
-            )}
-            <CostCard onNavigate={() => onNavigateToView('cost')} />
+              <ActivitySummary
+                namespaces={namespaces}
+                topology={topology}
+                onNavigate={() => onNavigateToView('timeline')}
+              />
+              <TrafficSummary
+                data={data.trafficSummary}
+                onNavigate={() => onNavigateToView('traffic')}
+              />
+              <CostCard onNavigate={() => onNavigateToView('cost')} />
+            </div>
+
+            {/* Health & compliance cards — 3-col when enough cards, 2-col fallback */}
+            {(data.certificateHealth || data.networkPolicyCoverage || data.audit) && (() => {
+              const healthCards = [
+                data.certificateHealth && (
+                  <CertificateHealthCard
+                    key="certs"
+                    data={data.certificateHealth}
+                    onNavigate={() => onNavigateToResourceKind('secrets', undefined, { type: ['TLS'] })}
+                  />
+                ),
+                data.networkPolicyCoverage && (
+                  <NetworkPolicyCoverageCard
+                    key="netpol"
+                    data={data.networkPolicyCoverage}
+                    onNavigate={() => onNavigateToResourceKind('networkpolicies', 'networking.k8s.io')}
+                  />
+                ),
+                data.audit && (
+                  <AuditCard
+                    key="audit"
+                    data={data.audit}
+                    onNavigate={() => onNavigateToView('audit')}
+                  />
+                ),
+              ].filter(Boolean)
+
+              return (
+                <div className={clsx(
+                  'grid gap-6',
+                  healthCards.length >= 3 ? 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3' : 'grid-cols-1 sm:grid-cols-2'
+                )}>
+                  {healthCards}
+                </div>
+              )
+            })()}
           </div>
 
           {/* Right column: problems panel */}
