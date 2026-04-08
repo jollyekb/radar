@@ -353,7 +353,7 @@ export function ResourceRendererDispatch({
         {kind === 'grpcroutes' && <GRPCRouteRenderer data={data} onNavigate={onNavigate} />}
         {kind === 'tcproutes' && <SimpleRouteRenderer data={data} kind="TCPRoute" onNavigate={onNavigate} />}
         {kind === 'tlsroutes' && <SimpleRouteRenderer data={data} kind="TLSRoute" onNavigate={onNavigate} />}
-        {kind === 'sealedsecrets' && <SealedSecretRenderer data={data} />}
+        {kind === 'sealedsecrets' && <SealedSecretRenderer data={data} onNavigate={onNavigate} />}
         {kind === 'workflowtemplates' && <WorkflowTemplateRenderer data={data} />}
         {(kind === 'networkpolicies' || kind === 'networkpolicy') && <NetworkPolicyRenderer data={data} />}
         {(kind === 'ciliumnetworkpolicies' || kind === 'ciliumnetworkpolicy' || kind === 'ciliumclusterwidenetworkpolicies' || kind === 'ciliumclusterwidenetworkpolicy') && <CiliumNetworkPolicyRenderer data={data} />}
@@ -395,7 +395,7 @@ export function ResourceRendererDispatch({
         {kind === 'backupstoragelocations' && <VeleroBSLRenderer data={data} />}
         {kind === 'volumesnapshotlocations' && <VeleroVSLRenderer data={data} />}
         {kind === 'externalsecrets' && <ExternalSecretRenderer data={data} onNavigate={onNavigate} />}
-        {kind === 'clusterexternalsecrets' && <ClusterExternalSecretRenderer data={data} />}
+        {kind === 'clusterexternalsecrets' && <ClusterExternalSecretRenderer data={data} onNavigate={onNavigate} />}
         {(kind === 'secretstores' || kind === 'clustersecretstores') && <SecretStoreRenderer data={data} />}
         {kind === 'clusters' && <CNPGClusterRenderer data={data} onNavigate={onNavigate} />}
         {kind === 'scheduledbackups' && <CNPGScheduledBackupRenderer data={data} onNavigate={onNavigate} />}

@@ -1,5 +1,5 @@
 import { Globe, AlertTriangle } from 'lucide-react'
-import { Section, PropertyList, Property, ConditionsSection, AlertBanner } from '../../ui/drawer-components'
+import { Section, PropertyList, Property, ConditionsSection, AlertBanner, ResourceLink } from '../../ui/drawer-components'
 import {
   getClusterExternalSecretStatus,
   getClusterExternalSecretProvisionedNamespaces,
@@ -10,9 +10,10 @@ import {
 
 interface ClusterExternalSecretRendererProps {
   data: any
+  onNavigate?: (ref: { kind: string; namespace: string; name: string }) => void
 }
 
-export function ClusterExternalSecretRenderer({ data }: ClusterExternalSecretRendererProps) {
+export function ClusterExternalSecretRenderer({ data, onNavigate }: ClusterExternalSecretRendererProps) {
   const status = data.status || {}
   const conditions = status.conditions || []
 
@@ -119,7 +120,23 @@ export function ClusterExternalSecretRenderer({ data }: ClusterExternalSecretRen
           <Property label="Refresh Interval" value={refreshInterval} />
           {storeRef && (
             <>
-              <Property label="Store Name" value={storeRef.name || '-'} />
+              <Property label="Store Name" value={(() => {
+                const storeName = storeRef.name
+                if (storeName) {
+                  const storeKind = (storeRef.kind || 'SecretStore') === 'ClusterSecretStore'
+                    ? 'clustersecretstores'
+                    : 'secretstores'
+                  return (
+                    <ResourceLink
+                      name={storeName}
+                      kind={storeKind}
+                      namespace={storeKind === 'clustersecretstores' ? '' : (data.metadata?.namespace || '')}
+                      onNavigate={onNavigate}
+                    />
+                  )
+                }
+                return '-'
+              })()} />
               <Property label="Store Kind" value={storeRef.kind || 'SecretStore'} />
             </>
           )}

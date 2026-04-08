@@ -1,9 +1,10 @@
 import { Lock, Key, FileText } from 'lucide-react'
 import { clsx } from 'clsx'
-import { Section, PropertyList, Property, ConditionsSection, KeyValueBadgeList, AlertBanner } from '../../ui/drawer-components'
+import { Section, PropertyList, Property, ConditionsSection, KeyValueBadgeList, AlertBanner, ResourceLink } from '../../ui/drawer-components'
 
 interface SealedSecretRendererProps {
   data: any
+  onNavigate?: (ref: { kind: string; namespace: string; name: string }) => void
 }
 
 function getScope(annotations: Record<string, string> | undefined): string {
@@ -13,7 +14,7 @@ function getScope(annotations: Record<string, string> | undefined): string {
   return 'strict'
 }
 
-export function SealedSecretRenderer({ data }: SealedSecretRendererProps) {
+export function SealedSecretRenderer({ data, onNavigate }: SealedSecretRendererProps) {
   const spec = data.spec || {}
   const status = data.status || {}
   const conditions = status.conditions || []
@@ -65,6 +66,14 @@ export function SealedSecretRenderer({ data }: SealedSecretRendererProps) {
               </span>
             }
           />
+          <Property label="Target Secret" value={
+            <ResourceLink
+              name={data.metadata?.name || ''}
+              kind="secrets"
+              namespace={data.metadata?.namespace || ''}
+              onNavigate={onNavigate}
+            />
+          } />
           <Property label="Secret Type" value={secretType} />
           <Property label="Scope" value={scope} />
           <Property label="Observed Gen" value={status.observedGeneration} />

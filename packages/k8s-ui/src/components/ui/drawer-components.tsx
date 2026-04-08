@@ -28,6 +28,52 @@ export function KeyValueBadgeList({ items }: { items: Record<string, unknown> | 
   )
 }
 
+/**
+ * Renders a Kubernetes label selector (matchLabels + matchExpressions).
+ * Accepts either a full selector object `{ matchLabels?, matchExpressions? }`
+ * or a flat `Record<string, string>` (e.g. Service.spec.selector).
+ */
+export function LabelSelectorDisplay({
+  selector,
+  emptyText = 'All',
+  inline = false,
+}: {
+  selector: any
+  emptyText?: string
+  inline?: boolean
+}) {
+  if (!selector) {
+    return <span className="text-xs text-theme-text-tertiary">{emptyText}</span>
+  }
+
+  // Detect flat selector (e.g. Service.spec.selector has no matchLabels wrapper)
+  const isFlat = selector && typeof selector === 'object' && !selector.matchLabels && !selector.matchExpressions && !Array.isArray(selector)
+  const matchLabels: Record<string, unknown> = isFlat ? selector : (selector.matchLabels || {})
+  const matchExpressions: Array<{ key: string; operator: string; values?: string[] }> = selector.matchExpressions || []
+
+  const hasLabels = Object.keys(matchLabels).length > 0
+  const hasExpressions = matchExpressions.length > 0
+
+  if (!hasLabels && !hasExpressions) {
+    return <span className="text-xs text-theme-text-tertiary">{emptyText}</span>
+  }
+
+  const Wrapper = inline ? 'span' : 'div'
+
+  return (
+    <Wrapper className={inline ? 'inline-flex flex-wrap gap-1 align-middle' : 'flex flex-wrap gap-1'}>
+      {Object.entries(matchLabels).map(([k, v]) => (
+        <KeyValueBadge key={`l-${k}`} k={k} v={String(v)} />
+      ))}
+      {matchExpressions.map((expr, i) => (
+        <span key={`e-${i}`} className="badge bg-theme-elevated text-theme-text-secondary">
+          {expr.key} {expr.operator}{expr.values && expr.values.length > 0 ? ` ${expr.values.join(', ')}` : ''}
+        </span>
+      ))}
+    </Wrapper>
+  )
+}
+
 interface SectionProps {
   title: string
   icon?: React.ComponentType<{ className?: string }>

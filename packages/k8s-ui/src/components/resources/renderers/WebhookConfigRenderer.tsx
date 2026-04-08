@@ -1,6 +1,6 @@
 import { Shield } from 'lucide-react'
 import { clsx } from 'clsx'
-import { Section, PropertyList, Property, AlertBanner } from '../../ui/drawer-components'
+import { Section, PropertyList, Property, AlertBanner, LabelSelectorDisplay } from '../../ui/drawer-components'
 
 interface WebhookConfigRendererProps {
   data: any
@@ -65,8 +65,8 @@ export function WebhookConfigRenderer({ data, isMutating }: WebhookConfigRendere
                 ? `URL: ${url}`
                 : 'No target'
 
-            const nsLabels = wh.namespaceSelector?.matchLabels
-            const objLabels = wh.objectSelector?.matchLabels
+            const nsSelector = wh.namespaceSelector
+            const objSelector = wh.objectSelector
 
             return (
               <div key={i} className="card-inner-lg">
@@ -119,26 +119,18 @@ export function WebhookConfigRenderer({ data, isMutating }: WebhookConfigRendere
                 )}
 
                 {/* Selectors */}
-                {(nsLabels || objLabels) && (
+                {(nsSelector || objSelector) && (
                   <div className="mt-2 space-y-1">
-                    {nsLabels && Object.keys(nsLabels).length > 0 && (
+                    {nsSelector && (
                       <div>
                         <div className="text-xs text-theme-text-tertiary mb-1">Namespace Selector</div>
-                        <div className="flex flex-wrap gap-1">
-                          {Object.entries(nsLabels).map(([k, v]) => (
-                            <span key={k} className="badge-sm bg-theme-elevated text-theme-text-secondary">{k}={String(v)}</span>
-                          ))}
-                        </div>
+                        <LabelSelectorDisplay selector={nsSelector} />
                       </div>
                     )}
-                    {objLabels && Object.keys(objLabels).length > 0 && (
+                    {objSelector && (
                       <div>
                         <div className="text-xs text-theme-text-tertiary mb-1">Object Selector</div>
-                        <div className="flex flex-wrap gap-1">
-                          {Object.entries(objLabels).map(([k, v]) => (
-                            <span key={k} className="badge-sm bg-theme-elevated text-theme-text-secondary">{k}={String(v)}</span>
-                          ))}
-                        </div>
+                        <LabelSelectorDisplay selector={objSelector} />
                       </div>
                     )}
                   </div>

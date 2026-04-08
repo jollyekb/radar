@@ -1,6 +1,6 @@
 import { Shield, Activity } from 'lucide-react'
 import { clsx } from 'clsx'
-import { Section, PropertyList, Property, ConditionsSection, KeyValueBadgeList, AlertBanner } from '../../ui/drawer-components'
+import { Section, PropertyList, Property, ConditionsSection, LabelSelectorDisplay, AlertBanner } from '../../ui/drawer-components'
 
 interface PodDisruptionBudgetRendererProps {
   data: any
@@ -9,8 +9,7 @@ interface PodDisruptionBudgetRendererProps {
 export function PodDisruptionBudgetRenderer({ data }: PodDisruptionBudgetRendererProps) {
   const spec = data.spec || {}
   const status = data.status || {}
-  const matchLabels = spec.selector?.matchLabels || {}
-  const hasSelector = Object.keys(matchLabels).length > 0
+  const selector = spec.selector
 
   // Determine budget type
   const hasMaxUnavailable = spec.maxUnavailable !== undefined && spec.maxUnavailable !== null
@@ -113,11 +112,7 @@ export function PodDisruptionBudgetRenderer({ data }: PodDisruptionBudgetRendere
       </Section>
 
       <Section title="Selector">
-        {hasSelector ? (
-          <KeyValueBadgeList items={matchLabels} />
-        ) : (
-          <div className="text-sm text-theme-text-tertiary">All pods in namespace</div>
-        )}
+        <LabelSelectorDisplay selector={selector} emptyText="All pods in namespace" />
       </Section>
 
       <ConditionsSection conditions={status.conditions} />

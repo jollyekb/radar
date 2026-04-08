@@ -1,5 +1,5 @@
 import { Server } from 'lucide-react'
-import { Section, PropertyList, Property, KeyValueBadgeList, ConditionsSection, AlertBanner } from '../../ui/drawer-components'
+import { Section, PropertyList, Property, LabelSelectorDisplay, ConditionsSection, AlertBanner } from '../../ui/drawer-components'
 
 interface ReplicaSetRendererProps {
   data: any
@@ -62,7 +62,7 @@ export function ReplicaSetRenderer({ data }: ReplicaSetRendererProps) {
       </Section>
 
       <Section title="Selector">
-        <KeyValueBadgeList items={data.spec?.selector?.matchLabels} />
+        <LabelSelectorDisplay selector={data.spec?.selector} />
       </Section>
 
       <ConditionsSection conditions={data.status?.conditions} />
