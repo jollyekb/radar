@@ -51,6 +51,11 @@ const PLURAL_TO_KIND: Record<string, string> = {
   serviceentries: 'ServiceEntry',
   peerauthentications: 'PeerAuthentication',
   authorizationpolicies: 'AuthorizationPolicy',
+  externalsecrets: 'ExternalSecret',
+  clusterexternalsecrets: 'ClusterExternalSecret',
+  secretstores: 'SecretStore',
+  clustersecretstores: 'ClusterSecretStore',
+  sealedsecrets: 'SealedSecret',
 }
 
 /**

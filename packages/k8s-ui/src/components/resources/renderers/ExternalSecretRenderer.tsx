@@ -76,14 +76,12 @@ export function ExternalSecretRenderer({ data, onNavigate }: ExternalSecretRende
         <PropertyList>
           <Property label="Store Name" value={(() => {
             if (store.name && store.name !== '-') {
-              const storeKind = store.kind === 'ClusterSecretStore'
-                ? 'clustersecretstores'
-                : 'secretstores'
+              const storeKindSingular = store.kind || 'SecretStore'
               return (
                 <ResourceLink
                   name={store.name}
-                  kind={storeKind}
-                  namespace={store.kind === 'ClusterSecretStore' ? '' : (data.metadata?.namespace || '')}
+                  kind={storeKindSingular}
+                  namespace={storeKindSingular === 'ClusterSecretStore' ? '' : (data.metadata?.namespace || '')}
                   onNavigate={onNavigate}
                 />
               )
