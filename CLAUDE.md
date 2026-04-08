@@ -18,6 +18,7 @@ Not everything is in this file. The following files contain critical details tha
 | Working on **resource renderers** | `packages/k8s-ui/src/components/resources/renderers/` — all existing renderers live here |
 | Understanding **cluster connection behavior** | [docs/configuration.md](docs/configuration.md) — kubeconfig precedence, multi-context, in-cluster |
 | Working on **MCP tools or AI context** | [docs/mcp.md](docs/mcp.md) + `internal/mcp/tools.go` — tool definitions and design rationale |
+| Writing or modifying **frontend UI / styling** | [DESIGN.md](DESIGN.md) — theme tokens, do's/don'ts, component patterns |
 
 ## Architecture
 
@@ -444,6 +445,15 @@ Error responses are parsed as `{"error": "message"}` and displayed in toasts.
   - `.card-inner` / `.card-inner-lg` — nested containers in drawers/renderers
   - `.selection` / `.selection-strong` / `.selection-text` / `.selection-ring` — selected rows/items (reference `--selection-*` CSS variables)
   - `.dialog` — modal/dialog containers
+
+### Frontend Styling Rules
+**Use theme tokens — never hardcode colors.** See [DESIGN.md](DESIGN.md) for the full reference. Quick rules:
+- Backgrounds: `bg-theme-base/surface/elevated/hover` — not `bg-white`, `bg-gray-*`, `bg-slate-*`
+- Text: `text-theme-text-primary/secondary/tertiary` — not `text-gray-*`
+- Borders: `border-theme-border` — not `border-gray-*`
+- Buttons: `.btn-brand` — not hand-rolled `bg-blue-*`
+- Badges: `<Badge severity="...">` or `<Badge kind="...">` — never hand-write color strings
+- Shadows: `shadow-theme-sm/md/lg` — not raw Tailwind shadows
 
 ### Resource Renderers
 - **Adding a new CRD integration? You MUST read [docs/INTEGRATION_GUIDE.md](docs/INTEGRATION_GUIDE.md) first** — it has the full step-by-step checklist with all files, patterns, and collision gotchas. Do not skip this.

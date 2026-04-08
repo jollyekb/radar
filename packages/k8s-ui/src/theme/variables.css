@@ -43,7 +43,7 @@
   /* ── Text (cool neutral) ── */
   --text-primary: light-dark(#1A1C20, #F5F6F8);
   --text-secondary: light-dark(#555860, #D8DAE0);
-  --text-tertiary: light-dark(#7E828A, #B0B5C0);
+  --text-tertiary: light-dark(#6B7080, #B0B5C0);
   --text-disabled: light-dark(#A0A4AC, #6A7080);
 
   /* ── Borders (lightly blue-tinted in light mode) ── */
