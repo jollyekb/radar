@@ -140,7 +140,7 @@ import { ResourcesSidebar } from './ResourcesSidebar'
 import type { SelectedKindInfo } from './ResourcesSidebar'
 
 // Pod problem filter options (special multi-select, not a single column value)
-const POD_PROBLEMS = ['CrashLoopBackOff', 'ImagePullBackOff', 'OOMKilled', 'Unschedulable', 'Not Ready', 'High Restarts'] as const
+const POD_PROBLEMS = ['CrashLoopBackOff', 'ImagePullBackOff', 'OOMKilled', 'Unschedulable', 'Not Ready', 'High Restarts', 'Init Failed', 'Exit Code Error', 'Failed'] as const
 
 // Columns to skip for auto-detected filters (high cardinality, text-like, or non-filterable)
 const SKIP_FILTER_COLUMNS = new Set([
@@ -2486,7 +2486,7 @@ export function ResourcesView({
         case 'CrashLoopBackOff':
           return problemMessages.includes('CrashLoopBackOff')
         case 'ImagePullBackOff':
-          return problemMessages.some(m => m.includes('ImagePull'))
+          return problemMessages.some(m => m.includes('ImagePull') && !m.startsWith('Init:'))
         case 'OOMKilled':
           return problemMessages.includes('OOMKilled')
         case 'Unschedulable':
@@ -2495,6 +2495,12 @@ export function ResourcesView({
           return problemMessages.includes('Not Ready') || problemMessages.some(m => m.includes('Probe'))
         case 'High Restarts':
           return restarts > 5
+        case 'Init Failed':
+          return problemMessages.some(m => m.startsWith('Init:'))
+        case 'Exit Code Error':
+          return problemMessages.some(m => m.startsWith('Exit Code'))
+        case 'Failed':
+          return problemMessages.includes('Failed') || problemMessages.includes('Unknown')
         default:
           return false
       }
@@ -2808,11 +2814,14 @@ export function ResourcesView({
         const restarts = getPodRestarts(pod)
 
         if (msgs.includes('CrashLoopBackOff')) problemCounts['CrashLoopBackOff']++
-        if (msgs.some(m => m.includes('ImagePull'))) problemCounts['ImagePullBackOff']++
+        if (msgs.some(m => m.includes('ImagePull') && !m.startsWith('Init:'))) problemCounts['ImagePullBackOff']++
         if (msgs.includes('OOMKilled')) problemCounts['OOMKilled']++
         if (msgs.includes('Unschedulable')) problemCounts['Unschedulable']++
         if (msgs.includes('Not Ready') || msgs.some(m => m.includes('Probe'))) problemCounts['Not Ready']++
         if (restarts > 5) problemCounts['High Restarts']++
+        if (msgs.some(m => m.startsWith('Init:'))) problemCounts['Init Failed']++
+        if (msgs.some(m => m.startsWith('Exit Code'))) problemCounts['Exit Code Error']++
+        if (msgs.includes('Failed') || msgs.includes('Unknown')) problemCounts['Failed']++
       }
 
       const activeProblems = POD_PROBLEMS
@@ -4028,7 +4037,20 @@ function PodCell({ resource, column }: { resource: any; column: string }) {
             {status.text}
           </span>
           {problems.length > 0 && (
-            <Tooltip content={problems.map(p => p.message).join(', ')}>
+            <Tooltip content={
+              <div className="space-y-0.5">
+                {problems.map((p, i) => (
+                  <div key={i} className="flex items-center gap-1.5">
+                    <span className={clsx('w-1.5 h-1.5 rounded-full shrink-0', {
+                      'bg-red-400': p.severity === 'critical',
+                      'bg-orange-400': p.severity === 'high',
+                      'bg-yellow-400': p.severity === 'medium',
+                    })} />
+                    <span>{p.message}</span>
+                  </div>
+                ))}
+              </div>
+            }>
               <span className="text-red-400">
                 <AlertTriangle className="w-3.5 h-3.5" />
               </span>

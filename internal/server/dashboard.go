@@ -67,7 +67,7 @@ type DashboardProblem struct {
 	Kind       string `json:"kind"`
 	Namespace  string `json:"namespace"`
 	Name       string `json:"name"`
-	Status     string `json:"status"`
+	Severity   string `json:"severity"`
 	Reason     string `json:"reason"`
 	Message    string `json:"message"`
 	Age        string `json:"age"`
@@ -393,7 +393,7 @@ func (s *Server) getDashboardHealth(cache *k8s.ResourceCache, namespace string) 
 			Kind:       p.Kind,
 			Namespace:  p.Namespace,
 			Name:       p.Name,
-			Status:     p.Severity,
+			Severity:   p.Severity,
 			Reason:     p.Reason,
 			Message:    p.Message,
 			Age:        p.Age,
@@ -403,10 +403,10 @@ func (s *Server) getDashboardHealth(cache *k8s.ResourceCache, namespace string) 
 
 	// Sort: errors first, then warnings; within each group sort by age (most recent first)
 	sort.SliceStable(problems, func(i, j int) bool {
-		if problems[i].Status != problems[j].Status {
-			return problems[i].Status == "error"
+		if problems[i].Severity != problems[j].Severity {
+			return problems[i].Severity == "error"
 		}
-		// Within same status, sort by age (lower AgeSeconds = more recent = first)
+		// Within same severity, sort by age (lower AgeSeconds = more recent = first)
 		return problems[i].AgeSeconds < problems[j].AgeSeconds
 	})
 
@@ -463,7 +463,7 @@ func podToProblem(pod *corev1.Pod, severity string, now time.Time) DashboardProb
 		Kind:       "Pod",
 		Namespace:  pod.Namespace,
 		Name:       pod.Name,
-		Status:     severity,
+		Severity:   severity,
 		Reason:     reason,
 		Message:    k8s.Truncate(message, 200),
 		Age:        k8s.FormatAge(ageDur),

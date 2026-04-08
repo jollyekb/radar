@@ -107,7 +107,7 @@ export interface DashboardProblem {
   kind: string
   namespace: string
   name: string
-  status: string
+  severity: string
   reason: string
   message: string
   age: string

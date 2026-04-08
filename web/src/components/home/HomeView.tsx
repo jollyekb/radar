@@ -198,7 +198,7 @@ function ProblemsPanel({ problems, onResourceClick }: ProblemsPanelProps) {
             >
               <span className={clsx(
                 'w-1.5 h-1.5 rounded-full shrink-0',
-                p.status === 'error' ? 'bg-red-500' : 'bg-yellow-500'
+                p.severity === 'error' ? 'bg-red-500' : 'bg-yellow-500'
               )} />
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-1.5">

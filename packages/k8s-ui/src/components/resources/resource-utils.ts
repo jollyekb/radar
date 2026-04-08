@@ -87,7 +87,31 @@ export function getPodStatus(pod: any): StatusBadge {
 export function getPodProblems(pod: any): PodProblem[] {
   const problems: PodProblem[] = []
   const containerStatuses = pod.status?.containerStatuses || []
+  const initContainerStatuses = pod.status?.initContainerStatuses || []
   const conditions = pod.status?.conditions || []
+  const phase = pod.status?.phase
+
+  // Failed or Unknown phase
+  if (phase === 'Failed' && pod.status?.reason !== 'Evicted') {
+    problems.push({ severity: 'critical', message: 'Failed' })
+  } else if (phase === 'Unknown') {
+    problems.push({ severity: 'high', message: 'Unknown' })
+  }
+
+  // Init container failures
+  for (const cs of initContainerStatuses) {
+    if (cs.state?.waiting?.reason && cs.state.waiting.reason !== 'PodInitializing') {
+      const reason = cs.state.waiting.reason
+      if (['CrashLoopBackOff', 'ImagePullBackOff', 'ErrImagePull'].includes(reason)) {
+        problems.push({ severity: 'critical', message: `Init: ${reason}` })
+      } else {
+        problems.push({ severity: 'high', message: `Init: ${reason}` })
+      }
+    }
+    if (cs.state?.terminated?.exitCode && cs.state.terminated.exitCode !== 0) {
+      problems.push({ severity: 'high', message: `Init: Exit Code ${cs.state.terminated.exitCode}` })
+    }
+  }
 
   for (const cs of containerStatuses) {
     // Check waiting state
@@ -104,6 +128,8 @@ export function getPodProblems(pod: any): PodProblem[] {
     // Check terminated state
     if (cs.state?.terminated?.reason === 'OOMKilled') {
       problems.push({ severity: 'critical', message: 'OOMKilled' })
+    } else if (cs.state?.terminated?.exitCode && cs.state.terminated.exitCode !== 0) {
+      problems.push({ severity: 'high', message: `Exit Code ${cs.state.terminated.exitCode}` })
     }
     // High restart count
     if (cs.restartCount > 5) {
@@ -142,7 +168,7 @@ export function getPodProblems(pod: any): PodProblem[] {
   }
 
   // Evicted pods
-  if (pod.status?.phase === 'Failed' && pod.status?.reason === 'Evicted') {
+  if (phase === 'Failed' && pod.status?.reason === 'Evicted') {
     problems.push({ severity: 'high', message: 'Evicted' })
   }
 
@@ -156,7 +182,6 @@ export function getPodProblems(pod: any): PodProblem[] {
   }
 
   // Not ready (Running but containers not ready)
-  const phase = pod.status?.phase
   if (phase === 'Running') {
     const readyContainers = containerStatuses.filter((c: any) => c.ready).length
     const totalContainers = containerStatuses.length
