@@ -116,6 +116,8 @@ import {
   getCellFilterValue,
   parseColumnFilters,
   serializeColumnFilters,
+  podMatchesProblemCategory,
+  SEVERITY_DOT_COLOR,
 } from './resource-utils'
 import { SEVERITY_BADGE, EVENT_TYPE_COLORS } from '../../utils/badge-colors'
 import { Tooltip } from '../ui/Tooltip'
@@ -2478,33 +2480,8 @@ export function ResourcesView({
   const podMatchesProblemFilter = useCallback((pod: any, filters: string[]): boolean => {
     if (filters.length === 0) return true
     const problems = getPodProblems(pod)
-    const problemMessages = problems.map(p => p.message)
     const restarts = getPodRestarts(pod)
-
-    return filters.some(filter => {
-      switch (filter) {
-        case 'CrashLoopBackOff':
-          return problemMessages.includes('CrashLoopBackOff')
-        case 'ImagePullBackOff':
-          return problemMessages.some(m => m.includes('ImagePull') && !m.startsWith('Init:'))
-        case 'OOMKilled':
-          return problemMessages.includes('OOMKilled')
-        case 'Unschedulable':
-          return problemMessages.includes('Unschedulable')
-        case 'Not Ready':
-          return problemMessages.includes('Not Ready') || problemMessages.some(m => m.includes('Probe'))
-        case 'High Restarts':
-          return restarts > 5
-        case 'Init Failed':
-          return problemMessages.some(m => m.startsWith('Init:'))
-        case 'Exit Code Error':
-          return problemMessages.some(m => m.startsWith('Exit Code'))
-        case 'Failed':
-          return problemMessages.includes('Failed') || problemMessages.includes('Unknown')
-        default:
-          return false
-      }
-    })
+    return filters.some(filter => podMatchesProblemCategory(problems, restarts, filter))
   }, [])
 
 
@@ -2810,18 +2787,12 @@ export function ResourcesView({
 
       for (const pod of resources) {
         const podProblems = getPodProblems(pod)
-        const msgs = podProblems.map(p => p.message)
         const restarts = getPodRestarts(pod)
-
-        if (msgs.includes('CrashLoopBackOff')) problemCounts['CrashLoopBackOff']++
-        if (msgs.some(m => m.includes('ImagePull') && !m.startsWith('Init:'))) problemCounts['ImagePullBackOff']++
-        if (msgs.includes('OOMKilled')) problemCounts['OOMKilled']++
-        if (msgs.includes('Unschedulable')) problemCounts['Unschedulable']++
-        if (msgs.includes('Not Ready') || msgs.some(m => m.includes('Probe'))) problemCounts['Not Ready']++
-        if (restarts > 5) problemCounts['High Restarts']++
-        if (msgs.some(m => m.startsWith('Init:'))) problemCounts['Init Failed']++
-        if (msgs.some(m => m.startsWith('Exit Code'))) problemCounts['Exit Code Error']++
-        if (msgs.includes('Failed') || msgs.includes('Unknown')) problemCounts['Failed']++
+        for (const category of POD_PROBLEMS) {
+          if (podMatchesProblemCategory(podProblems, restarts, category)) {
+            problemCounts[category]++
+          }
+        }
       }
 
       const activeProblems = POD_PROBLEMS
@@ -4041,11 +4012,7 @@ function PodCell({ resource, column }: { resource: any; column: string }) {
               <div className="space-y-0.5">
                 {problems.map((p, i) => (
                   <div key={i} className="flex items-center gap-1.5">
-                    <span className={clsx('w-1.5 h-1.5 rounded-full shrink-0', {
-                      'bg-red-400': p.severity === 'critical',
-                      'bg-orange-400': p.severity === 'high',
-                      'bg-yellow-400': p.severity === 'medium',
-                    })} />
+                    <span className={clsx('w-1.5 h-1.5 rounded-full shrink-0', SEVERITY_DOT_COLOR[p.severity])} />
                     <span>{p.message}</span>
                   </div>
                 ))}

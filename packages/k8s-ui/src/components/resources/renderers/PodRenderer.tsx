@@ -2,7 +2,7 @@ import { useState, type ReactNode, type JSX } from 'react'
 import { Server, HardDrive, Terminal as TerminalIcon, FileText, Activity, CirclePlay, FolderOpen, List, Eye, EyeOff } from 'lucide-react'
 import { clsx } from 'clsx'
 import { Section, PropertyList, Property, ConditionsSection, CopyHandler, AlertBanner, ResourceLink } from '../../ui/drawer-components'
-import { formatResources, formatDuration, getPodProblems } from '../resource-utils'
+import { formatResources, formatDuration, getPodProblems, SEVERITY_DOT_COLOR } from '../resource-utils'
 import { getResourceStatusColor, SEVERITY_BADGE_BORDERED } from '../../../utils/badge-colors'
 import type { ResolvedEnvFrom } from '../../../types'
 import { Tooltip } from '../../ui/Tooltip'
@@ -323,11 +323,7 @@ export function PodRenderer({
           <ul className="text-xs space-y-1">
             {podProblems.map((p, i) => (
               <li key={i} className="flex items-center gap-1.5">
-                <span className={clsx('w-1.5 h-1.5 rounded-full shrink-0', {
-                  'bg-red-500': p.severity === 'critical',
-                  'bg-orange-400': p.severity === 'high',
-                  'bg-yellow-400': p.severity === 'medium',
-                })} />
+                <span className={clsx('w-1.5 h-1.5 rounded-full shrink-0', SEVERITY_DOT_COLOR[p.severity])} />
                 <span className="text-red-600 dark:text-red-400">{p.message}</span>
               </li>
             ))}

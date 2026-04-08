@@ -42,6 +42,40 @@ export interface PodProblem {
   message: string
 }
 
+/** Tailwind classes for severity dot indicators (used in tooltips and alert banners) */
+export const SEVERITY_DOT_COLOR: Record<PodProblem['severity'], string> = {
+  critical: 'bg-red-400',
+  high: 'bg-orange-400',
+  medium: 'bg-yellow-400',
+}
+
+/** Check whether a pod's problems match a given problem category (filter chip label) */
+export function podMatchesProblemCategory(problems: PodProblem[], restarts: number, category: string): boolean {
+  const msgs = problems.map(p => p.message)
+  switch (category) {
+    case 'CrashLoopBackOff':
+      return msgs.includes('CrashLoopBackOff')
+    case 'ImagePullBackOff':
+      return msgs.some(m => m.includes('ImagePull') && !m.startsWith('Init:'))
+    case 'OOMKilled':
+      return msgs.includes('OOMKilled')
+    case 'Unschedulable':
+      return msgs.includes('Unschedulable')
+    case 'Not Ready':
+      return msgs.includes('Not Ready') || msgs.some(m => m.includes('Probe'))
+    case 'High Restarts':
+      return restarts > 5
+    case 'Init Failed':
+      return msgs.some(m => m.startsWith('Init:'))
+    case 'Exit Code Error':
+      return msgs.some(m => m.startsWith('Exit Code'))
+    case 'Failed':
+      return msgs.includes('Failed') || msgs.includes('Unknown')
+    default:
+      return false
+  }
+}
+
 export function getPodStatus(pod: any): StatusBadge {
   const phase = pod.status?.phase || 'Unknown'
   const containerStatuses = pod.status?.containerStatuses || []
@@ -123,6 +157,8 @@ export function getPodProblems(pod: any): PodProblem[] {
         problems.push({ severity: 'critical', message: 'Config Error' })
       } else if (reason === 'ContainerCannotRun') {
         problems.push({ severity: 'critical', message: 'Cannot Run' })
+      } else if (reason !== 'ContainerCreating' && reason !== 'PodInitializing') {
+        problems.push({ severity: 'high', message: reason })
       }
     }
     // Check terminated state
