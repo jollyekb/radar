@@ -189,13 +189,13 @@ function resolveEnvValueNode(env: any): JSX.Element {
   }
   if (env.valueFrom?.configMapKeyRef) {
     const { name, key } = env.valueFrom.configMapKeyRef
-    return <span className="text-blue-400/70 text-[10px] shrink-0 self-center px-1 py-0.5 bg-blue-500/10 rounded">configmap:{name}[{key}]</span>
+    return <span className="text-blue-700 dark:text-blue-400/80 text-[10px] shrink-0 self-center px-1 py-0.5 bg-blue-500/10 rounded">configmap:{name}[{key}]</span>
   }
   if (env.valueFrom?.fieldRef) {
-    return <span className="text-purple-400/70 break-all">field:{env.valueFrom.fieldRef.fieldPath}</span>
+    return <span className="text-purple-700 dark:text-purple-400/80 break-all">field:{env.valueFrom.fieldRef.fieldPath}</span>
   }
   if (env.valueFrom?.resourceFieldRef) {
-    return <span className="text-purple-400/70 break-all">resource:{env.valueFrom.resourceFieldRef.resource}</span>
+    return <span className="text-purple-700 dark:text-purple-400/80 break-all">resource:{env.valueFrom.resourceFieldRef.resource}</span>
   }
   return <span className="text-theme-text-primary break-all min-w-0">{env.value ?? ''}</span>
 }
@@ -218,10 +218,13 @@ function EnvVarsSection({
   resolvedEnvFrom?: ResolvedEnvFrom
 }) {
   const allContainers = [...initContainers, ...containers]
-  const multiContainer = allContainers.filter((c: any) => c.env?.length > 0 || c.envFrom?.length > 0).length > 1
+  const containersWithEnv = allContainers.filter((c: any) => c.env?.length > 0 || c.envFrom?.length > 0)
+  const multiContainer = containersWithEnv.length > 1
+  const totalVars = allContainers.reduce((sum: number, c: any) => sum + (c.env?.length || 0) + (c.envFrom?.length || 0), 0)
+  const subtitle = multiContainer ? `${totalVars} vars across ${containersWithEnv.length} containers` : `${totalVars} vars`
 
   return (
-    <Section title="Environment Variables" icon={List}>
+    <Section title={`Environment Variables  ·  ${subtitle}`} icon={List} defaultExpanded={false}>
       <div className="space-y-4">
         {allContainers.map((container: any) => {
           const envVars: any[] = container.env || []
@@ -247,7 +250,7 @@ function EnvVarsSection({
                       <div className="flex items-center gap-1.5 text-xs font-mono py-0.5">
                         <span className={clsx(
                           'shrink-0 px-1 py-0.5 rounded text-[10px]',
-                          isSecret ? 'bg-amber-500/10 dark:bg-yellow-500/10 text-amber-700 dark:text-yellow-400' : 'bg-blue-500/10 text-blue-400'
+                          isSecret ? 'bg-amber-500/10 dark:bg-yellow-500/10 text-amber-700 dark:text-yellow-400' : 'bg-blue-500/10 text-blue-700 dark:text-blue-400/80'
                         )}>
                           {prefix}
                         </span>
