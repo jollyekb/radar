@@ -45,7 +45,7 @@ jobs:
         with:
           node-version: '22'
           cache: 'npm'
-          cache-dependency-path: web/package-lock.json
+          cache-dependency-path: package-lock.json
 
       - name: GoReleaser
         uses: goreleaser/goreleaser-action@v7
