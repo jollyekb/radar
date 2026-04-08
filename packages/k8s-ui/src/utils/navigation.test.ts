@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'vitest'
-import { kindToPlural, pluralToKind, refToSelectedResource } from './navigation'
+import { kindToPlural, pluralToKind, refToSelectedResource, initNavigationMap } from './navigation'
 
 describe('kindToPlural', () => {
   test('singular PascalCase to plural lowercase', () => {
@@ -107,6 +107,29 @@ describe('pluralToKind', () => {
     // "databases" triggers the -ses rule (strips 2 chars) — a known limitation
     // of the heuristic fallback. Known kinds use the PLURAL_TO_KIND map instead.
     expect(pluralToKind('databases')).toBe('Databas')
+  })
+})
+
+describe('initNavigationMap', () => {
+  test('discovered API resources override heuristic pluralization', () => {
+    // Before init, an unknown CRD would hit the heuristic fallback
+    // After init, it uses the discovered plural name
+    initNavigationMap([
+      { group: 'external-secrets.io', version: 'v1', kind: 'SecretStore', name: 'secretstores', namespaced: true, isCrd: true, verbs: ['get'] },
+      { group: 'external-secrets.io', version: 'v1', kind: 'ClusterSecretStore', name: 'clustersecretstores', namespaced: false, isCrd: true, verbs: ['get'] },
+    ])
+    expect(kindToPlural('SecretStore')).toBe('secretstores')
+    expect(kindToPlural('ClusterSecretStore')).toBe('clustersecretstores')
+    expect(pluralToKind('secretstores')).toBe('SecretStore')
+    expect(pluralToKind('clustersecretstores')).toBe('ClusterSecretStore')
+  })
+
+  test('prevents double-pluralization of discovered plurals', () => {
+    initNavigationMap([
+      { group: 'external-secrets.io', version: 'v1', kind: 'SecretStore', name: 'secretstores', namespaced: true, isCrd: true, verbs: ['get'] },
+    ])
+    // Passing an already-plural kind should be idempotent
+    expect(kindToPlural('secretstores')).toBe('secretstores')
   })
 })
 

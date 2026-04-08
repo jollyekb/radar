@@ -1,4 +1,4 @@
-import type { SelectedResource, ResourceRef } from '../types/core'
+import type { SelectedResource, ResourceRef, APIResource } from '../types/core'
 
 /**
  * Canonical callback type for navigating to a resource.
@@ -6,9 +6,8 @@ import type { SelectedResource, ResourceRef } from '../types/core'
  */
 export type NavigateToResource = (resource: SelectedResource) => void
 
-// Known plural API resource names → singular PascalCase kind.
-// Shared between kindToPlural (idempotency guard) and pluralToKind (reverse lookup).
-const PLURAL_TO_KIND: Record<string, string> = {
+// Fallback map for core K8s resources — used before API discovery completes.
+const BUILTIN_PLURAL_TO_KIND: Record<string, string> = {
   pods: 'Pod',
   services: 'Service',
   deployments: 'Deployment',
@@ -16,11 +15,6 @@ const PLURAL_TO_KIND: Record<string, string> = {
   statefulsets: 'StatefulSet',
   replicasets: 'ReplicaSet',
   ingresses: 'Ingress',
-  gateways: 'Gateway',
-  httproutes: 'HTTPRoute',
-  grpcroutes: 'GRPCRoute',
-  tcproutes: 'TCPRoute',
-  tlsroutes: 'TLSRoute',
   configmaps: 'ConfigMap',
   secrets: 'Secret',
   namespaces: 'Namespace',
@@ -33,29 +27,38 @@ const PLURAL_TO_KIND: Record<string, string> = {
   persistentvolumes: 'PersistentVolume',
   storageclasses: 'StorageClass',
   poddisruptionbudgets: 'PodDisruptionBudget',
-  rollouts: 'Rollout',
-  applications: 'Application',
-  kustomizations: 'Kustomization',
-  helmreleases: 'HelmRelease',
-  gitrepositories: 'GitRepository',
-  certificates: 'Certificate',
   roles: 'Role',
   clusterroles: 'ClusterRole',
   rolebindings: 'RoleBinding',
   clusterrolebindings: 'ClusterRoleBinding',
   serviceaccounts: 'ServiceAccount',
   networkpolicies: 'NetworkPolicy',
-  verticalpodautoscalers: 'VerticalPodAutoscaler',
-  virtualservices: 'VirtualService',
-  destinationrules: 'DestinationRule',
-  serviceentries: 'ServiceEntry',
-  peerauthentications: 'PeerAuthentication',
-  authorizationpolicies: 'AuthorizationPolicy',
-  externalsecrets: 'ExternalSecret',
-  clusterexternalsecrets: 'ClusterExternalSecret',
-  secretstores: 'SecretStore',
-  clustersecretstores: 'ClusterSecretStore',
-  sealedsecrets: 'SealedSecret',
+}
+
+// Dynamic map built from API discovery — populated by initNavigationMap().
+// Once populated, this is the source of truth for all kind↔plural lookups.
+let discoveredPluralToKind: Record<string, string> | null = null
+let discoveredKindToPlural: Record<string, string> | null = null
+
+/**
+ * Initialize navigation maps from discovered API resources.
+ * Call once when API resources are fetched. After this, kindToPlural/pluralToKind
+ * use the real cluster data instead of heuristics.
+ */
+export function initNavigationMap(resources: APIResource[]) {
+  const p2k: Record<string, string> = { ...BUILTIN_PLURAL_TO_KIND }
+  const k2p: Record<string, string> = {}
+  for (const r of resources) {
+    const plural = r.name.toLowerCase()
+    p2k[plural] = r.kind
+    k2p[r.kind.toLowerCase()] = plural
+  }
+  discoveredPluralToKind = p2k
+  discoveredKindToPlural = k2p
+}
+
+function getPluralToKind(): Record<string, string> {
+  return discoveredPluralToKind || BUILTIN_PLURAL_TO_KIND
 }
 
 /**
@@ -66,9 +69,15 @@ const PLURAL_TO_KIND: Record<string, string> = {
  */
 export function kindToPlural(kind: string): string {
   const kindLower = kind.toLowerCase()
+  const pluralToKindMap = getPluralToKind()
 
   // Already a known plural — return as-is to prevent double-pluralization
-  if (kindLower in PLURAL_TO_KIND) return kindLower
+  if (kindLower in pluralToKindMap) return kindLower
+
+  // Lookup from discovered API resources (singular kind → plural name)
+  if (discoveredKindToPlural && kindLower in discoveredKindToPlural) {
+    return discoveredKindToPlural[kindLower]
+  }
 
   // Aliases: abbreviations or mappings to a different resource name
   const aliases: Record<string, string> = {
@@ -78,7 +87,7 @@ export function kindToPlural(kind: string): string {
   }
   if (aliases[kindLower]) return aliases[kindLower]
 
-  // English pluralization rules (covers *Class→*classes, *Policy→*policies, *Repository→*repositories, etc.)
+  // Fallback: English pluralization rules (covers *Class→*classes, *Policy→*policies, *Repository→*repositories, etc.)
   if (kindLower.endsWith('s') || kindLower.endsWith('x') || kindLower.endsWith('ch') || kindLower.endsWith('sh')) {
     return kindLower + 'es'
   }
@@ -95,8 +104,9 @@ export function kindToPlural(kind: string): string {
  */
 export function pluralToKind(plural: string): string {
   const lower = plural.toLowerCase()
+  const pluralToKindMap = getPluralToKind()
 
-  if (PLURAL_TO_KIND[lower]) return PLURAL_TO_KIND[lower]
+  if (pluralToKindMap[lower]) return pluralToKindMap[lower]
 
   // If it already looks like a singular PascalCase kind (starts with uppercase), return as-is
   if (plural[0] === plural[0].toUpperCase() && plural[0] !== plural[0].toLowerCase()) {
