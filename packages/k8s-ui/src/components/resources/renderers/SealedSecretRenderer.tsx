@@ -68,7 +68,7 @@ export function SealedSecretRenderer({ data, onNavigate }: SealedSecretRendererP
           />
           <Property label="Target Secret" value={
             <ResourceLink
-              name={data.metadata?.name || ''}
+              name={data.spec?.template?.metadata?.name || data.metadata?.name || ''}
               kind="secrets"
               namespace={data.metadata?.namespace || ''}
               onNavigate={onNavigate}

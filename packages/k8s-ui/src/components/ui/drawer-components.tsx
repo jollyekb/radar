@@ -32,6 +32,7 @@ export function KeyValueBadgeList({ items }: { items: Record<string, unknown> | 
  * Renders a Kubernetes label selector (matchLabels + matchExpressions).
  * Accepts either a full selector object `{ matchLabels?, matchExpressions? }`
  * or a flat `Record<string, string>` (e.g. Service.spec.selector).
+ * Pass `inline` for flow-inline rendering (e.g. within a sentence).
  */
 export function LabelSelectorDisplay({
   selector,
@@ -47,7 +48,7 @@ export function LabelSelectorDisplay({
   }
 
   // Detect flat selector (e.g. Service.spec.selector has no matchLabels wrapper)
-  const isFlat = selector && typeof selector === 'object' && !selector.matchLabels && !selector.matchExpressions && !Array.isArray(selector)
+  const isFlat = typeof selector === 'object' && !Array.isArray(selector) && !selector.matchLabels && !selector.matchExpressions
   const matchLabels: Record<string, unknown> = isFlat ? selector : (selector.matchLabels || {})
   const matchExpressions: Array<{ key: string; operator: string; values?: string[] }> = selector.matchExpressions || []
 
@@ -280,7 +281,7 @@ export interface Problem {
   message: string
 }
 
-/** Displays a list of problem alerts (warnings and errors) for GitOps resources */
+/** Displays a list of problem alerts (warnings and errors) */
 export function ProblemAlerts({ problems }: { problems: Problem[] }) {
   if (problems.length === 0) return null
 
