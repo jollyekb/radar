@@ -22,9 +22,11 @@ export function NodePoolCell({ resource, column }: { resource: any; column: stri
     case 'status': {
       const status = getNodePoolStatus(resource)
       return (
-        <span className={clsx('badge', status.color)}>
-          {status.text}
-        </span>
+        <Tooltip content={status.text}>
+          <span className={clsx('badge truncate max-w-[140px]', status.color)}>
+            {status.text}
+          </span>
+        </Tooltip>
       )
     }
     case 'nodeClass': {
