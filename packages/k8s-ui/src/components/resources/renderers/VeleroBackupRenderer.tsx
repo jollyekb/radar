@@ -56,7 +56,7 @@ export function VeleroBackupRenderer({ data }: VeleroBackupRendererProps) {
         <AlertBanner
           variant="error"
           title={isFailed ? 'Backup Failed' : 'Backup Partially Failed'}
-          message={`${errors} error(s) occurred during backup.`}
+          message={status.failureReason || `${errors} error(s) occurred during backup.`}
           items={validationErrors.length > 0 ? validationErrors : undefined}
         />
       )}
@@ -84,8 +84,16 @@ export function VeleroBackupRenderer({ data }: VeleroBackupRendererProps) {
           )}
           <Property label="Duration" value={getBackupDuration(data)} />
           <Property label="Expiration" value={getBackupExpiry(data)} />
-          {errors > 0 && <Property label="Errors" value={String(errors)} />}
-          {warnings > 0 && <Property label="Warnings" value={String(warnings)} />}
+          <Property label="Errors" value={
+            errors > 0
+              ? <span className="text-red-500 dark:text-red-400 font-medium">{errors}</span>
+              : '0'
+          } />
+          <Property label="Warnings" value={
+            warnings > 0
+              ? <span className="text-amber-500 dark:text-amber-400 font-medium">{warnings}</span>
+              : '0'
+          } />
         </PropertyList>
       </Section>
 

@@ -99,23 +99,67 @@ export function getPrometheusRuleTotalRules(resource: any): number {
   return groups.reduce((sum: number, g: any) => sum + (g.rules?.length || 0), 0)
 }
 
-export function getPrometheusRuleGroups(resource: any): Array<{
+export interface PrometheusAlertRule {
+  type: 'alert'
+  alert: string
+  expr: string
+  for?: string
+  severity?: string
+  summary?: string
+  description?: string
+  labels?: Record<string, string>
+}
+
+export interface PrometheusRecordingRule {
+  type: 'recording'
+  record: string
+  expr: string
+  labels?: Record<string, string>
+}
+
+export type PrometheusRule = PrometheusAlertRule | PrometheusRecordingRule
+
+export interface PrometheusRuleGroup {
   name: string
   interval?: string
   ruleCount: number
   alertCount: number
   recordCount: number
-}> {
+  rules: PrometheusRule[]
+}
+
+export function getPrometheusRuleGroups(resource: any): PrometheusRuleGroup[] {
   return (resource.spec?.groups || []).map((g: any) => {
-    const rules = g.rules || []
-    const alertCount = rules.filter((r: any) => r.alert).length
-    const recordCount = rules.filter((r: any) => r.record).length
+    const rawRules = g.rules || []
+    const alertCount = rawRules.filter((r: any) => r.alert).length
+    const recordCount = rawRules.filter((r: any) => r.record).length
+    const rules: PrometheusRule[] = rawRules.map((r: any) => {
+      if (r.alert) {
+        return {
+          type: 'alert' as const,
+          alert: r.alert,
+          expr: r.expr || '',
+          for: r.for,
+          severity: r.labels?.severity,
+          summary: r.annotations?.summary,
+          description: r.annotations?.description,
+          labels: r.labels,
+        }
+      }
+      return {
+        type: 'recording' as const,
+        record: r.record,
+        expr: r.expr || '',
+        labels: r.labels,
+      }
+    })
     return {
       name: g.name,
       interval: g.interval,
-      ruleCount: rules.length,
+      ruleCount: rawRules.length,
       alertCount,
       recordCount,
+      rules,
     }
   })
 }
