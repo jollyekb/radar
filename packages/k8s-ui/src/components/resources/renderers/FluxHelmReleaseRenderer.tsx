@@ -1,15 +1,16 @@
-import { Package, Settings, CheckCircle2, History } from 'lucide-react'
+import { Package, Settings, CheckCircle2, History, FileCode2, GitBranch } from 'lucide-react'
 import { clsx } from 'clsx'
-import { Section, PropertyList, Property, ConditionsSection, ProblemAlerts } from '../../ui/drawer-components'
+import { Section, PropertyList, Property, ConditionsSection, ProblemAlerts, ResourceLink } from '../../ui/drawer-components'
 import { formatAge } from '../resource-utils'
 import { GitOpsStatusBadge, SyncCountdown } from '../../gitops'
 import { fluxConditionsToGitOpsStatus, type FluxCondition } from '../../../types/gitops'
 
 interface FluxHelmReleaseRendererProps {
   data: any
+  onNavigate?: (ref: { kind: string; namespace: string; name: string }) => void
 }
 
-export function FluxHelmReleaseRenderer({ data }: FluxHelmReleaseRendererProps) {
+export function FluxHelmReleaseRenderer({ data, onNavigate }: FluxHelmReleaseRendererProps) {
   const status = data.status || {}
   const spec = data.spec || {}
   const conditions = (status.conditions || []) as FluxCondition[]
@@ -39,6 +40,26 @@ export function FluxHelmReleaseRenderer({ data }: FluxHelmReleaseRendererProps) 
       message: testFailCondition.message || 'Helm tests failed',
     })
   }
+
+  // Revision mismatch detection
+  if (
+    status.lastAppliedRevision &&
+    status.lastAttemptedRevision &&
+    status.lastAppliedRevision !== status.lastAttemptedRevision
+  ) {
+    problems.push({
+      color: 'red',
+      message: `Revision mismatch: attempted ${status.lastAttemptedRevision} but applied ${status.lastAppliedRevision} — the latest reconciliation failed.`,
+    })
+  }
+
+  // Values info
+  const valuesFrom = spec.valuesFrom || []
+  const values = spec.values || {}
+  const valueKeys = Object.keys(values)
+
+  // Dependencies
+  const dependsOn: Array<{ name: string; namespace?: string }> = spec.dependsOn || []
 
   // Chart reference
   const chartRef = spec.chart?.spec || {}
@@ -96,6 +117,71 @@ export function FluxHelmReleaseRenderer({ data }: FluxHelmReleaseRendererProps) 
           )}
         </PropertyList>
       </Section>
+
+      {/* Dependencies */}
+      {dependsOn.length > 0 && (
+        <Section title={`Dependencies (${dependsOn.length})`} icon={GitBranch}>
+          <div className="flex flex-wrap gap-1">
+            {dependsOn.map((dep, idx) => (
+              <ResourceLink
+                key={idx}
+                name={dep.name}
+                kind="helmreleases"
+                namespace={dep.namespace || data.metadata?.namespace || ''}
+                onNavigate={onNavigate}
+              />
+            ))}
+          </div>
+        </Section>
+      )}
+
+      {/* Values */}
+      {(valuesFrom.length > 0 || valueKeys.length > 0) && (
+        <Section title="Values" icon={FileCode2} defaultExpanded={valuesFrom.length > 0}>
+          {valuesFrom.length > 0 && (
+            <div className="mb-3">
+              <div className="text-xs font-medium text-theme-text-secondary uppercase tracking-wider mb-1.5">
+                Values From
+              </div>
+              <div className="space-y-1">
+                {valuesFrom.map((ref: any, idx: number) => (
+                  <div key={idx} className="card-inner text-sm flex items-center gap-2 flex-wrap">
+                    <span className="badge-sm status-neutral">{ref.kind || 'ConfigMap'}</span>
+                    <ResourceLink
+                      name={ref.name}
+                      kind={ref.kind === 'Secret' ? 'secrets' : 'configmaps'}
+                      namespace={data.metadata?.namespace || ''}
+                      onNavigate={onNavigate}
+                    />
+                    {ref.valuesKey && (
+                      <span className="text-theme-text-tertiary text-xs">
+                        key: {ref.valuesKey}
+                      </span>
+                    )}
+                    {ref.targetPath && (
+                      <span className="text-theme-text-tertiary text-xs">
+                        path: {ref.targetPath}
+                      </span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+          {valueKeys.length > 0 && (
+            <div>
+              <div className="text-xs font-medium text-theme-text-secondary uppercase tracking-wider mb-1.5">
+                Inline Overrides ({valueKeys.length} {valueKeys.length === 1 ? 'key' : 'keys'})
+              </div>
+              <Section title={`${valueKeys.length} value ${valueKeys.length === 1 ? 'override' : 'overrides'}`} defaultExpanded={false}>
+                <pre className="text-xs text-theme-text-secondary font-mono bg-theme-elevated rounded-md p-2 overflow-x-auto max-h-48">
+                  {JSON.stringify(values, null, 2)}
+                </pre>
+              </Section>
+            </div>
+          )}
+        </Section>
+      )}
 
       {/* Install/Upgrade settings */}
       {(spec.install || spec.upgrade) && (

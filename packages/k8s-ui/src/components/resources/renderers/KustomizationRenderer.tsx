@@ -1,14 +1,15 @@
-import { Layers, FolderTree } from 'lucide-react'
-import { Section, PropertyList, Property, ConditionsSection, ProblemAlerts } from '../../ui/drawer-components'
+import { Layers, FolderTree, GitBranch } from 'lucide-react'
+import { Section, PropertyList, Property, ConditionsSection, ProblemAlerts, ResourceLink } from '../../ui/drawer-components'
 import { formatAge } from '../resource-utils'
 import { GitOpsStatusBadge, ManagedResourcesList, SyncCountdown } from '../../gitops'
 import { fluxConditionsToGitOpsStatus, parseFluxInventory, type FluxCondition } from '../../../types/gitops'
 
 interface KustomizationRendererProps {
   data: any
+  onNavigate?: (ref: { kind: string; namespace: string; name: string }) => void
 }
 
-export function KustomizationRenderer({ data }: KustomizationRendererProps) {
+export function KustomizationRenderer({ data, onNavigate }: KustomizationRendererProps) {
   const status = data.status || {}
   const spec = data.spec || {}
   const conditions = (status.conditions || []) as FluxCondition[]
@@ -38,6 +39,21 @@ export function KustomizationRenderer({ data }: KustomizationRendererProps) {
       message: healthyCondition.message || 'Deployed resources are not healthy',
     })
   }
+
+  // Revision mismatch detection
+  if (
+    status.lastAppliedRevision &&
+    status.lastAttemptedRevision &&
+    status.lastAppliedRevision !== status.lastAttemptedRevision
+  ) {
+    problems.push({
+      color: 'red',
+      message: `Revision mismatch: attempted ${status.lastAttemptedRevision} but applied ${status.lastAppliedRevision} — the latest reconciliation failed.`,
+    })
+  }
+
+  // Dependencies
+  const dependsOn: Array<{ name: string; namespace?: string }> = spec.dependsOn || []
 
   // Source reference
   const sourceRef = spec.sourceRef || {}
@@ -93,6 +109,23 @@ export function KustomizationRenderer({ data }: KustomizationRendererProps) {
           )}
         </PropertyList>
       </Section>
+
+      {/* Dependencies */}
+      {dependsOn.length > 0 && (
+        <Section title={`Dependencies (${dependsOn.length})`} icon={GitBranch}>
+          <div className="flex flex-wrap gap-1">
+            {dependsOn.map((dep, idx) => (
+              <ResourceLink
+                key={idx}
+                name={dep.name}
+                kind="kustomizations"
+                namespace={dep.namespace || data.metadata?.namespace || ''}
+                onNavigate={onNavigate}
+              />
+            ))}
+          </div>
+        </Section>
+      )}
 
       {/* Health checks */}
       {spec.healthChecks && spec.healthChecks.length > 0 && (
