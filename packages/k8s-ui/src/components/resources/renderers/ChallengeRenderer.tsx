@@ -1,4 +1,4 @@
-import { Shield, AlertTriangle, Globe, Key } from 'lucide-react'
+import { Shield, AlertTriangle, Globe, Key, FileText } from 'lucide-react'
 import { clsx } from 'clsx'
 import { Section, PropertyList, Property, ConditionsSection } from '../../ui/drawer-components'
 import { getSolverType } from './ClusterIssuerRenderer'
@@ -71,8 +71,15 @@ export function ChallengeRenderer({ data }: { data: any }) {
           <Property
             label="Type"
             value={
-              <span className="badge bg-theme-elevated text-theme-text-secondary">
-                {challengeType}
+              <span className="flex items-center gap-2">
+                <span className="badge bg-theme-elevated text-theme-text-secondary">
+                  {challengeType}
+                </span>
+                {spec.wildcard && (
+                  <span className="badge bg-purple-500/20 text-purple-400">
+                    Wildcard
+                  </span>
+                )}
               </span>
             }
           />
@@ -83,6 +90,17 @@ export function ChallengeRenderer({ data }: { data: any }) {
           {spec.dnsName && <Property label="Domain" value={spec.dnsName} />}
         </PropertyList>
       </Section>
+
+      {/* Issuer */}
+      {spec.issuerRef && (
+        <Section title="Issuer" icon={FileText}>
+          <PropertyList>
+            <Property label="Name" value={spec.issuerRef.name} />
+            <Property label="Kind" value={spec.issuerRef.kind} />
+            <Property label="Group" value={spec.issuerRef.group} />
+          </PropertyList>
+        </Section>
+      )}
 
       {/* ACME */}
       {(spec.url || spec.token) && (

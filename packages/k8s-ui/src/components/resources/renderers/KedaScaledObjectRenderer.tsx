@@ -1,4 +1,4 @@
-import { Cpu } from 'lucide-react'
+import { Cpu, Settings } from 'lucide-react'
 import { Section, PropertyList, Property, ConditionsSection, AlertBanner, ResourceLink } from '../../ui/drawer-components'
 import { kindToPlural } from '../../../utils/navigation'
 import {
@@ -11,6 +11,16 @@ import {
   getScaledObjectPollingInterval,
   getScaledObjectCooldownPeriod,
 } from '../resource-utils-keda'
+
+function summarizeScalingPolicies(policies: any[] | undefined, periodSeconds?: number): string {
+  if (!policies || policies.length === 0) return '-'
+  return policies.map((p: any) => {
+    const value = p.value ?? '?'
+    const type = p.type === 'Percent' ? '%' : ` pod${value !== 1 ? 's' : ''}`
+    const period = p.periodSeconds ?? periodSeconds ?? '?'
+    return `max ${value}${type}/${period}s`
+  }).join(', ')
+}
 
 interface KedaScaledObjectRendererProps {
   data: any
@@ -128,6 +138,50 @@ export function KedaScaledObjectRenderer({ data, onNavigate }: KedaScaledObjectR
               </div>
             ))}
           </div>
+        </Section>
+      )}
+
+      {/* Advanced section */}
+      {data.spec?.advanced && (
+        <Section title="Advanced" icon={Settings} defaultExpanded={false}>
+          <PropertyList>
+            {data.spec.advanced.restoreToOriginalReplicaCount != null && (
+              <Property
+                label="Restore Original Replicas"
+                value={data.spec.advanced.restoreToOriginalReplicaCount ? 'Yes' : 'No'}
+              />
+            )}
+            {data.spec.advanced.horizontalPodAutoscalerConfig?.behavior?.scaleUp && (
+              <Property
+                label="Scale Up"
+                value={summarizeScalingPolicies(
+                  data.spec.advanced.horizontalPodAutoscalerConfig.behavior.scaleUp.policies,
+                  data.spec.advanced.horizontalPodAutoscalerConfig.behavior.scaleUp.stabilizationWindowSeconds
+                )}
+              />
+            )}
+            {data.spec.advanced.horizontalPodAutoscalerConfig?.behavior?.scaleDown && (
+              <Property
+                label="Scale Down"
+                value={summarizeScalingPolicies(
+                  data.spec.advanced.horizontalPodAutoscalerConfig.behavior.scaleDown.policies,
+                  data.spec.advanced.horizontalPodAutoscalerConfig.behavior.scaleDown.stabilizationWindowSeconds
+                )}
+              />
+            )}
+            {data.spec.advanced.horizontalPodAutoscalerConfig?.behavior?.scaleUp?.stabilizationWindowSeconds != null && (
+              <Property
+                label="Scale Up Stabilization"
+                value={`${data.spec.advanced.horizontalPodAutoscalerConfig.behavior.scaleUp.stabilizationWindowSeconds}s`}
+              />
+            )}
+            {data.spec.advanced.horizontalPodAutoscalerConfig?.behavior?.scaleDown?.stabilizationWindowSeconds != null && (
+              <Property
+                label="Scale Down Stabilization"
+                value={`${data.spec.advanced.horizontalPodAutoscalerConfig.behavior.scaleDown.stabilizationWindowSeconds}s`}
+              />
+            )}
+          </PropertyList>
         </Section>
       )}
 

@@ -1,4 +1,4 @@
-import { Shield, AlertTriangle, Globe, Lock, Key } from 'lucide-react'
+import { Shield, AlertTriangle, Globe, Lock, Key, Server } from 'lucide-react'
 import { clsx } from 'clsx'
 import { Section, PropertyList, Property, ConditionsSection } from '../../ui/drawer-components'
 
@@ -7,6 +7,15 @@ function detectIssuerType(spec: any): string {
   if (spec.ca) return 'CA'
   if (spec.selfSigned !== undefined) return 'SelfSigned'
   if (spec.vault) return 'Vault'
+  if (spec.venafi) return 'Venafi'
+  return 'Unknown'
+}
+
+function getVaultAuthMethod(auth: any): string {
+  if (!auth) return 'Unknown'
+  if (auth.tokenSecretRef) return 'Token'
+  if (auth.appRole) return 'AppRole'
+  if (auth.kubernetes) return 'Kubernetes'
   return 'Unknown'
 }
 
@@ -134,6 +143,55 @@ function IssuerRendererBase({ data, kind }: { data: any; kind: string }) {
         <Section title="CA" icon={Lock}>
           <PropertyList>
             <Property label="Secret Name" value={spec.ca.secretName} />
+          </PropertyList>
+        </Section>
+      )}
+
+      {/* Vault section */}
+      {spec.vault && (
+        <Section title="Vault Configuration" icon={Server}>
+          <PropertyList>
+            <Property label="Server" value={spec.vault.server} />
+            <Property label="Path" value={spec.vault.path} />
+            <Property label="Auth Method" value={getVaultAuthMethod(spec.vault.auth)} />
+            {spec.vault.auth?.appRole?.roleId && (
+              <Property label="AppRole Role ID" value={spec.vault.auth.appRole.roleId} />
+            )}
+            {spec.vault.auth?.appRole?.secretRef?.name && (
+              <Property label="AppRole Secret Ref" value={spec.vault.auth.appRole.secretRef.name} />
+            )}
+            {spec.vault.auth?.tokenSecretRef?.name && (
+              <Property label="Token Secret Ref" value={spec.vault.auth.tokenSecretRef.name} />
+            )}
+            {spec.vault.auth?.kubernetes?.role && (
+              <Property label="K8s Auth Role" value={spec.vault.auth.kubernetes.role} />
+            )}
+            {spec.vault.auth?.kubernetes?.secretRef?.name && (
+              <Property label="K8s Secret Ref" value={spec.vault.auth.kubernetes.secretRef.name} />
+            )}
+            <Property label="Custom CA" value={spec.vault.caBundle ? 'Yes' : 'No'} />
+            {spec.vault.namespace && (
+              <Property label="Vault Namespace" value={spec.vault.namespace} />
+            )}
+          </PropertyList>
+        </Section>
+      )}
+
+      {/* Venafi section */}
+      {spec.venafi && (
+        <Section title="Venafi Configuration" icon={Shield}>
+          <PropertyList>
+            <Property label="Zone" value={spec.venafi.zone} />
+            <Property
+              label="Platform"
+              value={spec.venafi.cloud ? 'Cloud' : spec.venafi.tpp ? 'TPP' : '-'}
+            />
+            {spec.venafi.cloud?.url && (
+              <Property label="Cloud URL" value={spec.venafi.cloud.url} />
+            )}
+            {spec.venafi.tpp?.url && (
+              <Property label="TPP URL" value={spec.venafi.tpp.url} />
+            )}
           </PropertyList>
         </Section>
       )}

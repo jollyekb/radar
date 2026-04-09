@@ -1,4 +1,4 @@
-import { Shield, Clock, Globe } from 'lucide-react'
+import { Shield, Clock, Globe, Key } from 'lucide-react'
 import { clsx } from 'clsx'
 import { Section, PropertyList, Property, ConditionsSection, AlertBanner } from '../../ui/drawer-components'
 
@@ -25,6 +25,10 @@ export function CertificateRenderer({ data }: CertificateRendererProps) {
   const dnsNames = spec.dnsNames || []
   const issuerRef = spec.issuerRef || {}
   const usages = spec.usages || []
+
+  const privateKey = spec.privateKey
+  const failedIssuanceAttempts = status.failedIssuanceAttempts
+  const lastFailureTime = status.lastFailureTime
 
   const readyCond = conditions.find((c: any) => c.type === 'Ready')
   const isReady = readyCond?.status === 'True'
@@ -96,30 +100,53 @@ export function CertificateRenderer({ data }: CertificateRendererProps) {
         />
       )}
 
+      {failedIssuanceAttempts > 0 && (
+        <AlertBanner
+          variant="warning"
+          title={`${failedIssuanceAttempts} failed issuance attempt${failedIssuanceAttempts !== 1 ? 's' : ''}`}
+          message={lastFailureTime ? `Last failure: ${formatDate(lastFailureTime)}` : undefined}
+        />
+      )}
+
       {/* Certificate Info */}
       <Section title="Certificate Info" icon={Shield}>
         <PropertyList>
           <Property
             label="Status"
             value={
-              <span className={clsx(
-                'badge',
-                isReady
-                  ? 'bg-green-500/20 text-green-400'
-                  : 'bg-red-500/20 text-red-400'
-              )}>
-                {isReady ? 'Ready' : 'Not Ready'}
+              <span className="flex items-center gap-2">
+                <span className={clsx(
+                  'badge',
+                  isReady
+                    ? 'bg-green-500/20 text-green-400'
+                    : 'bg-red-500/20 text-red-400'
+                )}>
+                  {isReady ? 'Ready' : 'Not Ready'}
+                </span>
+                {spec.isCA && (
+                  <span className="badge bg-purple-500/20 text-purple-400">
+                    CA Certificate
+                  </span>
+                )}
               </span>
             }
           />
           <Property label="Secret Name" value={spec.secretName} />
           <Property label="Revision" value={status.revision} />
+          {failedIssuanceAttempts > 0 && (
+            <Property label="Failed Issuance Attempts" value={String(failedIssuanceAttempts)} />
+          )}
+          {lastFailureTime && (
+            <Property label="Last Failure Time" value={formatDate(lastFailureTime)} />
+          )}
         </PropertyList>
       </Section>
 
       {/* Validity */}
       <Section title="Validity" icon={Clock}>
         <PropertyList>
+          <Property label="Duration" value={spec.duration} />
+          <Property label="Renew Before" value={spec.renewBefore} />
           <Property label="Not Before" value={notBefore ? formatDate(notBefore) : '-'} />
           <Property
             label="Not After"
@@ -160,6 +187,18 @@ export function CertificateRenderer({ data }: CertificateRendererProps) {
           </div>
         )}
       </Section>
+
+      {/* Private Key */}
+      {privateKey && (
+        <Section title="Private Key" icon={Key}>
+          <PropertyList>
+            <Property label="Algorithm" value={privateKey.algorithm} />
+            <Property label="Size" value={privateKey.size != null ? String(privateKey.size) : undefined} />
+            <Property label="Encoding" value={privateKey.encoding} />
+            <Property label="Rotation Policy" value={privateKey.rotationPolicy} />
+          </PropertyList>
+        </Section>
+      )}
 
       {/* Domains */}
       {dnsNames.length > 0 && (
