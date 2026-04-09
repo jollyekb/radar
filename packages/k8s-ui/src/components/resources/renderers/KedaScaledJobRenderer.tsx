@@ -46,6 +46,9 @@ export function KedaScaledJobRenderer({ data }: KedaScaledJobRendererProps) {
           {spec.failedJobsHistoryLimit !== undefined && (
             <Property label="Failure History" value={String(spec.failedJobsHistoryLimit)} />
           )}
+          {spec.minReplicaCount !== undefined && (
+            <Property label="Min Replicas" value={String(spec.minReplicaCount)} />
+          )}
           {spec.maxReplicaCount !== undefined && (
             <Property label="Max Replicas" value={String(spec.maxReplicaCount)} />
           )}

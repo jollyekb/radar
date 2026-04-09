@@ -1,4 +1,4 @@
-import { GitBranch, FolderTree, Settings, Target, XCircle, History } from 'lucide-react'
+import { GitBranch, FolderTree, Settings, Target, XCircle, History, ListChecks } from 'lucide-react'
 import { clsx } from 'clsx'
 import { Section, PropertyList, Property, ConditionsSection, ProblemAlerts } from '../../ui/drawer-components'
 import { formatAge } from '../resource-utils'
@@ -14,6 +14,62 @@ interface ArgoApplicationRendererProps {
   data: any
   onTerminate?: (params: { namespace: string; name: string }) => void
   isTerminating?: boolean
+}
+
+function SourceProperties({ source }: { source: any }) {
+  if (!source) return null
+  return (
+    <>
+      <Property label="Repository" value={source.repoURL} />
+      {source.path && <Property label="Path" value={source.path} />}
+      {source.targetRevision && (
+        <Property
+          label="Target Revision"
+          value={
+            <span className="flex items-center gap-1">
+              <GitBranch className="w-3.5 h-3.5" />
+              {source.targetRevision}
+            </span>
+          }
+        />
+      )}
+      {source.chart && <Property label="Helm Chart" value={source.chart} />}
+      {source.helm?.valueFiles && source.helm.valueFiles.length > 0 && (
+        <Property label="Value Files" value={source.helm.valueFiles.join(', ')} />
+      )}
+      {source.helm?.parameters && source.helm.parameters.length > 0 && (
+        <Property
+          label="Helm Parameters"
+          value={
+            <div className="flex flex-wrap gap-1">
+              {source.helm.parameters.filter(Boolean).map((p: { name: string; value: string }, i: number) => (
+                <span key={i} className="badge-sm bg-theme-elevated text-theme-text-secondary font-mono">
+                  {p.name ?? '?'}={p.value ?? ''}
+                </span>
+              ))}
+            </div>
+          }
+        />
+      )}
+      {source.kustomize?.namePrefix && (
+        <Property label="Kustomize Prefix" value={source.kustomize.namePrefix} />
+      )}
+    </>
+  )
+}
+
+function isSyncResourceFailed(res: any): boolean {
+  return res.status === 'SyncFailed' || res.hookPhase === 'Failed' || res.hookPhase === 'Error'
+}
+
+function getSyncResourceBadgeClass(status: string, hookPhase?: string): string {
+  if (status === 'SyncFailed' || hookPhase === 'Failed' || hookPhase === 'Error') {
+    return 'status-unhealthy'
+  }
+  if (status === 'Synced') return 'status-healthy'
+  if (status === 'Pruned') return 'status-neutral'
+  if (status === 'PruneSkipped') return 'status-degraded'
+  return 'status-unknown'
 }
 
 export function ArgoApplicationRenderer({ data, onTerminate, isTerminating }: ArgoApplicationRendererProps) {
@@ -47,14 +103,21 @@ export function ArgoApplicationRenderer({ data, onTerminate, isTerminating }: Ar
     problems.push({ color: 'yellow', message: 'Application is out of sync with git' })
   }
 
-  // Extract source info
-  const source = spec.source || {}
+  // Extract source info — support both spec.source (single) and spec.sources (multi, ArgoCD 2.6+)
+  const sources: any[] = (spec.sources && spec.sources.length > 0) ? spec.sources : (spec.source ? [spec.source] : [])
+  const isMultiSource = Array.isArray(spec.sources) && spec.sources.length > 0
   const destination = spec.destination || {}
   const syncPolicy = spec.syncPolicy || {}
   const operationState = status.operationState
 
   // Check if sync is in progress
   const isSyncing = operationState?.phase === 'Running'
+
+  // Extract sync result resources for per-resource failure details
+  const syncResultResources: any[] = operationState?.syncResult?.resources || []
+  const failedSyncResources = syncResultResources.filter(isSyncResourceFailed)
+  const otherSyncResources = syncResultResources.filter((r: any) => !isSyncResourceFailed(r))
+  const sortedSyncResources = [...failedSyncResources, ...otherSyncResources]
 
   return (
     <>
@@ -90,57 +153,27 @@ export function ArgoApplicationRenderer({ data, onTerminate, isTerminating }: Ar
         </div>
       </Section>
 
-      {/* Source section */}
-      <Section title="Source" icon={FolderTree}>
-        <PropertyList>
-          <Property label="Repository" value={source.repoURL} />
-          {source.path && <Property label="Path" value={source.path} />}
-          {source.targetRevision && (
-            <Property
-              label="Target Revision"
-              value={
-                <span className="flex items-center gap-1">
-                  <GitBranch className="w-3.5 h-3.5" />
-                  {source.targetRevision}
-                </span>
-              }
-            />
-          )}
-          {source.chart && <Property label="Helm Chart" value={source.chart} />}
-          {source.helm?.valueFiles && source.helm.valueFiles.length > 0 && (
-            <Property label="Value Files" value={source.helm.valueFiles.join(', ')} />
-          )}
-          {source.helm?.parameters && source.helm.parameters.length > 0 && (
-            <Property
-              label="Helm Parameters"
-              value={
-                <div className="flex flex-wrap gap-1">
-                  {source.helm.parameters.map((p: { name: string; value: string }, i: number) => (
-                    <span key={i} className="badge-sm bg-theme-elevated text-theme-text-secondary font-mono">
-                      {p.name}={p.value}
-                    </span>
-                  ))}
-                </div>
-              }
-            />
-          )}
-          {source.kustomize?.namePrefix && (
-            <Property label="Kustomize Prefix" value={source.kustomize.namePrefix} />
-          )}
-        </PropertyList>
-        {source.helm?.values && (
-          <div className="mt-3">
-            <div className="text-xs font-medium text-theme-text-secondary uppercase tracking-wider mb-1.5">
-              Inline Values
-            </div>
-            <Section title={`${source.helm.values.split('\n').length} lines`} defaultExpanded={false}>
-              <pre className="text-xs text-theme-text-secondary font-mono bg-theme-elevated rounded-md p-2 overflow-x-auto max-h-48 whitespace-pre-wrap">
-                {source.helm.values}
-              </pre>
-            </Section>
+      {/* Source section — renders each source for multi-source apps */}
+      {isMultiSource ? (
+        <Section title={`Sources (${sources.length})`} icon={FolderTree}>
+          <div className="space-y-3">
+            {sources.map((src: any, idx: number) => (
+              <div key={idx} className="card-inner">
+                <div className="text-xs font-medium text-theme-text-tertiary mb-1.5">Source {idx + 1}</div>
+                <PropertyList>
+                  <SourceProperties source={src} />
+                </PropertyList>
+              </div>
+            ))}
           </div>
-        )}
-      </Section>
+        </Section>
+      ) : sources.length > 0 ? (
+        <Section title="Source" icon={FolderTree}>
+          <PropertyList>
+            <SourceProperties source={sources[0]} />
+          </PropertyList>
+        </Section>
+      ) : null}
 
       {/* Destination section */}
       <Section title="Destination" icon={Target}>
@@ -238,6 +271,55 @@ export function ArgoApplicationRenderer({ data, onTerminate, isTerminating }: Ar
               <Property label="Revision" value={operationState.syncResult.revision} />
             )}
           </PropertyList>
+        </Section>
+      )}
+
+      {/* Sync Result Resources — per-resource sync status with failure details */}
+      {sortedSyncResources.length > 0 && (
+        <Section
+          title={`Sync Result Resources (${sortedSyncResources.length})`}
+          icon={ListChecks}
+          defaultExpanded={failedSyncResources.length > 0}
+        >
+          <div className="space-y-1.5">
+            {sortedSyncResources.map((res: any, idx: number) => {
+              const isFailed = isSyncResourceFailed(res)
+              return (
+                <div
+                  key={`${res.kind}-${res.namespace}-${res.name}-${idx}`}
+                  className={clsx(
+                    'card-inner px-3 py-2',
+                    isFailed && 'border-l-2 border-red-500'
+                  )}
+                >
+                  <div className="flex items-center gap-2 text-sm">
+                    <span className={clsx('badge badge-sm', getSyncResourceBadgeClass(res.status, res.hookPhase))}>
+                      {res.status || res.hookPhase || 'Unknown'}
+                    </span>
+                    <span className="text-theme-text-primary">
+                      {res.kind}/{res.name}
+                    </span>
+                    {res.namespace && (
+                      <span className="text-theme-text-tertiary text-xs">({res.namespace})</span>
+                    )}
+                  </div>
+                  {res.message && (
+                    <div className={clsx(
+                      'text-xs mt-1 break-all',
+                      isFailed ? 'text-red-400' : 'text-theme-text-secondary'
+                    )}>
+                      {res.message}
+                    </div>
+                  )}
+                  {res.hookPhase && res.hookPhase !== res.status && (
+                    <div className="text-xs text-theme-text-tertiary mt-0.5">
+                      Hook: {res.hookPhase}
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+          </div>
         </Section>
       )}
 
