@@ -49,7 +49,8 @@ export function CNPGClusterRenderer({ data, onNavigate }: CNPGClusterRendererPro
   const hasSplitBrain = primariesReported.length > 1
 
   // Certificate expiry warnings
-  const criticalCerts = certExpirations.filter(c => c.daysUntilExpiry <= 7)
+  const expiredCerts = certExpirations.filter(c => c.daysUntilExpiry < 0)
+  const criticalCerts = certExpirations.filter(c => c.daysUntilExpiry >= 0 && c.daysUntilExpiry <= 7)
   const warningCerts = certExpirations.filter(c => c.daysUntilExpiry > 7 && c.daysUntilExpiry <= 30)
 
   // Last failed backup
@@ -111,6 +112,13 @@ export function CNPGClusterRenderer({ data, onNavigate }: CNPGClusterRendererPro
           variant="error"
           title="Last Backup Failed"
           message={`Last backup failed at ${lastFailedBackup}. WAL archiving may be impacted and RPO is growing.`}
+        />
+      )}
+      {expiredCerts.length > 0 && (
+        <AlertBanner
+          variant="error"
+          title="Certificate Expired"
+          items={expiredCerts.map(c => `${c.secretName} expired ${Math.abs(c.daysUntilExpiry)} day${Math.abs(c.daysUntilExpiry) === 1 ? '' : 's'} ago (${c.expiryDate})`)}
         />
       )}
       {criticalCerts.length > 0 && (

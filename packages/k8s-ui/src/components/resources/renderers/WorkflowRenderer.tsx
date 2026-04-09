@@ -28,7 +28,7 @@ function StepStatusIcon({ phase, nodeType }: { phase: string; nodeType?: string 
   if (nodeType === 'Skipped' || phase === 'Skipped') {
     return <SkipForward className="w-4 h-4 text-theme-text-tertiary shrink-0" />
   }
-  if (nodeType === 'Suspend') {
+  if (nodeType === 'Suspend' && phase !== 'Succeeded') {
     return <PauseCircle className="w-4 h-4 text-yellow-400 shrink-0" />
   }
   switch (phase) {
@@ -93,8 +93,7 @@ function getWorkflowProblems(data: any): string[] {
   if (failedNodes.length > 0) {
     const withMessages = failedNodes.filter((node: any) => node.message)
     if (withMessages.length > 0) {
-      for (const node of withMessages) {
-        const n = node as any
+      for (const n of withMessages as any[]) {
         problems.push(`${n.displayName}: ${n.message}`)
       }
     } else {

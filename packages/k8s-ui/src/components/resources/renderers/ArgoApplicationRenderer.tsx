@@ -58,6 +58,10 @@ function SourceProperties({ source }: { source: any }) {
   )
 }
 
+function isSyncResourceFailed(res: any): boolean {
+  return res.status === 'SyncFailed' || res.hookPhase === 'Failed' || res.hookPhase === 'Error'
+}
+
 function getSyncResourceBadgeClass(status: string, hookPhase?: string): string {
   if (status === 'SyncFailed' || hookPhase === 'Failed' || hookPhase === 'Error') {
     return 'status-unhealthy'
@@ -111,12 +115,8 @@ export function ArgoApplicationRenderer({ data, onTerminate, isTerminating }: Ar
 
   // Extract sync result resources for per-resource failure details
   const syncResultResources: any[] = operationState?.syncResult?.resources || []
-  const failedSyncResources = syncResultResources.filter(
-    (r: any) => r.status === 'SyncFailed' || r.hookPhase === 'Failed' || r.hookPhase === 'Error'
-  )
-  const otherSyncResources = syncResultResources.filter(
-    (r: any) => r.status !== 'SyncFailed' && r.hookPhase !== 'Failed' && r.hookPhase !== 'Error'
-  )
+  const failedSyncResources = syncResultResources.filter(isSyncResourceFailed)
+  const otherSyncResources = syncResultResources.filter((r: any) => !isSyncResourceFailed(r))
   const sortedSyncResources = [...failedSyncResources, ...otherSyncResources]
 
   return (
@@ -283,7 +283,7 @@ export function ArgoApplicationRenderer({ data, onTerminate, isTerminating }: Ar
         >
           <div className="space-y-1.5">
             {sortedSyncResources.map((res: any, idx: number) => {
-              const isFailed = res.status === 'SyncFailed' || res.hookPhase === 'Failed' || res.hookPhase === 'Error'
+              const isFailed = isSyncResourceFailed(res)
               return (
                 <div
                   key={`${res.kind}-${res.namespace}-${res.name}-${idx}`}
