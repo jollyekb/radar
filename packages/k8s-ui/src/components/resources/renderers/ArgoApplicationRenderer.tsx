@@ -42,9 +42,9 @@ function SourceProperties({ source }: { source: any }) {
           label="Helm Parameters"
           value={
             <div className="flex flex-wrap gap-1">
-              {source.helm.parameters.map((p: { name: string; value: string }, i: number) => (
+              {source.helm.parameters.filter(Boolean).map((p: { name: string; value: string }, i: number) => (
                 <span key={i} className="badge-sm bg-theme-elevated text-theme-text-secondary font-mono">
-                  {p.name}={p.value}
+                  {p.name ?? '?'}={p.value ?? ''}
                 </span>
               ))}
             </div>
@@ -100,7 +100,7 @@ export function ArgoApplicationRenderer({ data, onTerminate, isTerminating }: Ar
   }
 
   // Extract source info — support both spec.source (single) and spec.sources (multi, ArgoCD 2.6+)
-  const sources: any[] = spec.sources || (spec.source ? [spec.source] : [])
+  const sources: any[] = (spec.sources && spec.sources.length > 0) ? spec.sources : (spec.source ? [spec.source] : [])
   const isMultiSource = Array.isArray(spec.sources) && spec.sources.length > 0
   const destination = spec.destination || {}
   const syncPolicy = spec.syncPolicy || {}

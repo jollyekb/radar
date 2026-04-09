@@ -196,7 +196,9 @@ export function getCNPGClusterCertificateExpirations(resource: any): CNPGCertifi
   const now = new Date()
   return Object.entries(expirations).map(([secretName, expiryDate]: [string, any]) => {
     const expiry = new Date(expiryDate)
-    const daysUntilExpiry = Math.floor((expiry.getTime() - now.getTime()) / (1000 * 60 * 60 * 24))
+    const daysUntilExpiry = isNaN(expiry.getTime())
+      ? -1  // treat unparseable dates as expired/critical
+      : Math.floor((expiry.getTime() - now.getTime()) / (1000 * 60 * 60 * 24))
     return { secretName, expiryDate: String(expiryDate), daysUntilExpiry }
   })
 }

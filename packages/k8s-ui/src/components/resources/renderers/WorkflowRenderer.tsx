@@ -88,7 +88,7 @@ function getWorkflowProblems(data: any): string[] {
   // Check for failed nodes — include error messages when available
   const nodes = status.nodes || {}
   const failedNodes = Object.values(nodes)
-    .filter((node: any) => node.type === 'Pod' && node.phase === 'Failed')
+    .filter((node: any) => (node.type === 'Pod' || node.type === 'Suspend' || node.type === 'Skipped') && (node.phase === 'Failed' || node.phase === 'Error'))
 
   if (failedNodes.length > 0) {
     const withMessages = failedNodes.filter((node: any) => node.message)
