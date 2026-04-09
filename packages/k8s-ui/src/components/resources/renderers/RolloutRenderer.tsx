@@ -1,6 +1,7 @@
 import { Server, GitBranch, AlertTriangle, Network } from 'lucide-react'
 import { clsx } from 'clsx'
 import { Section, PropertyList, Property, ConditionsSection, PodTemplateSection } from '../../ui/drawer-components'
+import { formatAge } from '../resource-utils'
 
 interface RolloutRendererProps {
   data: any
@@ -35,6 +36,11 @@ export function RolloutRenderer({ data }: RolloutRendererProps) {
   // Problem detection
   const problems: Array<{ color: 'red' | 'yellow'; message: string }> = []
 
+  // Aborted rollout detection — must come before generic paused check
+  if (status.abort === true) {
+    problems.push({ color: 'red', message: status.message || 'Rollout was aborted' })
+  }
+
   if (phase === 'Degraded') {
     problems.push({ color: 'red', message: status.message || 'Rollout is degraded' })
   }
@@ -53,8 +59,19 @@ export function RolloutRenderer({ data }: RolloutRendererProps) {
     problems.push({ color: 'red', message: invalidSpecCond.message || 'Invalid rollout spec' })
   }
 
-  if (phase === 'Paused') {
-    problems.push({ color: 'yellow', message: 'Rollout is paused' })
+  // Pause conditions — show specific reasons instead of generic "Rollout is paused"
+  const pauseConditions: Array<{ reason: string; startTime?: string }> = status.pauseConditions || []
+  if (phase === 'Paused' && !status.abort) {
+    if (pauseConditions.length > 0) {
+      const reasons = pauseConditions.map((pc: any) => {
+        const reason = pc.reason || 'Unknown'
+        const since = pc.startTime ? ` (since ${formatAge(pc.startTime)})` : ''
+        return `${reason}${since}`
+      })
+      problems.push({ color: 'yellow', message: `Rollout is paused: ${reasons.join('; ')}` })
+    } else {
+      problems.push({ color: 'yellow', message: 'Rollout is paused' })
+    }
   }
 
   // Phase badge color
