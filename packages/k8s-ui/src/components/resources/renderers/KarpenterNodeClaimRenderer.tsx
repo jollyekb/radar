@@ -35,6 +35,8 @@ export function KarpenterNodeClaimRenderer({ data, onNavigate }: KarpenterNodeCl
   const status = data.status || {}
   const conditions = status.conditions || []
 
+  const labels = data.metadata?.labels || {}
+
   const claimStatus = getNodeClaimStatus(data)
   const isNotReady = claimStatus.level === 'unhealthy'
   const readyCond = conditions.find((c: any) => c.type === 'Ready')
@@ -42,6 +44,10 @@ export function KarpenterNodeClaimRenderer({ data, onNavigate }: KarpenterNodeCl
   const requirements = getNodeClaimRequirements(data)
   const nodeClassRef = getNodeClaimNodeClassRef(data)
   const expireAfter = getNodeClaimExpireAfter(data)
+  const capacityType = labels['karpenter.sh/capacity-type'] || ''
+  const zone = labels['topology.kubernetes.io/zone'] || ''
+  const arch = labels['kubernetes.io/arch'] || ''
+  const nodeName = getNodeClaimNodeName(data)
 
   // Provisioning steps for timeline
   const steps = [
@@ -66,7 +72,35 @@ export function KarpenterNodeClaimRenderer({ data, onNavigate }: KarpenterNodeCl
       <Section title="Instance" icon={Server}>
         <PropertyList>
           <Property label="Instance Type" value={getNodeClaimInstanceType(data)} />
-          <Property label="Node Name" value={getNodeClaimNodeName(data)} />
+          {capacityType && (
+            <Property
+              label="Capacity Type"
+              value={
+                <span className={clsx(
+                  'badge-sm',
+                  capacityType === 'spot'
+                    ? 'bg-amber-100 text-amber-800 border-amber-300 dark:bg-amber-950/50 dark:text-amber-400 dark:border-amber-700/40'
+                    : 'bg-sky-100 text-sky-700 border-sky-300 dark:bg-sky-950/50 dark:text-sky-400 dark:border-sky-700/40'
+                )}>
+                  {capacityType}
+                </span>
+              }
+            />
+          )}
+          <Property
+            label="Node Name"
+            value={nodeName !== '-' ? (
+              <ResourceLink
+                name={nodeName}
+                kind="Node"
+                namespace=""
+                label={nodeName}
+                onNavigate={onNavigate}
+              />
+            ) : '-'}
+          />
+          {zone && <Property label="Zone" value={zone} />}
+          {arch && <Property label="Architecture" value={arch} />}
           <Property label="NodePool" value={getNodeClaimNodePoolRef(data)} />
           {nodeClassRef && (
             <Property

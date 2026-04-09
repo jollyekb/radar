@@ -70,6 +70,25 @@ export function NodeClaimCell({ resource, column }: { resource: any; column: str
       const pool = getNodeClaimNodePoolRef(resource)
       return <span className="text-sm text-theme-text-secondary">{pool}</span>
     }
+    case 'capacityType': {
+      const ct = resource.metadata?.labels?.['karpenter.sh/capacity-type'] || '-'
+      return (
+        <span className={clsx(
+          'badge-sm',
+          ct === 'spot'
+            ? 'bg-amber-100 text-amber-800 border-amber-300 dark:bg-amber-950/50 dark:text-amber-400 dark:border-amber-700/40'
+            : ct === 'on-demand'
+              ? 'bg-sky-100 text-sky-700 border-sky-300 dark:bg-sky-950/50 dark:text-sky-400 dark:border-sky-700/40'
+              : ''
+        )}>
+          {ct}
+        </span>
+      )
+    }
+    case 'zone': {
+      const zone = resource.metadata?.labels?.['topology.kubernetes.io/zone'] || '-'
+      return <span className="text-sm text-theme-text-secondary">{zone}</span>
+    }
     default:
       return <span className="text-sm text-theme-text-tertiary">-</span>
   }
