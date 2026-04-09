@@ -74,6 +74,29 @@ export function CNPGClusterRenderer({ data, onNavigate }: CNPGClusterRendererPro
           <Property label="Current Primary" value={getCNPGClusterPrimary(data)} />
           <Property label="Image" value={getCNPGClusterImage(data)} />
           <Property label="Update Strategy" value={getCNPGClusterUpdateStrategy(data)} />
+          {data.status?.writeService && (
+            <Property label="Write Service" value={
+              <ResourceLink name={data.status.writeService} kind="Service" namespace={data.metadata?.namespace || ''} onNavigate={onNavigate} />
+            } />
+          )}
+          {data.status?.readService && (
+            <Property label="Read Service" value={
+              <ResourceLink name={data.status.readService} kind="Service" namespace={data.metadata?.namespace || ''} onNavigate={onNavigate} />
+            } />
+          )}
+          {data.spec?.enableSuperuserAccess !== undefined && (
+            <Property label="Superuser Access" value={
+              <span className={`badge-sm ${data.spec.enableSuperuserAccess ? 'bg-green-500/20 text-green-400' : 'bg-theme-hover text-theme-text-secondary'}`}>
+                {data.spec.enableSuperuserAccess ? 'Enabled' : 'Disabled'}
+              </span>
+            } />
+          )}
+          {(data.spec?.minSyncReplicas !== undefined || data.spec?.maxSyncReplicas !== undefined) && (
+            <Property
+              label="Sync Replicas"
+              value={`Min: ${data.spec?.minSyncReplicas ?? '-'} / Max: ${data.spec?.maxSyncReplicas ?? '-'}`}
+            />
+          )}
         </PropertyList>
         {instanceNames.length > 0 && (
           <div className="mt-2 pt-2 border-t border-theme-border">
