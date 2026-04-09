@@ -37,13 +37,21 @@ export function CNPGClusterRenderer({ data, onNavigate }: CNPGClusterRendererPro
   const bootstrapMethod = getCNPGClusterBootstrapMethod(data)
 
   // Problem detection
-  const isDegraded = instances > 0 && readyInstances < instances
+  const isDown = instances > 0 && readyInstances === 0
+  const isDegraded = instances > 0 && readyInstances < instances && readyInstances > 0
   const isFailover = phase.toLowerCase().includes('failing over')
   const isSwitchover = phase.toLowerCase().includes('switchover')
 
   return (
     <>
       {/* Problem alerts */}
+      {isDown && (
+        <AlertBanner
+          variant="error"
+          title="Cluster Down"
+          message={`All ${instances} instances are not ready.`}
+        />
+      )}
       {isDegraded && (
         <AlertBanner
           variant="warning"
