@@ -43,6 +43,9 @@ export function CNPGBackupRenderer({ data, onNavigate }: CNPGBackupRendererProps
           <Property label="Method" value={getCNPGBackupMethod(data)} />
           <Property label="Duration" value={getCNPGBackupDuration(data)} />
           <Property label="Backup Name" value={getCNPGBackupName(data)} />
+          {data.status?.instanceID?.podName && (
+            <Property label="Instance" value={data.status.instanceID.podName} />
+          )}
         </PropertyList>
         {data.status?.startedAt && (
           <div className="mt-2 pt-2 border-t border-theme-border">

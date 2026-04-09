@@ -19,6 +19,7 @@ export function KedaTriggerAuthRenderer({ data, onNavigate }: KedaTriggerAuthRen
   const vault = spec.hashiCorpVault
   const azureKeyVault = spec.azureKeyVault
   const awsSecretManager = spec.awsSecretManager
+  const gcpSecretManager = spec.gcpSecretManager
   const podIdentity = spec.podIdentity
 
   return (
@@ -138,6 +139,28 @@ export function KedaTriggerAuthRenderer({ data, onNavigate }: KedaTriggerAuthRen
                 <div key={i} className="card-inner text-sm">
                   <span className="text-theme-text-primary font-medium">{s.parameter}</span>
                   <span className="text-theme-text-secondary ml-2">{s.name}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </Section>
+      )}
+
+      {/* GCP Secret Manager */}
+      {gcpSecretManager && (
+        <Section title="GCP Secret Manager" icon={Cloud}>
+          <PropertyList>
+            {gcpSecretManager.credentials?.clientSecret?.name && (
+              <Property label="Credentials Secret" value={gcpSecretManager.credentials.clientSecret.name} />
+            )}
+          </PropertyList>
+          {gcpSecretManager.secrets && gcpSecretManager.secrets.length > 0 && (
+            <div className="mt-2 space-y-1">
+              <div className="text-xs font-medium text-theme-text-secondary uppercase tracking-wider mb-1">Secrets</div>
+              {gcpSecretManager.secrets.map((s: any, i: number) => (
+                <div key={i} className="card-inner text-sm">
+                  <span className="text-theme-text-primary font-medium">{s.parameter}</span>
+                  <span className="text-theme-text-secondary ml-2">{s.id}{s.version ? ` (v${s.version})` : ''}</span>
                 </div>
               ))}
             </div>

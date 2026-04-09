@@ -163,8 +163,21 @@ export function WorkflowRenderer({ data }: WorkflowRendererProps) {
           {status.startedAt && <Property label="Started" value={formatAge(status.startedAt)} />}
           <Property label="Finished" value={status.finishedAt ? formatAge(status.finishedAt) : 'Running...'} />
           {templateName && <Property label="Template" value={templateName} />}
+          {status.progress && (
+            <Property label="Progress" value={status.progress} />
+          )}
           {estimatedDuration != null && (
             <Property label="Estimated Duration" value={formatEstimatedDuration(estimatedDuration)} />
+          )}
+          {status.resourcesDuration && (
+            <Property
+              label="Resource Usage"
+              value={
+                Object.entries(status.resourcesDuration as Record<string, number>)
+                  .map(([resource, seconds]) => `${resource}: ${seconds}s`)
+                  .join(', ')
+              }
+            />
           )}
         </PropertyList>
       </Section>

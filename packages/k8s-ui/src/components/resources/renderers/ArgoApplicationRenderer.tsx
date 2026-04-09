@@ -1,4 +1,4 @@
-import { GitBranch, FolderTree, Settings, Target, XCircle } from 'lucide-react'
+import { GitBranch, FolderTree, Settings, Target, XCircle, History } from 'lucide-react'
 import { clsx } from 'clsx'
 import { Section, PropertyList, Property, ConditionsSection, ProblemAlerts } from '../../ui/drawer-components'
 import { formatAge } from '../resource-utils'
@@ -110,10 +110,36 @@ export function ArgoApplicationRenderer({ data, onTerminate, isTerminating }: Ar
           {source.helm?.valueFiles && source.helm.valueFiles.length > 0 && (
             <Property label="Value Files" value={source.helm.valueFiles.join(', ')} />
           )}
+          {source.helm?.parameters && source.helm.parameters.length > 0 && (
+            <Property
+              label="Helm Parameters"
+              value={
+                <div className="flex flex-wrap gap-1">
+                  {source.helm.parameters.map((p: { name: string; value: string }, i: number) => (
+                    <span key={i} className="badge-sm bg-theme-elevated text-theme-text-secondary font-mono">
+                      {p.name}={p.value}
+                    </span>
+                  ))}
+                </div>
+              }
+            />
+          )}
           {source.kustomize?.namePrefix && (
             <Property label="Kustomize Prefix" value={source.kustomize.namePrefix} />
           )}
         </PropertyList>
+        {source.helm?.values && (
+          <div className="mt-3">
+            <div className="text-xs font-medium text-theme-text-secondary uppercase tracking-wider mb-1.5">
+              Inline Values
+            </div>
+            <Section title={`${source.helm.values.split('\n').length} lines`} defaultExpanded={false}>
+              <pre className="text-xs text-theme-text-secondary font-mono bg-theme-elevated rounded-md p-2 overflow-x-auto max-h-48 whitespace-pre-wrap">
+                {source.helm.values}
+              </pre>
+            </Section>
+          </div>
+        )}
       </Section>
 
       {/* Destination section */}
@@ -192,8 +218,21 @@ export function ArgoApplicationRenderer({ data, onTerminate, isTerminating }: Ar
             {operationState.message && (
               <Property label="Message" value={operationState.message} />
             )}
+            {operationState.startedAt && (
+              <Property label="Started" value={formatAge(operationState.startedAt)} />
+            )}
             {operationState.finishedAt && (
               <Property label="Finished" value={formatAge(operationState.finishedAt)} />
+            )}
+            {operationState.retryCount != null && (
+              <Property
+                label="Retries"
+                value={
+                  syncPolicy.retry?.limit
+                    ? `${operationState.retryCount}/${syncPolicy.retry.limit}`
+                    : String(operationState.retryCount)
+                }
+              />
             )}
             {operationState.syncResult?.revision && (
               <Property label="Revision" value={operationState.syncResult.revision} />
@@ -208,6 +247,47 @@ export function ArgoApplicationRenderer({ data, onTerminate, isTerminating }: Ar
           resources={managedResources}
           title={`Managed Resources (${managedResources.length})`}
         />
+      )}
+
+      {/* Revision History */}
+      {status.history && status.history.length > 0 && (
+        <Section title={`Revision History (${status.history.length})`} icon={History} defaultExpanded={false}>
+          <div className="space-y-2 max-h-48 overflow-y-auto">
+            {status.history
+              .slice(0, 10)
+              .map((entry, idx) => (
+                <div
+                  key={entry.id ?? idx}
+                  className={clsx(
+                    'p-2 rounded text-sm',
+                    idx === 0
+                      ? 'bg-green-500/10 border border-green-500/30'
+                      : 'bg-theme-elevated/30'
+                  )}
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="font-medium text-theme-text-primary font-mono text-xs">
+                      {entry.revision
+                        ? entry.revision.length > 12
+                          ? entry.revision.slice(0, 12)
+                          : entry.revision
+                        : '-'}
+                    </span>
+                    {entry.deployedAt && (
+                      <span className="text-xs text-theme-text-tertiary">
+                        {formatAge(entry.deployedAt)}
+                      </span>
+                    )}
+                  </div>
+                  {entry.source?.path && (
+                    <div className="text-xs text-theme-text-secondary mt-0.5 truncate" title={entry.source.path}>
+                      {entry.source.path}
+                    </div>
+                  )}
+                </div>
+              ))}
+          </div>
+        </Section>
       )}
 
       {/* Revision Info */}
