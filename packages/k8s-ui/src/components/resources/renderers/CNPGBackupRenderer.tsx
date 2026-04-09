@@ -25,6 +25,13 @@ export function CNPGBackupRenderer({ data, onNavigate }: CNPGBackupRendererProps
   const target = getCNPGBackupTarget(data)
   const clusterName = getCNPGBackupCluster(data)
 
+  // WAL range fields
+  const beginWal = data.status?.beginWal
+  const endWal = data.status?.endWal
+  const beginLSN = data.status?.beginLSN
+  const endLSN = data.status?.endLSN
+  const hasWalRange = beginWal || endWal || beginLSN || endLSN
+
   return (
     <>
       {/* Problem alerts */}
@@ -78,6 +85,18 @@ export function CNPGBackupRenderer({ data, onNavigate }: CNPGBackupRendererProps
           <Property label="Server Name" value={getCNPGBackupServerName(data)} />
         </PropertyList>
       </Section>
+
+      {/* WAL Range */}
+      {hasWalRange && (
+        <Section title="WAL Range" defaultExpanded>
+          <PropertyList>
+            {beginWal && <Property label="Begin WAL" value={beginWal} />}
+            {endWal && <Property label="End WAL" value={endWal} />}
+            {beginLSN && <Property label="Begin LSN" value={beginLSN} />}
+            {endLSN && <Property label="End LSN" value={endLSN} />}
+          </PropertyList>
+        </Section>
+      )}
 
       {/* Target - for PITR backups */}
       {target !== '-' && (

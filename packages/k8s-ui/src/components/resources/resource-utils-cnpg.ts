@@ -166,6 +166,41 @@ export function getCNPGClusterPostgresParams(resource: any): Record<string, stri
   return resource.spec?.postgresql?.parameters || {}
 }
 
+/** Per-instance replication state from status.instancesReportedState */
+export interface CNPGInstanceReportedState {
+  podName: string
+  isPrimary: boolean
+  timelineID?: number
+}
+
+export function getCNPGClusterInstancesReportedState(resource: any): CNPGInstanceReportedState[] {
+  const reported = resource.status?.instancesReportedState
+  if (!reported || typeof reported !== 'object') return []
+  return Object.entries(reported).map(([podName, state]: [string, any]) => ({
+    podName,
+    isPrimary: state?.isPrimary === true,
+    timelineID: state?.timelineID,
+  }))
+}
+
+/** Certificate expirations from status.certificates.expirations */
+export interface CNPGCertificateExpiry {
+  secretName: string
+  expiryDate: string
+  daysUntilExpiry: number
+}
+
+export function getCNPGClusterCertificateExpirations(resource: any): CNPGCertificateExpiry[] {
+  const expirations = resource.status?.certificates?.expirations
+  if (!expirations || typeof expirations !== 'object') return []
+  const now = new Date()
+  return Object.entries(expirations).map(([secretName, expiryDate]: [string, any]) => {
+    const expiry = new Date(expiryDate)
+    const daysUntilExpiry = Math.floor((expiry.getTime() - now.getTime()) / (1000 * 60 * 60 * 24))
+    return { secretName, expiryDate: String(expiryDate), daysUntilExpiry }
+  })
+}
+
 // ============================================================================
 // CNPG BACKUP UTILITIES
 // ============================================================================
@@ -341,4 +376,14 @@ export function getCNPGPoolerInstances(resource: any): string {
 
 export function getCNPGPoolerParameters(resource: any): Record<string, string> {
   return resource.spec?.pgbouncer?.parameters || {}
+}
+
+export function getCNPGPoolerAuthQuery(resource: any): string | undefined {
+  return resource.spec?.pgbouncer?.authQuery
+}
+
+export function getCNPGPoolerAuthQuerySecret(resource: any): { name: string } | undefined {
+  const secret = resource.spec?.pgbouncer?.authQuerySecret
+  if (!secret?.name) return undefined
+  return { name: secret.name }
 }

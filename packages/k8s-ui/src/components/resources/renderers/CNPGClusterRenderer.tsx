@@ -1,8 +1,7 @@
-import { Database, HardDrive, Activity, Clock, Shield } from 'lucide-react'
+import { Database, HardDrive, Activity, Clock, Shield, KeyRound } from 'lucide-react'
 import { Section, PropertyList, Property, ConditionsSection, AlertBanner, ResourceLink } from '../../ui/drawer-components'
 import {
   getCNPGClusterInstances,
-  getCNPGClusterPrimary,
   getCNPGClusterPhase,
   getCNPGClusterImage,
   getCNPGClusterStorage,
@@ -16,6 +15,8 @@ import {
   getCNPGClusterReplicaSource,
   getCNPGClusterInstanceNames,
   getCNPGClusterPostgresParams,
+  getCNPGClusterInstancesReportedState,
+  getCNPGClusterCertificateExpirations,
 } from '../resource-utils-cnpg'
 
 interface CNPGClusterRendererProps {
@@ -35,6 +36,24 @@ export function CNPGClusterRenderer({ data, onNavigate }: CNPGClusterRendererPro
   const postgresParams = getCNPGClusterPostgresParams(data)
   const instanceNames = getCNPGClusterInstanceNames(data)
   const bootstrapMethod = getCNPGClusterBootstrapMethod(data)
+  const reportedState = getCNPGClusterInstancesReportedState(data)
+  const certExpirations = getCNPGClusterCertificateExpirations(data)
+
+  // Primary mismatch detection
+  const targetPrimary = data.status?.targetPrimary
+  const currentPrimary = data.status?.currentPrimary
+  const primaryMismatch = targetPrimary && currentPrimary && targetPrimary !== currentPrimary
+
+  // Split-brain detection: multiple instances report isPrimary
+  const primariesReported = reportedState.filter(i => i.isPrimary)
+  const hasSplitBrain = primariesReported.length > 1
+
+  // Certificate expiry warnings
+  const criticalCerts = certExpirations.filter(c => c.daysUntilExpiry <= 7)
+  const warningCerts = certExpirations.filter(c => c.daysUntilExpiry > 7 && c.daysUntilExpiry <= 30)
+
+  // Last failed backup
+  const lastFailedBackup = data.status?.lastFailedBackup
 
   // Problem detection
   const isDown = instances > 0 && readyInstances === 0
@@ -45,6 +64,13 @@ export function CNPGClusterRenderer({ data, onNavigate }: CNPGClusterRendererPro
   return (
     <>
       {/* Problem alerts */}
+      {hasSplitBrain && (
+        <AlertBanner
+          variant="error"
+          title="Potential Split-Brain Detected"
+          message={`Multiple instances report as primary: ${primariesReported.map(i => i.podName).join(', ')}. Immediate investigation required.`}
+        />
+      )}
       {isDown && (
         <AlertBanner
           variant="error"
@@ -73,13 +99,44 @@ export function CNPGClusterRenderer({ data, onNavigate }: CNPGClusterRendererPro
           message={`Cluster is performing a switchover. Current phase: ${phase}`}
         />
       )}
+      {primaryMismatch && (
+        <AlertBanner
+          variant="warning"
+          title="Switchover Pending"
+          message={`Target primary is ${targetPrimary} but current primary is ${currentPrimary}.`}
+        />
+      )}
+      {lastFailedBackup && (
+        <AlertBanner
+          variant="error"
+          title="Last Backup Failed"
+          message={`Last backup failed at ${lastFailedBackup}. WAL archiving may be impacted and RPO is growing.`}
+        />
+      )}
+      {criticalCerts.length > 0 && (
+        <AlertBanner
+          variant="error"
+          title="Certificate Expiring Soon"
+          items={criticalCerts.map(c => `${c.secretName} expires in ${c.daysUntilExpiry} day${c.daysUntilExpiry === 1 ? '' : 's'} (${c.expiryDate})`)}
+        />
+      )}
+      {warningCerts.length > 0 && (
+        <AlertBanner
+          variant="warning"
+          title="Certificate Expiry Warning"
+          items={warningCerts.map(c => `${c.secretName} expires in ${c.daysUntilExpiry} days (${c.expiryDate})`)}
+        />
+      )}
 
       {/* Cluster Overview */}
       <Section title="Cluster Overview" icon={Database} defaultExpanded>
         <PropertyList>
           <Property label="Phase" value={phase} />
           <Property label="Instances" value={getCNPGClusterInstances(data)} />
-          <Property label="Current Primary" value={getCNPGClusterPrimary(data)} />
+          <Property label="Current Primary" value={currentPrimary || '-'} />
+          {targetPrimary && targetPrimary !== currentPrimary && (
+            <Property label="Target Primary" value={targetPrimary} />
+          )}
           <Property label="Image" value={getCNPGClusterImage(data)} />
           <Property label="Update Strategy" value={getCNPGClusterUpdateStrategy(data)} />
           {data.status?.writeService && (
@@ -123,6 +180,29 @@ export function CNPGClusterRenderer({ data, onNavigate }: CNPGClusterRendererPro
         )}
       </Section>
 
+      {/* Replication State */}
+      {reportedState.length > 0 && (
+        <Section title="Replication" icon={Activity} defaultExpanded>
+          <div className="space-y-1.5">
+            {reportedState.map((instance) => (
+              <div key={instance.podName} className="flex items-center gap-2 text-sm">
+                <span className="text-theme-text-primary font-mono flex-1 break-all">{instance.podName}</span>
+                <span className={
+                  instance.isPrimary
+                    ? 'badge-sm bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300'
+                    : 'badge-sm bg-theme-elevated text-theme-text-secondary'
+                }>
+                  {instance.isPrimary ? 'Primary' : 'Replica'}
+                </span>
+                {instance.timelineID != null && (
+                  <span className="text-xs text-theme-text-tertiary">TL {instance.timelineID}</span>
+                )}
+              </div>
+            ))}
+          </div>
+        </Section>
+      )}
+
       {/* Storage */}
       <Section title="Storage" icon={HardDrive} defaultExpanded>
         <PropertyList>
@@ -162,10 +242,42 @@ export function CNPGClusterRenderer({ data, onNavigate }: CNPGClusterRendererPro
             {backupConfig.lastSuccessfulBackup && (
               <Property label="Last Successful" value={backupConfig.lastSuccessfulBackup} />
             )}
+            {lastFailedBackup && (
+              <Property label="Last Failed" value={lastFailedBackup} />
+            )}
             {backupConfig.firstRecoverabilityPoint && (
               <Property label="First Recoverability" value={backupConfig.firstRecoverabilityPoint} />
             )}
           </PropertyList>
+        </Section>
+      )}
+
+      {/* Certificates */}
+      {certExpirations.length > 0 && (
+        <Section title="Certificates" icon={KeyRound} defaultExpanded>
+          <div className="space-y-1.5">
+            {certExpirations.map((cert) => (
+              <div key={cert.secretName} className="flex items-center gap-2 text-sm">
+                <span className="text-theme-text-primary font-mono flex-1 break-all">{cert.secretName}</span>
+                <span className="text-xs text-theme-text-tertiary">{cert.expiryDate}</span>
+                {cert.daysUntilExpiry <= 7 && (
+                  <span className="badge-sm bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300">
+                    {cert.daysUntilExpiry}d
+                  </span>
+                )}
+                {cert.daysUntilExpiry > 7 && cert.daysUntilExpiry <= 30 && (
+                  <span className="badge-sm bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300">
+                    {cert.daysUntilExpiry}d
+                  </span>
+                )}
+                {cert.daysUntilExpiry > 30 && (
+                  <span className="badge-sm bg-theme-elevated text-theme-text-secondary">
+                    {cert.daysUntilExpiry}d
+                  </span>
+                )}
+              </div>
+            ))}
+          </div>
         </Section>
       )}
 
@@ -196,7 +308,7 @@ export function CNPGClusterRenderer({ data, onNavigate }: CNPGClusterRendererPro
 
       {/* Replication - only if this is a replica cluster */}
       {isReplica && (
-        <Section title="Replication" icon={Shield} defaultExpanded>
+        <Section title="Replica Cluster" icon={Shield} defaultExpanded>
           <PropertyList>
             <Property label="Role" value="Replica" />
             <Property label="Source" value={getCNPGClusterReplicaSource(data)} />

@@ -1,4 +1,4 @@
-import { Users, Database } from 'lucide-react'
+import { Users, Database, KeyRound } from 'lucide-react'
 import { Section, PropertyList, Property, AlertBanner, ResourceLink } from '../../ui/drawer-components'
 import {
   getCNPGPoolerCluster,
@@ -6,6 +6,8 @@ import {
   getCNPGPoolerMode,
   getCNPGPoolerInstances,
   getCNPGPoolerParameters,
+  getCNPGPoolerAuthQuery,
+  getCNPGPoolerAuthQuerySecret,
 } from '../resource-utils-cnpg'
 
 interface CNPGPoolerRendererProps {
@@ -19,6 +21,8 @@ export function CNPGPoolerRenderer({ data, onNavigate }: CNPGPoolerRendererProps
   const isDegraded = desired > 0 && ready < desired
   const clusterName = getCNPGPoolerCluster(data)
   const parameters = getCNPGPoolerParameters(data)
+  const authQuery = getCNPGPoolerAuthQuery(data)
+  const authQuerySecret = getCNPGPoolerAuthQuerySecret(data)
 
   return (
     <>
@@ -39,6 +43,29 @@ export function CNPGPoolerRenderer({ data, onNavigate }: CNPGPoolerRendererProps
           <Property label="Instances" value={getCNPGPoolerInstances(data)} />
         </PropertyList>
       </Section>
+
+      {/* Authentication */}
+      {(authQuery || authQuerySecret) && (
+        <Section title="Authentication" icon={KeyRound} defaultExpanded>
+          <PropertyList>
+            {authQuery && (
+              <Property label="Auth Query" value={
+                <code className="text-xs font-mono bg-theme-elevated px-1.5 py-0.5 rounded break-all">{authQuery}</code>
+              } />
+            )}
+            {authQuerySecret && (
+              <Property label="Auth Query Secret" value={
+                <ResourceLink
+                  name={authQuerySecret.name}
+                  kind="secrets"
+                  namespace={data.metadata?.namespace || ''}
+                  onNavigate={onNavigate}
+                />
+              } />
+            )}
+          </PropertyList>
+        </Section>
+      )}
 
       {/* Cluster Reference */}
       <Section title="Cluster" icon={Database} defaultExpanded>
