@@ -603,10 +603,17 @@ function ActivityCard({ item, expanded, onToggle, onResourceClick }: ActivityCar
               {item.owner && (
                 <span className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
                   <span className="text-xs text-theme-text-quaternary">←</span>
-                  <ResourceRefBadge
-                    resourceRef={{ kind: item.owner.kind, namespace: item.namespace, name: item.owner.name }}
-                    onClick={(ref) => onResourceClick?.(refToSelectedResource(ref))}
-                  />
+                  {item.owner.kind === 'ReplicaSet' ? (
+                    <ResourceRefBadge
+                      resourceRef={{ kind: 'Deployment', namespace: item.namespace, name: item.owner.name.replace(/-[a-z0-9]+$/, '') }}
+                      onClick={(ref) => onResourceClick?.(refToSelectedResource(ref))}
+                    />
+                  ) : (
+                    <ResourceRefBadge
+                      resourceRef={{ kind: item.owner.kind, namespace: item.namespace, name: item.owner.name }}
+                      onClick={(ref) => onResourceClick?.(refToSelectedResource(ref))}
+                    />
+                  )}
                 </span>
               )}
               {item.createdAt && (

@@ -71,6 +71,10 @@ export function podMatchesProblemCategory(problems: PodProblem[], restarts: numb
       return msgs.some(m => m.startsWith('Exit Code'))
     case 'Failed':
       return msgs.includes('Failed') || msgs.includes('Unknown')
+    case 'Other': {
+      const knownPatterns = ['CrashLoopBackOff', 'ImagePull', 'ErrImagePull', 'OOMKilled', 'Unschedulable', 'Not Ready', 'Probe', 'Init:', 'Exit Code', 'Failed', 'Unknown']
+      return problems.some(p => !knownPatterns.some(pat => p.message.includes(pat)) && p.message !== `${restarts} restarts`)
+    }
     default:
       return false
   }
@@ -394,6 +398,70 @@ export function getWorkloadStatus(resource: any, kind: string): StatusBadge {
     return { text: `${ready}/${desired}`, color: healthColors.degraded, level: 'degraded' }
   }
   return { text: `${ready}/${desired}`, color: healthColors.unhealthy, level: 'unhealthy' }
+}
+
+/** Detect problems for Deployments, StatefulSets, DaemonSets. Parallel to getPodProblems. */
+export function getWorkloadProblems(resource: any, kind: string): PodProblem[] {
+  const problems: PodProblem[] = []
+  const status = resource.status || {}
+  const spec = resource.spec || {}
+  const k = kind.toLowerCase()
+
+  if (k === 'daemonsets') {
+    const desired = status.desiredNumberScheduled || 0
+    const ready = status.numberReady || 0
+    if (desired > 0 && ready === 0) {
+      problems.push({ severity: 'critical', message: 'No pods ready' })
+    } else if (desired > 0 && ready < desired) {
+      problems.push({ severity: 'high', message: `${desired - ready} pods unavailable` })
+    }
+    return problems
+  }
+
+  // Deployment, StatefulSet
+  const desired = spec.replicas ?? status.replicas ?? 0
+  const ready = status.readyReplicas || 0
+  const available = status.availableReplicas ?? ready
+  const updated = status.updatedReplicas || 0
+
+  if (desired === 0) return problems
+
+  if (ready === 0 && desired > 0) {
+    problems.push({ severity: 'critical', message: 'No pods ready' })
+  } else if (available < desired) {
+    problems.push({ severity: 'high', message: `${desired - available} pods unavailable` })
+  }
+
+  if (updated > 0 && updated < desired) {
+    problems.push({ severity: 'medium', message: 'Rollout in progress' })
+  }
+
+  // Check conditions for stuck rollouts (Deployment only)
+  if (k === 'deployments') {
+    const conditions = status.conditions || []
+    for (const cond of conditions) {
+      if (cond.type === 'Progressing' && cond.status === 'False' && cond.reason === 'ProgressDeadlineExceeded') {
+        problems.push({ severity: 'critical', message: 'Rollout stuck' })
+      }
+    }
+  }
+
+  return problems
+}
+
+/** Check whether a workload's problems match a given problem category */
+export function workloadMatchesProblemCategory(problems: PodProblem[], category: string): boolean {
+  const msgs = problems.map(p => p.message)
+  switch (category) {
+    case 'Unavailable':
+      return msgs.some(m => m.includes('unavailable') || m.includes('No pods ready'))
+    case 'Rollout Stuck':
+      return msgs.includes('Rollout stuck')
+    case 'Rollout In Progress':
+      return msgs.includes('Rollout in progress')
+    default:
+      return false
+  }
 }
 
 export function getWorkloadImages(resource: any): string[] {
@@ -1386,37 +1454,6 @@ export function getRoleBindingSubjectCount(rb: any): number {
 // WORKLOAD PROBLEM DETECTION (for table row indicators)
 // ============================================================================
 
-export function getWorkloadProblems(resource: any, kind: string): string[] {
-  const problems: string[] = []
-  const status = resource.status || {}
-  const spec = resource.spec || {}
-
-  if (kind === 'daemonsets') {
-    const ready = status.numberReady || 0
-    const desired = status.desiredNumberScheduled || 0
-    if (desired > 0 && ready < desired) {
-      problems.push(`${desired - ready} pods not ready`)
-    }
-  } else {
-    const ready = status.readyReplicas || 0
-    const desired = spec.replicas ?? 0
-    if (desired > 0 && ready < desired) {
-      problems.push(`${desired - ready} replicas not ready`)
-    }
-  }
-
-  const conditions = status.conditions || []
-  for (const cond of conditions) {
-    if (cond.status === 'True' && cond.type === 'ReplicaFailure') {
-      problems.push('ReplicaFailure')
-    }
-    if (cond.status === 'False' && cond.type === 'Available') {
-      problems.push('Unavailable')
-    }
-  }
-
-  return problems
-}
 
 // ============================================================================
 // FORMATTING UTILITIES

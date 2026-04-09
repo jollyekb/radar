@@ -77,7 +77,6 @@ interface PodRendererProps {
   resolvedEnvFrom?: ResolvedEnvFrom
 }
 
-
 // ── Env vars section — extracted to use hooks (useState for reveal) ──────────
 
 function SecretValueCell({ value }: { value: string }) {

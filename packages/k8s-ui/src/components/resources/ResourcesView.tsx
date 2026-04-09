@@ -31,6 +31,8 @@ import {
   getPodStatus,
   getPodRestarts,
   getPodProblems,
+  getWorkloadProblems,
+  workloadMatchesProblemCategory,
   getContainerSquareStates,
   getWorkloadImages,
   getWorkloadConditions,
@@ -142,7 +144,9 @@ import { ResourcesSidebar } from './ResourcesSidebar'
 import type { SelectedKindInfo } from './ResourcesSidebar'
 
 // Pod problem filter options (special multi-select, not a single column value)
-const POD_PROBLEMS = ['CrashLoopBackOff', 'ImagePullBackOff', 'OOMKilled', 'Unschedulable', 'Not Ready', 'High Restarts', 'Init Failed', 'Exit Code Error', 'Failed'] as const
+const POD_PROBLEMS = ['CrashLoopBackOff', 'ImagePullBackOff', 'OOMKilled', 'Unschedulable', 'Not Ready', 'High Restarts', 'Init Failed', 'Exit Code Error', 'Failed', 'Other'] as const
+const WORKLOAD_PROBLEMS = ['Unavailable', 'Rollout Stuck', 'Rollout In Progress'] as const
+const WORKLOAD_KINDS = new Set(['deployments', 'statefulsets', 'daemonsets'])
 
 // Columns to skip for auto-detected filters (high cardinality, text-like, or non-filterable)
 const SKIP_FILTER_COLUMNS = new Set([
@@ -2511,9 +2515,17 @@ export function ResourcesView({
       )
     }
 
-    // Apply problem filters (pods only)
-    if (problemFilters.length > 0 && selectedKind.name.toLowerCase() === 'pods') {
-      result = result.filter((r: any) => podMatchesProblemFilter(r, problemFilters))
+    // Apply problem filters
+    if (problemFilters.length > 0) {
+      const kindLower = normalizeKindToPlural(selectedKind.name, selectedKind.group)
+      if (kindLower === 'pods') {
+        result = result.filter((r: any) => podMatchesProblemFilter(r, problemFilters))
+      } else if (WORKLOAD_KINDS.has(kindLower)) {
+        result = result.filter((r: any) => {
+          const problems = getWorkloadProblems(r, kindLower)
+          return problemFilters.some(f => workloadMatchesProblemCategory(problems, f))
+        })
+      }
     }
 
     // Apply inactive ReplicaSet filter (default: hide inactive)
@@ -2796,6 +2808,28 @@ export function ResourcesView({
       }
 
       const activeProblems = POD_PROBLEMS
+        .map(p => ({ value: p, count: problemCounts[p] }))
+        .filter(p => p.count > 0)
+      if (activeProblems.length > 0) {
+        problems = activeProblems
+      }
+    }
+
+    // Workload-specific: compute problem counts
+    if (WORKLOAD_KINDS.has(kindLower)) {
+      const problemCounts: Record<string, number> = {}
+      WORKLOAD_PROBLEMS.forEach(p => problemCounts[p] = 0)
+
+      for (const resource of resources) {
+        const workloadProblems = getWorkloadProblems(resource, kindLower)
+        for (const category of WORKLOAD_PROBLEMS) {
+          if (workloadMatchesProblemCategory(workloadProblems, category)) {
+            problemCounts[category]++
+          }
+        }
+      }
+
+      const activeProblems = WORKLOAD_PROBLEMS
         .map(p => ({ value: p, count: problemCounts[p] }))
         .filter(p => p.count > 0)
       if (activeProblems.length > 0) {
@@ -4003,11 +4037,11 @@ function PodCell({ resource, column }: { resource: any; column: string }) {
       const status = getPodStatus(resource)
       const problems = getPodProblems(resource)
       return (
-        <div className="flex items-center gap-2">
-          <span className={clsx('badge', status.color)}>
+        <div className="flex items-center gap-2 min-w-0">
+          <span className={clsx('badge truncate', status.color)} title={status.text}>
             {status.text}
           </span>
-          {problems.length > 0 && (
+          {problems.length > 1 && (
             <Tooltip content={
               <div className="space-y-0.5">
                 {problems.map((p, i) => (
@@ -4092,7 +4126,7 @@ function PodCell({ resource, column }: { resource: any; column: string }) {
   }
 }
 
-function WorkloadCell({ resource, column }: { resource: any; kind: string; column: string }) {
+function WorkloadCell({ resource, column, kind }: { resource: any; kind: string; column: string }) {
   const status = resource.status || {}
   const spec = resource.spec || {}
 
@@ -4101,13 +4135,32 @@ function WorkloadCell({ resource, column }: { resource: any; kind: string; colum
       const desired = spec.replicas ?? 0
       const ready = status.readyReplicas || 0
       const allReady = ready === desired && desired > 0
+      const problems = getWorkloadProblems(resource, kind)
       return (
-        <span className={clsx(
-          'text-sm font-medium',
-          desired === 0 ? 'text-theme-text-secondary' : allReady ? 'text-green-400' : ready > 0 ? 'text-yellow-400' : 'text-red-400'
-        )}>
-          {ready}/{desired}
-        </span>
+        <div className="flex items-center gap-1.5">
+          <span className={clsx(
+            'text-sm font-medium',
+            desired === 0 ? 'text-theme-text-secondary' : allReady ? 'text-green-400' : ready > 0 ? 'text-yellow-400' : 'text-red-400'
+          )}>
+            {ready}/{desired}
+          </span>
+          {problems.length > 0 && (
+            <Tooltip content={
+              <div className="space-y-0.5">
+                {problems.map((p, i) => (
+                  <div key={i} className="flex items-center gap-1.5">
+                    <span className={clsx('w-1.5 h-1.5 rounded-full shrink-0', SEVERITY_DOT_COLOR[p.severity])} />
+                    <span>{p.message}</span>
+                  </div>
+                ))}
+              </div>
+            }>
+              <span className="text-red-400">
+                <AlertTriangle className="w-3.5 h-3.5" />
+              </span>
+            </Tooltip>
+          )}
+        </div>
       )
     }
     case 'upToDate':
@@ -4158,13 +4211,32 @@ function DaemonSetCell({ resource, column }: { resource: any; column: string }) 
       const desired = status.desiredNumberScheduled || 0
       const ready = status.numberReady || 0
       const allReady = ready === desired && desired > 0
+      const problems = getWorkloadProblems(resource, 'daemonsets')
       return (
-        <span className={clsx(
-          'text-sm font-medium',
-          allReady ? 'text-green-400' : ready > 0 ? 'text-yellow-400' : 'text-red-400'
-        )}>
-          {ready}
-        </span>
+        <div className="flex items-center gap-1.5">
+          <span className={clsx(
+            'text-sm font-medium',
+            allReady ? 'text-green-400' : ready > 0 ? 'text-yellow-400' : 'text-red-400'
+          )}>
+            {ready}
+          </span>
+          {problems.length > 0 && (
+            <Tooltip content={
+              <div className="space-y-0.5">
+                {problems.map((p, i) => (
+                  <div key={i} className="flex items-center gap-1.5">
+                    <span className={clsx('w-1.5 h-1.5 rounded-full shrink-0', SEVERITY_DOT_COLOR[p.severity])} />
+                    <span>{p.message}</span>
+                  </div>
+                ))}
+              </div>
+            }>
+              <span className="text-red-400">
+                <AlertTriangle className="w-3.5 h-3.5" />
+              </span>
+            </Tooltip>
+          )}
+        </div>
       )
     }
     case 'upToDate':
