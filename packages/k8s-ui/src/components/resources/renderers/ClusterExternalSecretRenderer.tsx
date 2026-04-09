@@ -29,7 +29,6 @@ export function ClusterExternalSecretRenderer({ data, onNavigate }: ClusterExter
   const storeRef = esSpec?.secretStoreRef
   const storeName = storeRef?.name
   const storeKindSingular = storeRef?.kind || 'SecretStore'
-  const storeNamespace = storeKindSingular === 'ClusterSecretStore' ? '' : (data.metadata?.namespace || '')
   const dataCount = (esSpec?.data || []).length
   const dataFromCount = (esSpec?.dataFrom || []).length
 
@@ -124,9 +123,9 @@ export function ClusterExternalSecretRenderer({ data, onNavigate }: ClusterExter
           {storeRef && (
             <>
               <Property label="Store Name" value={
-                storeName
-                  ? <ResourceLink name={storeName} kind={storeKindSingular} namespace={storeNamespace} onNavigate={onNavigate} />
-                  : '-'
+                storeName && storeKindSingular === 'ClusterSecretStore'
+                  ? <ResourceLink name={storeName} kind={storeKindSingular} namespace="" onNavigate={onNavigate} />
+                  : storeName || '-'
               } />
               <Property label="Store Kind" value={storeRef.kind || 'SecretStore'} />
             </>

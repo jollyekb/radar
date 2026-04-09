@@ -254,7 +254,7 @@ function CiliumRuleCard({ rule }: { rule: any }) {
           <div className="flex flex-wrap gap-1">
             {toServices.map((svc: any, j: number) => {
               const k8s = svc.k8sService
-              const sel = svc.k8sServiceNamespace
+              const sel = svc.k8sServiceSelector
               if (k8s) {
                 const ns = k8s.namespace ? `${k8s.namespace}/` : ''
                 return (
@@ -264,7 +264,7 @@ function CiliumRuleCard({ rule }: { rule: any }) {
                 )
               }
               if (sel) {
-                return <LabelSelectorDisplay key={j} selector={sel} />
+                return <LabelSelectorDisplay key={j} selector={sel.selector || sel} />
               }
               return (
                 <span key={j} className="badge bg-theme-elevated text-theme-text-secondary">

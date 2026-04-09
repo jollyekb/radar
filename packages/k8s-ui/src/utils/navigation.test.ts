@@ -1,5 +1,9 @@
-import { describe, test, expect } from 'vitest'
-import { kindToPlural, pluralToKind, refToSelectedResource, initNavigationMap } from './navigation'
+import { describe, test, expect, afterEach } from 'vitest'
+import { kindToPlural, pluralToKind, refToSelectedResource, initNavigationMap, resetNavigationMap } from './navigation'
+
+afterEach(() => {
+  resetNavigationMap()
+})
 
 describe('kindToPlural', () => {
   test('singular PascalCase to plural lowercase', () => {

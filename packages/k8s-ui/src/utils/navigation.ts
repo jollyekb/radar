@@ -57,6 +57,12 @@ export function initNavigationMap(resources: APIResource[]) {
   discoveredKindToPlural = k2p
 }
 
+/** Reset navigation maps to builtin-only state. For testing. */
+export function resetNavigationMap() {
+  discoveredPluralToKind = null
+  discoveredKindToPlural = null
+}
+
 function getPluralToKind(): Record<string, string> {
   return discoveredPluralToKind || BUILTIN_PLURAL_TO_KIND
 }
