@@ -1,5 +1,5 @@
 import { Shield, ArrowDownToLine, ArrowUpFromLine, Ban, Lock } from 'lucide-react'
-import { Section, PropertyList, Property } from '../../ui/drawer-components'
+import { Section, LabelSelectorDisplay } from '../../ui/drawer-components'
 
 interface CiliumNetworkPolicyRendererProps {
   data: any
@@ -8,8 +8,6 @@ interface CiliumNetworkPolicyRendererProps {
 export function CiliumNetworkPolicyRenderer({ data }: CiliumNetworkPolicyRendererProps) {
   const spec = data.spec || data.specs || {}
   const endpointSelector = spec.endpointSelector || {}
-  const matchLabels = endpointSelector.matchLabels || {}
-  const hasMatchLabels = Object.keys(matchLabels).length > 0
   const ingress: any[] | undefined = spec.ingress
   const ingressDeny: any[] | undefined = spec.ingressDeny
   const egress: any[] | undefined = spec.egress
@@ -23,34 +21,14 @@ export function CiliumNetworkPolicyRenderer({ data }: CiliumNetworkPolicyRendere
         {description && (
           <p className="text-xs text-theme-text-secondary mb-2">{description}</p>
         )}
-        <PropertyList>
-          <Property
-            label="Endpoint Selector"
-            value={hasMatchLabels ? undefined : 'All endpoints in namespace'}
-          />
-        </PropertyList>
-        {hasMatchLabels && (
-          <div className="mt-2">
-            <div className="text-xs text-theme-text-tertiary mb-1">Endpoint Selector</div>
-            <div className="flex flex-wrap gap-1">
-              {Object.entries(matchLabels).map(([k, v]) => (
-                <span key={k} className="badge bg-theme-elevated text-theme-text-secondary">
-                  {k}={String(v)}
-                </span>
-              ))}
-            </div>
-          </div>
-        )}
+        <div className="mt-2">
+          <div className="text-xs text-theme-text-tertiary mb-1">Endpoint Selector</div>
+          <LabelSelectorDisplay selector={endpointSelector} emptyText="All endpoints in namespace" />
+        </div>
         {spec.nodeSelector && (
           <div className="mt-2">
             <div className="text-xs text-theme-text-tertiary mb-1">Node Selector</div>
-            <div className="flex flex-wrap gap-1">
-              {Object.entries(spec.nodeSelector.matchLabels || {}).map(([k, v]) => (
-                <span key={k} className="badge bg-theme-elevated text-theme-text-secondary">
-                  {k}={String(v)}
-                </span>
-              ))}
-            </div>
+            <LabelSelectorDisplay selector={spec.nodeSelector} emptyText="All nodes" />
           </div>
         )}
         {enableDefaultDeny && (
@@ -155,7 +133,7 @@ function CiliumRuleCard({ rule }: { rule: any }) {
           <div className="text-xs text-theme-text-tertiary mb-1">From Endpoints</div>
           <div className="space-y-1">
             {fromEndpoints.map((ep: any, j: number) => (
-              <SelectorEntry key={j} selector={ep} />
+              <LabelSelectorDisplay key={j} selector={ep} emptyText="all endpoints" inline />
             ))}
           </div>
         </div>
@@ -204,7 +182,7 @@ function CiliumRuleCard({ rule }: { rule: any }) {
           <div className="text-xs text-theme-text-tertiary mb-1">From Nodes</div>
           <div className="space-y-1">
             {fromNodes.map((node: any, j: number) => (
-              <SelectorEntry key={j} selector={node} />
+              <LabelSelectorDisplay key={j} selector={node} />
             ))}
           </div>
         </div>
@@ -226,7 +204,7 @@ function CiliumRuleCard({ rule }: { rule: any }) {
           <div className="text-xs text-theme-text-tertiary mb-1">To Endpoints</div>
           <div className="space-y-1">
             {toEndpoints.map((ep: any, j: number) => (
-              <SelectorEntry key={j} selector={ep} />
+              <LabelSelectorDisplay key={j} selector={ep} emptyText="all endpoints" inline />
             ))}
           </div>
         </div>
@@ -276,7 +254,7 @@ function CiliumRuleCard({ rule }: { rule: any }) {
           <div className="flex flex-wrap gap-1">
             {toServices.map((svc: any, j: number) => {
               const k8s = svc.k8sService
-              const sel = svc.k8sServiceNamespace
+              const sel = svc.k8sServiceSelector
               if (k8s) {
                 const ns = k8s.namespace ? `${k8s.namespace}/` : ''
                 return (
@@ -286,7 +264,7 @@ function CiliumRuleCard({ rule }: { rule: any }) {
                 )
               }
               if (sel) {
-                return <SelectorEntry key={j} selector={sel} />
+                return <LabelSelectorDisplay key={j} selector={sel.selector || sel} />
               }
               return (
                 <span key={j} className="badge bg-theme-elevated text-theme-text-secondary">
@@ -303,7 +281,7 @@ function CiliumRuleCard({ rule }: { rule: any }) {
           <div className="text-xs text-theme-text-tertiary mb-1">To Nodes</div>
           <div className="space-y-1">
             {toNodes.map((node: any, j: number) => (
-              <SelectorEntry key={j} selector={node} />
+              <LabelSelectorDisplay key={j} selector={node} />
             ))}
           </div>
         </div>
@@ -463,25 +441,5 @@ function CloudGroupEntry({ group }: { group: any }) {
     <span className="badge bg-theme-elevated text-theme-text-secondary">
       {JSON.stringify(group)}
     </span>
-  )
-}
-
-function SelectorEntry({ selector }: { selector: any }) {
-  const matchLabels = selector.matchLabels || {}
-  const hasLabels = Object.keys(matchLabels).length > 0
-  return (
-    <div className="text-sm">
-      {hasLabels ? (
-        <span className="inline-flex flex-wrap gap-1 align-middle">
-          {Object.entries(matchLabels).map(([k, v]) => (
-            <span key={k} className="badge bg-theme-elevated text-theme-text-secondary">
-              {k}={String(v)}
-            </span>
-          ))}
-        </span>
-      ) : (
-        <span className="text-xs text-theme-text-tertiary">all endpoints</span>
-      )}
-    </div>
   )
 }

@@ -1,6 +1,6 @@
 import { Shield, ArrowDownToLine, ArrowUpFromLine, GitFork } from 'lucide-react'
 import { clsx } from 'clsx'
-import { Section, PropertyList, Property } from '../../ui/drawer-components'
+import { Section, LabelSelectorDisplay } from '../../ui/drawer-components'
 import { NetworkPolicyDiagram } from './NetworkPolicyDiagram'
 
 interface NetworkPolicyRendererProps {
@@ -14,8 +14,6 @@ export function NetworkPolicyRenderer({ data }: NetworkPolicyRendererProps) {
   const ingress: any[] | undefined = spec.ingress
   const egress: any[] | undefined = spec.egress
 
-  const matchLabels = podSelector.matchLabels || {}
-  const hasMatchLabels = Object.keys(matchLabels).length > 0
   const hasIngress = policyTypes.includes('Ingress')
   const hasEgress = policyTypes.includes('Egress')
 
@@ -30,27 +28,10 @@ export function NetworkPolicyRenderer({ data }: NetworkPolicyRendererProps) {
       )}
 
       <Section title="Target" icon={Shield}>
-        <PropertyList>
-          <Property
-            label="Pod Selector"
-            value={hasMatchLabels ? undefined : 'All pods in namespace'}
-          />
-        </PropertyList>
-        {hasMatchLabels && (
-          <div className="mt-2">
-            <div className="text-xs text-theme-text-tertiary mb-1">Pod Selector</div>
-            <div className="flex flex-wrap gap-1">
-              {Object.entries(matchLabels).map(([k, v]) => (
-                <span
-                  key={k}
-                  className="badge bg-theme-elevated text-theme-text-secondary"
-                >
-                  {k}={String(v)}
-                </span>
-              ))}
-            </div>
-          </div>
-        )}
+        <div className="mt-2">
+          <div className="text-xs text-theme-text-tertiary mb-1">Pod Selector</div>
+          <LabelSelectorDisplay selector={podSelector} emptyText="All pods in namespace" />
+        </div>
         {policyTypes.length > 0 && (
           <div className="mt-2">
             <div className="text-xs text-theme-text-tertiary mb-1">Policy Types</div>
@@ -152,49 +133,19 @@ function IngressEgressRuleCard({
 
 function PeerEntry({ peer }: { peer: any }) {
   if (peer.podSelector) {
-    const labels = peer.podSelector.matchLabels || {}
-    const hasLabels = Object.keys(labels).length > 0
     return (
       <div className="text-sm">
         <span className="text-theme-text-secondary text-xs">podSelector: </span>
-        {hasLabels ? (
-          <span className="inline-flex flex-wrap gap-1 align-middle">
-            {Object.entries(labels).map(([k, v]) => (
-              <span
-                key={k}
-                className="badge bg-theme-elevated text-theme-text-secondary"
-              >
-                {k}={String(v)}
-              </span>
-            ))}
-          </span>
-        ) : (
-          <span className="text-xs text-theme-text-tertiary">all pods</span>
-        )}
+        <LabelSelectorDisplay selector={peer.podSelector} emptyText="all pods" inline />
       </div>
     )
   }
 
   if (peer.namespaceSelector) {
-    const labels = peer.namespaceSelector.matchLabels || {}
-    const hasLabels = Object.keys(labels).length > 0
     return (
       <div className="text-sm">
         <span className="text-theme-text-secondary text-xs">namespaceSelector: </span>
-        {hasLabels ? (
-          <span className="inline-flex flex-wrap gap-1 align-middle">
-            {Object.entries(labels).map(([k, v]) => (
-              <span
-                key={k}
-                className="badge bg-theme-elevated text-theme-text-secondary"
-              >
-                {k}={String(v)}
-              </span>
-            ))}
-          </span>
-        ) : (
-          <span className="text-xs text-theme-text-tertiary">all namespaces</span>
-        )}
+        <LabelSelectorDisplay selector={peer.namespaceSelector} emptyText="all namespaces" inline />
       </div>
     )
   }

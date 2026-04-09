@@ -1,5 +1,5 @@
 import { Radio } from 'lucide-react'
-import { Section, PropertyList, Property, ConditionsSection, KeyValueBadgeList } from '../../ui/drawer-components'
+import { Section, PropertyList, Property, ConditionsSection, LabelSelectorDisplay } from '../../ui/drawer-components'
 import {
   getServiceMonitorEndpoints,
   getServiceMonitorJobLabel,
@@ -12,7 +12,7 @@ interface ServiceMonitorRendererProps {
 
 export function ServiceMonitorRenderer({ data }: ServiceMonitorRendererProps) {
   const endpoints = getServiceMonitorEndpoints(data)
-  const selector = data.spec?.selector?.matchLabels
+  const selector = data.spec?.selector
   const conditions = data.status?.conditions
 
   return (
@@ -53,11 +53,9 @@ export function ServiceMonitorRenderer({ data }: ServiceMonitorRendererProps) {
         </Section>
       )}
 
-      {selector && Object.keys(selector).length > 0 && (
-        <Section title="Selector">
-          <KeyValueBadgeList items={selector} />
-        </Section>
-      )}
+      <Section title="Selector">
+        <LabelSelectorDisplay selector={selector} emptyText="No selector" />
+      </Section>
 
       <ConditionsSection conditions={conditions} />
     </>

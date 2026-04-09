@@ -1,8 +1,9 @@
-import { useState, useMemo, useCallback } from 'react'
+import { useState, useMemo, useCallback, useEffect } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { ApiError, fetchJSON, isForbiddenError, useSecretCertExpiry, useTopPodMetrics, useTopNodeMetrics } from '../../api/client'
 import { useAPIResources } from '../../api/apiResources'
+import { initNavigationMap } from '@skyhook-io/k8s-ui'
 import { usePinnedKinds } from '../../hooks/useFavorites'
 import { useOpenLogs, useOpenWorkloadLogs } from '../dock'
 import {
@@ -34,6 +35,11 @@ export function ResourcesView({ namespaces, selectedResource, onResourceClick, o
 
   // API resources discovery
   const { data: apiResources } = useAPIResources()
+
+  // Initialize navigation kind↔plural maps from discovered API resources
+  useEffect(() => {
+    if (apiResources) initNavigationMap(apiResources)
+  }, [apiResources])
 
   // Track the selected kind from the k8s-ui component
   const [selectedKind, setSelectedKind] = useState<{ name: string; kind: string; group: string } | null>(null)

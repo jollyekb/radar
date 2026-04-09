@@ -1,6 +1,6 @@
 import { Shield, ArrowDownToLine, ArrowUpFromLine } from 'lucide-react'
 import { clsx } from 'clsx'
-import { Section, PropertyList, Property } from '../../ui/drawer-components'
+import { Section, PropertyList, Property, LabelSelectorDisplay } from '../../ui/drawer-components'
 
 interface ClusterNetworkPolicyRendererProps {
   data: any
@@ -24,7 +24,7 @@ export function ClusterNetworkPolicyRenderer({ data }: ClusterNetworkPolicyRende
         {subject.namespaces && (
           <div className="mt-2">
             <div className="text-xs text-theme-text-tertiary mb-1">Namespace Selector</div>
-            <SelectorBadges selector={subject.namespaces} />
+            <LabelSelectorDisplay selector={subject.namespaces} />
           </div>
         )}
         {subject.pods && (
@@ -33,13 +33,13 @@ export function ClusterNetworkPolicyRenderer({ data }: ClusterNetworkPolicyRende
             {subject.pods.namespaceSelector && (
               <div className="mb-1">
                 <span className="text-xs text-theme-text-secondary">namespaces: </span>
-                <SelectorBadges selector={subject.pods.namespaceSelector} />
+                <LabelSelectorDisplay selector={subject.pods.namespaceSelector} inline />
               </div>
             )}
             {subject.pods.podSelector && (
               <div>
                 <span className="text-xs text-theme-text-secondary">pods: </span>
-                <SelectorBadges selector={subject.pods.podSelector} />
+                <LabelSelectorDisplay selector={subject.pods.podSelector} inline />
               </div>
             )}
           </div>
@@ -121,7 +121,7 @@ function AdminPeerEntry({ peer }: { peer: any }) {
     return (
       <div className="text-sm">
         <span className="text-theme-text-secondary text-xs">namespaces: </span>
-        <SelectorBadges selector={peer.namespaces} />
+        <LabelSelectorDisplay selector={peer.namespaces} inline />
       </div>
     )
   }
@@ -131,13 +131,13 @@ function AdminPeerEntry({ peer }: { peer: any }) {
         {peer.pods.namespaceSelector && (
           <div>
             <span className="text-theme-text-secondary text-xs">namespaces: </span>
-            <SelectorBadges selector={peer.pods.namespaceSelector} />
+            <LabelSelectorDisplay selector={peer.pods.namespaceSelector} inline />
           </div>
         )}
         {peer.pods.podSelector && (
           <div>
             <span className="text-theme-text-secondary text-xs">pods: </span>
-            <SelectorBadges selector={peer.pods.podSelector} />
+            <LabelSelectorDisplay selector={peer.pods.podSelector} inline />
           </div>
         )}
       </div>
@@ -158,17 +158,3 @@ function AdminPeerEntry({ peer }: { peer: any }) {
   return null
 }
 
-function SelectorBadges({ selector }: { selector: any }) {
-  const matchLabels = selector?.matchLabels || {}
-  const hasLabels = Object.keys(matchLabels).length > 0
-  if (!hasLabels) return <span className="text-xs text-theme-text-tertiary">all</span>
-  return (
-    <span className="inline-flex flex-wrap gap-1 align-middle">
-      {Object.entries(matchLabels).map(([k, v]) => (
-        <span key={k} className="badge bg-theme-elevated text-theme-text-secondary">
-          {k}={String(v)}
-        </span>
-      ))}
-    </span>
-  )
-}
