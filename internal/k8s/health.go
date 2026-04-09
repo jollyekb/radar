@@ -122,7 +122,7 @@ type NodeProblem struct {
 	NodeName string `json:"nodeName"`
 	Problem  string `json:"problem"`
 	Reason   string `json:"reason,omitempty"`
-	Severity string `json:"severity"` // "error" or "warning"
+	Severity string `json:"severity"` // "critical", "high", or "medium"
 }
 
 // DetectNodeProblems scans nodes for NotReady, Cordoned, and pressure conditions.
@@ -141,14 +141,14 @@ func DetectNodeProblems(nodes []*corev1.Node) []NodeProblem {
 				NodeName: node.Name,
 				Problem:  "NotReady",
 				Reason:   reason,
-				Severity: "error",
+				Severity: "critical",
 			})
 		} else if h.Unschedulable {
 			problems = append(problems, NodeProblem{
 				NodeName: node.Name,
 				Problem:  "Cordoned",
 				Reason:   "SchedulingDisabled",
-				Severity: "warning",
+				Severity: "medium",
 			})
 		}
 
@@ -157,7 +157,7 @@ func DetectNodeProblems(nodes []*corev1.Node) []NodeProblem {
 				NodeName: node.Name,
 				Problem:  pressure,
 				Reason:   pressure,
-				Severity: "warning",
+				Severity: "critical",
 			})
 		}
 	}

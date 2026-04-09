@@ -2,7 +2,7 @@ import { useState, type ReactNode, type JSX } from 'react'
 import { Server, HardDrive, Terminal as TerminalIcon, FileText, Activity, CirclePlay, FolderOpen, List, Eye, EyeOff } from 'lucide-react'
 import { clsx } from 'clsx'
 import { Section, PropertyList, Property, ConditionsSection, CopyHandler, AlertBanner, ResourceLink } from '../../ui/drawer-components'
-import { formatResources, formatDuration } from '../resource-utils'
+import { formatResources, formatDuration, getPodProblems, SEVERITY_DOT_COLOR } from '../resource-utils'
 import { getResourceStatusColor, SEVERITY_BADGE_BORDERED } from '../../../utils/badge-colors'
 import type { ResolvedEnvFrom } from '../../../types'
 import { Tooltip } from '../../ui/Tooltip'
@@ -75,70 +75,6 @@ interface PodRendererProps {
    * When provided, expands ConfigMap/Secret keys inline instead of showing "(all keys)".
    */
   resolvedEnvFrom?: ResolvedEnvFrom
-}
-
-// Extract problems from pod status and conditions
-function getPodProblems(data: any): string[] {
-  const problems: string[] = []
-  const phase = data.status?.phase
-  const conditions = data.status?.conditions || []
-  const containerStatuses = data.status?.containerStatuses || []
-  const initContainerStatuses = data.status?.initContainerStatuses || []
-
-  // Check phase
-  if (phase === 'Failed' || phase === 'Unknown') {
-    problems.push(`Pod is in ${phase} state`)
-  }
-
-  // Check conditions for scheduling/init issues
-  for (const cond of conditions) {
-    if (cond.status === 'False') {
-      if (cond.type === 'PodScheduled' && cond.reason) {
-        problems.push(`Scheduling: ${cond.reason}${cond.message ? ' - ' + cond.message : ''}`)
-      } else if (cond.type === 'Initialized' && cond.message) {
-        problems.push(`Init failed: ${cond.message}`)
-      } else if (cond.type === 'ContainersReady' && cond.reason === 'ContainersNotReady') {
-        // Will be covered by container status details
-      } else if (cond.message) {
-        problems.push(`${cond.type}: ${cond.message}`)
-      }
-    }
-  }
-
-  // Check init container failures
-  for (const initStatus of initContainerStatuses) {
-    if (initStatus.state?.waiting?.reason && initStatus.state.waiting.reason !== 'PodInitializing') {
-      problems.push(`Init container "${initStatus.name}": ${initStatus.state.waiting.reason}`)
-    }
-    if (initStatus.state?.terminated?.exitCode && initStatus.state.terminated.exitCode !== 0) {
-      problems.push(`Init container "${initStatus.name}" failed with exit code ${initStatus.state.terminated.exitCode}`)
-    }
-  }
-
-  // Check container issues (most important)
-  for (const status of containerStatuses) {
-    const waiting = status.state?.waiting
-    const terminated = status.state?.terminated
-
-    if (waiting?.reason && waiting.reason !== 'ContainerCreating') {
-      const msg = `Container "${status.name}": ${waiting.reason}`
-      if (waiting.reason === 'ImagePullBackOff' || waiting.reason === 'ErrImagePull') {
-        problems.push(msg + (waiting.message ? ` - ${waiting.message.slice(0, 100)}` : ''))
-      } else if (waiting.reason === 'CrashLoopBackOff') {
-        problems.push(msg + ' (container keeps crashing)')
-      } else {
-        problems.push(msg)
-      }
-    }
-
-    if (terminated?.reason === 'OOMKilled') {
-      problems.push(`Container "${status.name}" was OOMKilled - increase memory limit`)
-    } else if (terminated?.exitCode && terminated.exitCode !== 0) {
-      problems.push(`Container "${status.name}" exited with code ${terminated.exitCode}`)
-    }
-  }
-
-  return problems
 }
 
 // ── Env vars section — extracted to use hooks (useState for reveal) ──────────
@@ -315,8 +251,8 @@ export function PodRenderer({
   const isRunning = data.status?.phase === 'Running'
 
   // Check for problems
-  const problems = getPodProblems(data)
-  const hasProblems = problems.length > 0
+  const podProblems = getPodProblems(data)
+  const hasProblems = podProblems.length > 0
 
   // Image filesystem modal state
   const [selectedImage, setSelectedImage] = useState<string | null>(null)
@@ -382,7 +318,16 @@ export function PodRenderer({
     <>
       {/* Problems alert - shown at top when there are issues */}
       {hasProblems && (
-        <AlertBanner variant="error" title="Issues Detected" items={problems} />
+        <AlertBanner variant="error" title="Issues Detected">
+          <ul className="text-xs space-y-1">
+            {podProblems.map((p, i) => (
+              <li key={i} className="flex items-center gap-1.5">
+                <span className={clsx('w-1.5 h-1.5 rounded-full shrink-0', SEVERITY_DOT_COLOR[p.severity])} />
+                <span className="text-red-600 dark:text-red-400">{p.message}</span>
+              </li>
+            ))}
+          </ul>
+        </AlertBanner>
       )}
 
       {/* Status section */}

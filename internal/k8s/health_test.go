@@ -277,7 +277,7 @@ func TestDetectNodeProblems(t *testing.T) {
 				},
 			},
 			wantCount:    2,
-			wantSeverity: "error",
+			wantSeverity: "critical",
 			wantProblem:  "NotReady",
 		},
 		{
@@ -294,7 +294,7 @@ func TestDetectNodeProblems(t *testing.T) {
 				},
 			},
 			wantCount:    1,
-			wantSeverity: "warning",
+			wantSeverity: "medium",
 			wantProblem:  "Cordoned",
 		},
 		{
@@ -312,7 +312,7 @@ func TestDetectNodeProblems(t *testing.T) {
 				},
 			},
 			wantCount:    2,
-			wantSeverity: "warning",
+			wantSeverity: "critical",
 			wantProblem:  "MemoryPressure",
 		},
 		{
@@ -329,7 +329,7 @@ func TestDetectNodeProblems(t *testing.T) {
 				},
 			},
 			wantCount:    2,
-			wantSeverity: "error",
+			wantSeverity: "critical",
 			wantProblem:  "NotReady",
 		},
 	}

@@ -107,11 +107,14 @@ export interface DashboardProblem {
   kind: string
   namespace: string
   name: string
-  status: string
+  severity: 'critical' | 'high' | 'medium'
   reason: string
   message: string
   age: string
   ageSeconds: number
+  duration: string
+  durationSeconds: number
+  podCount?: number
 }
 
 export interface WorkloadCount {

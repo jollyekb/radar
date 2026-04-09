@@ -11,6 +11,8 @@ import (
 	"sync"
 	"time"
 
+	"strings"
+
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/labels"
@@ -64,14 +66,17 @@ type DashboardHealth struct {
 }
 
 type DashboardProblem struct {
-	Kind       string `json:"kind"`
-	Namespace  string `json:"namespace"`
-	Name       string `json:"name"`
-	Status     string `json:"status"`
-	Reason     string `json:"reason"`
-	Message    string `json:"message"`
-	Age        string `json:"age"`
-	AgeSeconds int64  `json:"ageSeconds"` // For sorting: lower = more recent
+	Kind            string `json:"kind"`
+	Namespace       string `json:"namespace"`
+	Name            string `json:"name"`
+	Severity        string `json:"severity"`        // "critical", "high", or "medium"
+	Reason          string `json:"reason"`
+	Message         string `json:"message"`
+	Age             string `json:"age"`
+	AgeSeconds      int64  `json:"ageSeconds"`      // For sorting: lower = more recent
+	Duration        string `json:"duration"`         // How long the problem has persisted
+	DurationSeconds int64  `json:"durationSeconds"`  // For sorting by problem age
+	PodCount        int    `json:"podCount,omitempty"` // For workload rollups: number of affected pods
 }
 
 type DashboardResourceCounts struct {
@@ -367,6 +372,10 @@ func (s *Server) getDashboardHealth(cache *k8s.ResourceCache, namespace string) 
 			pods, err = podLister.List(labels.Everything())
 		}
 	}
+	// Group unhealthy pods by owner workload for rollup
+	ownerGroups := make(map[ownerKey]*ownerGroup)
+	var orphanProblems []DashboardProblem
+
 	if err == nil {
 		for _, pod := range pods {
 			status := classifyPodHealth(pod, now)
@@ -375,38 +384,67 @@ func (s *Server) getDashboardHealth(cache *k8s.ResourceCache, namespace string) 
 				health.Healthy++
 			case "warning":
 				health.Warning++
-				if len(problems) < 20 {
-					problems = append(problems, podToProblem(pod, "warning", now))
-				}
+				collectPodForRollup(pod, "medium", now, ownerGroups, &orphanProblems)
 			case "error":
 				health.Error++
-				if len(problems) < 20 {
-					problems = append([]DashboardProblem{podToProblem(pod, "error", now)}, problems...)
-				}
+				collectPodForRollup(pod, "critical", now, ownerGroups, &orphanProblems)
 			}
 		}
 	}
 
+	// Convert owner groups to rolled-up problems
+	for key, g := range ownerGroups {
+		// Build reason summary: "CrashLoopBackOff (3), Pending (1)"
+		var reasonParts []string
+		for reason, count := range g.reasons {
+			if count > 1 {
+				reasonParts = append(reasonParts, fmt.Sprintf("%s (%d)", reason, count))
+			} else {
+				reasonParts = append(reasonParts, reason)
+			}
+		}
+		sort.Strings(reasonParts)
+
+		problems = append(problems, DashboardProblem{
+			Kind:            key.kind,
+			Namespace:       key.namespace,
+			Name:            key.name,
+			Severity:        g.severity,
+			Reason:          fmt.Sprintf("%d %s unhealthy", g.podCount, func() string { if g.podCount == 1 { return "pod" }; return "pods" }()),
+			Message:         k8s.Truncate(strings.Join(reasonParts, ", "), 200),
+			Age:             k8s.FormatAge(g.newestAge),
+			AgeSeconds:      int64(g.newestAge.Seconds()),
+			Duration:        k8s.FormatAge(g.newestDur),
+			DurationSeconds: int64(g.newestDur.Seconds()),
+			PodCount:        g.podCount,
+		})
+	}
+	// Add orphan pod problems (no owner workload)
+	problems = append(problems, orphanProblems...)
+
 	// Workload/HPA/CronJob/Node problems (excluding pods, handled above)
 	for _, p := range k8s.DetectProblems(cache, namespace) {
 		problems = append(problems, DashboardProblem{
-			Kind:       p.Kind,
-			Namespace:  p.Namespace,
-			Name:       p.Name,
-			Status:     p.Severity,
-			Reason:     p.Reason,
-			Message:    p.Message,
-			Age:        p.Age,
-			AgeSeconds: p.AgeSeconds,
+			Kind:            p.Kind,
+			Namespace:       p.Namespace,
+			Name:            p.Name,
+			Severity:        p.Severity,
+			Reason:          p.Reason,
+			Message:         p.Message,
+			Age:             p.Age,
+			AgeSeconds:      p.AgeSeconds,
+			Duration:        p.Duration,
+			DurationSeconds: p.DurationSeconds,
 		})
 	}
 
-	// Sort: errors first, then warnings; within each group sort by age (most recent first)
+	// Sort: critical first, then high, then medium; within each group sort by age (most recent first)
+	severityOrder := map[string]int{"critical": 0, "high": 1, "medium": 2}
 	sort.SliceStable(problems, func(i, j int) bool {
-		if problems[i].Status != problems[j].Status {
-			return problems[i].Status == "error"
+		si, sj := severityOrder[problems[i].Severity], severityOrder[problems[j].Severity]
+		if si != sj {
+			return si < sj
 		}
-		// Within same status, sort by age (lower AgeSeconds = more recent = first)
 		return problems[i].AgeSeconds < problems[j].AgeSeconds
 	})
 
@@ -458,16 +496,114 @@ func podToProblem(pod *corev1.Pod, severity string, now time.Time) DashboardProb
 	}
 
 	ageDur := now.Sub(pod.CreationTimestamp.Time)
+	durDur := podProblemDuration(pod, now)
 
 	return DashboardProblem{
-		Kind:       "Pod",
-		Namespace:  pod.Namespace,
-		Name:       pod.Name,
-		Status:     severity,
-		Reason:     reason,
-		Message:    k8s.Truncate(message, 200),
-		Age:        k8s.FormatAge(ageDur),
-		AgeSeconds: int64(ageDur.Seconds()),
+		Kind:            "Pod",
+		Namespace:       pod.Namespace,
+		Name:            pod.Name,
+		Severity:        severity,
+		Reason:          reason,
+		Message:         k8s.Truncate(message, 200),
+		Age:             k8s.FormatAge(ageDur),
+		AgeSeconds:      int64(ageDur.Seconds()),
+		Duration:        k8s.FormatAge(durDur),
+		DurationSeconds: int64(durDur.Seconds()),
+	}
+}
+
+// podProblemDuration estimates how long a pod has been in a problematic state.
+// Uses condition lastTransitionTime when available, falls back to creation time.
+func podProblemDuration(pod *corev1.Pod, now time.Time) time.Duration {
+	// For pending pods: use the PodScheduled or Ready condition transition
+	// For running-but-unhealthy: use ContainersReady condition transition
+	// For failed: use the Ready condition transition
+	for _, cond := range pod.Status.Conditions {
+		if cond.Type == corev1.ContainersReady && cond.Status == corev1.ConditionFalse {
+			if !cond.LastTransitionTime.IsZero() {
+				return now.Sub(cond.LastTransitionTime.Time)
+			}
+		}
+		if cond.Type == corev1.PodReady && cond.Status == corev1.ConditionFalse {
+			if !cond.LastTransitionTime.IsZero() {
+				return now.Sub(cond.LastTransitionTime.Time)
+			}
+		}
+		if cond.Type == corev1.PodScheduled && cond.Status == corev1.ConditionFalse {
+			if !cond.LastTransitionTime.IsZero() {
+				return now.Sub(cond.LastTransitionTime.Time)
+			}
+		}
+	}
+	// Fallback: use pod creation time
+	return now.Sub(pod.CreationTimestamp.Time)
+}
+
+type ownerKey struct{ kind, namespace, name string }
+type ownerGroup struct {
+	podCount   int
+	severity   string
+	reasons    map[string]int
+	newestDur  time.Duration
+	newestAge  time.Duration
+}
+
+// collectPodForRollup groups a problematic pod under its owner workload, or adds it as an orphan.
+func collectPodForRollup(pod *corev1.Pod, severity string, now time.Time, groups map[ownerKey]*ownerGroup, orphans *[]DashboardProblem) {
+	// Find the workload owner (Deployment owns ReplicaSet owns Pod, so look for grandparent)
+	var ownerKind, ownerName string
+	for _, ref := range pod.OwnerReferences {
+		if ref.Kind == "ReplicaSet" || ref.Kind == "StatefulSet" || ref.Kind == "DaemonSet" || ref.Kind == "Job" {
+			ownerKind = ref.Kind
+			ownerName = ref.Name
+			break
+		}
+	}
+
+	// For ReplicaSets, strip the hash suffix to get the Deployment name
+	if ownerKind == "ReplicaSet" {
+		ownerKind = "Deployment"
+		if idx := strings.LastIndex(ownerName, "-"); idx > 0 {
+			ownerName = ownerName[:idx]
+		}
+	}
+
+	// No workload owner — orphan pod
+	if ownerKind == "" {
+		*orphans = append(*orphans, podToProblem(pod, severity, now))
+		return
+	}
+
+	key := ownerKey{ownerKind, pod.Namespace, ownerName}
+	g, ok := groups[key]
+	if !ok {
+		g = &ownerGroup{
+			reasons:   make(map[string]int),
+			newestDur: 1<<62 - 1,
+			newestAge: 1<<62 - 1,
+		}
+		groups[key] = g
+	}
+
+	g.podCount++
+	// Keep worst severity: critical > high > medium
+	order := map[string]int{"critical": 0, "high": 1, "medium": 2}
+	if g.severity == "" || order[severity] < order[g.severity] {
+		g.severity = severity
+	}
+
+	reason := k8s.PodProblemReason(pod)
+	if reason != "" {
+		g.reasons[reason]++
+	}
+
+	ageDur := now.Sub(pod.CreationTimestamp.Time)
+	durDur := podProblemDuration(pod, now)
+	if durDur < g.newestDur {
+		g.newestDur = durDur
+	}
+	if ageDur < g.newestAge {
+		g.newestAge = ageDur
 	}
 }
 

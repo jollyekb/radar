@@ -198,18 +198,21 @@ function ProblemsPanel({ problems, onResourceClick }: ProblemsPanelProps) {
             >
               <span className={clsx(
                 'w-1.5 h-1.5 rounded-full shrink-0',
-                p.status === 'error' ? 'bg-red-500' : 'bg-yellow-500'
+                p.severity === 'critical' ? 'bg-red-400' : p.severity === 'high' ? 'bg-orange-400' : 'bg-yellow-400'
               )} />
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-1.5">
                   <span className="text-[10px] text-theme-text-tertiary bg-theme-elevated px-1 py-0.5 rounded">{p.kind}</span>
                   <span className="text-xs text-theme-text-primary truncate font-medium">{p.name}</span>
-                  <span className="text-[10px] text-theme-text-tertiary ml-auto shrink-0">{p.age}</span>
+                  <span className="text-[10px] text-theme-text-tertiary ml-auto shrink-0">{p.duration || p.age}</span>
                 </div>
                 <div className="flex items-center gap-1.5 mt-0.5">
                   <span className="text-[11px] text-theme-text-secondary truncate">{p.reason}</span>
                   <span className="text-[10px] text-theme-text-tertiary shrink-0">{p.namespace}</span>
                 </div>
+                {p.message && (
+                  <div className="text-[10px] text-theme-text-tertiary truncate mt-0.5">{p.message}</div>
+                )}
               </div>
             </button>
           ))}
