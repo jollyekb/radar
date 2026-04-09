@@ -68,6 +68,7 @@ export function ChallengeRenderer({ data }: { data: any }) {
               </span>
             }
           />
+          {status.reason && <Property label="Reason" value={status.reason} />}
           <Property
             label="Type"
             value={
