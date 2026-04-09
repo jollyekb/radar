@@ -230,7 +230,9 @@ export interface ArgoAppStatus {
   operationState?: {
     phase?: ArgoOperationPhase | string // Known types + allow unknown
     message?: string
+    startedAt?: string
     finishedAt?: string
+    retryCount?: number
     syncResult?: {
       revision?: string
       source?: ArgoSyncResultSource
@@ -238,6 +240,12 @@ export interface ArgoAppStatus {
     }
   }
   reconciledAt?: string
+  history?: Array<{
+    revision?: string
+    deployedAt?: string
+    id?: number
+    source?: { repoURL?: string; path?: string }
+  }>
 }
 
 /**

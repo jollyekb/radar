@@ -1,4 +1,4 @@
-import { Play, FileText, Key, Lock } from 'lucide-react'
+import { Play, FileText, Key, Lock, File, ArrowDownToLine, ArrowUpFromLine } from 'lucide-react'
 import { Section, PropertyList, Property } from '../../ui/drawer-components'
 
 interface WorkflowTemplateRendererProps {
@@ -44,6 +44,11 @@ export function WorkflowTemplateRenderer({ data }: WorkflowTemplateRendererProps
             {templates.map((template: any) => {
               const type = getTemplateType(template)
               const image = getTemplateImage(template)
+              const inputParams: Array<{ name: string }> = template.inputs?.parameters || []
+              const outputParams: Array<{ name: string }> = template.outputs?.parameters || []
+              const outputArtifacts: Array<{ name: string }> = template.outputs?.artifacts || []
+              const inputArtifacts: Array<{ name: string }> = template.inputs?.artifacts || []
+              const hasIO = inputParams.length > 0 || outputParams.length > 0 || outputArtifacts.length > 0 || inputArtifacts.length > 0
               return (
                 <div key={template.name} className="card-inner px-3 py-2 text-sm">
                   <div className="font-medium text-theme-text-primary">{template.name}</div>
@@ -51,6 +56,46 @@ export function WorkflowTemplateRenderer({ data }: WorkflowTemplateRendererProps
                   {image && (
                     <div className="text-xs text-theme-text-tertiary mt-0.5 truncate" title={image}>
                       {image}
+                    </div>
+                  )}
+                  {hasIO && (
+                    <div className="mt-2 space-y-1.5">
+                      {(inputParams.length > 0 || inputArtifacts.length > 0) && (
+                        <div className="flex items-start gap-1.5">
+                          <ArrowDownToLine className="w-3 h-3 text-theme-text-tertiary mt-0.5 shrink-0" />
+                          <div className="flex flex-wrap gap-1">
+                            {inputParams.map((p) => (
+                              <span key={p.name} className="badge-sm bg-theme-elevated text-theme-text-secondary">
+                                {p.name}
+                              </span>
+                            ))}
+                            {inputArtifacts.map((a) => (
+                              <span key={a.name} className="badge-sm bg-theme-elevated text-theme-text-secondary flex items-center gap-0.5">
+                                <File className="w-2.5 h-2.5" />
+                                {a.name}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      {(outputParams.length > 0 || outputArtifacts.length > 0) && (
+                        <div className="flex items-start gap-1.5">
+                          <ArrowUpFromLine className="w-3 h-3 text-theme-text-tertiary mt-0.5 shrink-0" />
+                          <div className="flex flex-wrap gap-1">
+                            {outputParams.map((p) => (
+                              <span key={p.name} className="badge-sm bg-theme-elevated text-theme-text-secondary">
+                                {p.name}
+                              </span>
+                            ))}
+                            {outputArtifacts.map((a) => (
+                              <span key={a.name} className="badge-sm bg-theme-elevated text-theme-text-secondary flex items-center gap-0.5">
+                                <File className="w-2.5 h-2.5" />
+                                {a.name}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>

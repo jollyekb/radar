@@ -1,4 +1,4 @@
-import { Server, GitBranch, AlertTriangle } from 'lucide-react'
+import { Server, GitBranch, AlertTriangle, Network } from 'lucide-react'
 import { clsx } from 'clsx'
 import { Section, PropertyList, Property, ConditionsSection, PodTemplateSection } from '../../ui/drawer-components'
 
@@ -17,6 +17,20 @@ export function RolloutRenderer({ data }: RolloutRendererProps) {
   const isCanary = !!canaryStrategy
   const steps = canaryStrategy?.steps || []
   const currentStepIndex = status.currentStepIndex
+  const trafficRouting = canaryStrategy?.trafficRouting
+
+  // Detect traffic routing provider
+  const trafficProvider = trafficRouting
+    ? (() => {
+        if (trafficRouting.istio) return { name: 'Istio', details: trafficRouting.istio }
+        if (trafficRouting.nginx) return { name: 'Nginx', details: trafficRouting.nginx }
+        if (trafficRouting.alb) return { name: 'ALB', details: trafficRouting.alb }
+        if (trafficRouting.smi) return { name: 'SMI', details: trafficRouting.smi }
+        if (trafficRouting.traefik) return { name: 'Traefik', details: trafficRouting.traefik }
+        if (trafficRouting.ambassador) return { name: 'Ambassador', details: trafficRouting.ambassador }
+        return null
+      })()
+    : null
 
   // Problem detection
   const problems: Array<{ color: 'red' | 'yellow'; message: string }> = []
@@ -152,6 +166,77 @@ export function RolloutRenderer({ data }: RolloutRendererProps) {
           )}
         </PropertyList>
       </Section>
+
+      {/* Traffic Routing */}
+      {trafficProvider && (
+        <Section title="Traffic Routing" icon={Network}>
+          <PropertyList>
+            <Property
+              label="Provider"
+              value={
+                <span className="badge-sm status-neutral">{trafficProvider.name}</span>
+              }
+            />
+            {trafficProvider.name === 'Istio' && (
+              <>
+                {trafficProvider.details.virtualService?.name && (
+                  <Property label="VirtualService" value={trafficProvider.details.virtualService.name} />
+                )}
+                {trafficProvider.details.destinationRule?.name && (
+                  <Property label="DestinationRule" value={trafficProvider.details.destinationRule.name} />
+                )}
+              </>
+            )}
+            {trafficProvider.name === 'ALB' && (
+              <>
+                {trafficProvider.details.ingress && (
+                  <Property label="Ingress" value={trafficProvider.details.ingress} />
+                )}
+                {trafficProvider.details.servicePort != null && (
+                  <Property label="Service Port" value={trafficProvider.details.servicePort} />
+                )}
+              </>
+            )}
+            {trafficProvider.name === 'Nginx' && (
+              <>
+                {trafficProvider.details.stableIngress && (
+                  <Property label="Stable Ingress" value={trafficProvider.details.stableIngress} />
+                )}
+                {trafficProvider.details.additionalIngressAnnotations && (
+                  <Property
+                    label="Annotations"
+                    value={Object.keys(trafficProvider.details.additionalIngressAnnotations).length + ' annotations'}
+                  />
+                )}
+              </>
+            )}
+            {trafficProvider.name === 'SMI' && (
+              <>
+                {trafficProvider.details.rootService && (
+                  <Property label="Root Service" value={trafficProvider.details.rootService} />
+                )}
+                {trafficProvider.details.trafficSplitName && (
+                  <Property label="TrafficSplit" value={trafficProvider.details.trafficSplitName} />
+                )}
+              </>
+            )}
+            {trafficProvider.name === 'Traefik' && (
+              <>
+                {trafficProvider.details.weightedTraefikServiceName && (
+                  <Property label="Weighted Service" value={trafficProvider.details.weightedTraefikServiceName} />
+                )}
+              </>
+            )}
+            {trafficProvider.name === 'Ambassador' && (
+              <>
+                {trafficProvider.details.mappings && (
+                  <Property label="Mappings" value={trafficProvider.details.mappings.join(', ')} />
+                )}
+              </>
+            )}
+          </PropertyList>
+        </Section>
+      )}
 
       {/* Canary Steps visual */}
       {isCanary && steps.length > 0 && (
