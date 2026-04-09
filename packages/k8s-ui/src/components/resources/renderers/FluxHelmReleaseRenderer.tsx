@@ -41,8 +41,10 @@ export function FluxHelmReleaseRenderer({ data, onNavigate }: FluxHelmReleaseRen
     })
   }
 
-  // Revision mismatch detection
+  // Revision mismatch detection — only flag when Ready=False to avoid false positives during active reconciliation
+  const isReadyFalse = conditions.find((c: any) => c.type === 'Ready')?.status === 'False'
   if (
+    isReadyFalse &&
     status.lastAppliedRevision &&
     status.lastAttemptedRevision &&
     status.lastAppliedRevision !== status.lastAttemptedRevision

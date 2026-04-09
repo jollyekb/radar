@@ -18,10 +18,6 @@ function formatCpuCores(value: string): string {
   return value
 }
 
-function formatMemory(value: string): string {
-  // Already human-readable (e.g. "48Gi", "128Gi") — pass through
-  return value
-}
 
 interface KarpenterNodePoolRendererProps {
   data: any
@@ -107,7 +103,7 @@ export function KarpenterNodePoolRenderer({ data, onNavigate }: KarpenterNodePoo
             {statusResources.memory && (
               <Property
                 label="Memory"
-                value={`${formatMemory(statusResources.memory)}${spec.limits?.memory ? ` / ${formatMemory(spec.limits.memory)}` : ''}`}
+                value={`${statusResources.memory}${spec.limits?.memory ? ` / ${spec.limits.memory}` : ''}`}
               />
             )}
           </PropertyList>
@@ -164,7 +160,7 @@ export function KarpenterNodePoolRenderer({ data, onNavigate }: KarpenterNodePoo
                 key={i}
                 className="badge-sm bg-theme-hover text-theme-text-secondary"
               >
-                {taint.key}={taint.value || ''}:{taint.effect}
+                {taint.key}={taint.value || ''}:{taint.effect || ''}
               </span>
             ))}
           </div>
@@ -180,7 +176,7 @@ export function KarpenterNodePoolRenderer({ data, onNavigate }: KarpenterNodePoo
                 key={i}
                 className="badge-sm bg-theme-hover text-theme-text-secondary"
               >
-                {taint.key}={taint.value || ''}:{taint.effect}
+                {taint.key}={taint.value || ''}:{taint.effect || ''}
               </span>
             ))}
           </div>

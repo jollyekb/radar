@@ -163,7 +163,7 @@ export function KarpenterEC2NodeClassRenderer({ data }: KarpenterEC2NodeClassRen
           <div className="space-y-2">
             {statusAMIs.map((ami: any, i: number) => (
               <div key={i} className="card-inner">
-                <div className="text-sm font-medium text-theme-text-primary mb-1">{ami.id}</div>
+                <div className="text-sm font-medium text-theme-text-primary mb-1">{ami.id || '(unknown AMI)'}</div>
                 {ami.name && (
                   <div className="text-xs text-theme-text-tertiary mb-1">{ami.name}</div>
                 )}

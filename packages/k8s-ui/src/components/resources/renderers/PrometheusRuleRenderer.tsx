@@ -2,21 +2,39 @@ import { useState, useMemo } from 'react'
 import { Bell, Search, ChevronRight } from 'lucide-react'
 import { clsx } from 'clsx'
 import { Section, PropertyList, Property, ConditionsSection } from '../../ui/drawer-components'
+import { BADGE_SEVERITY_COLORS } from '../../ui/Badge'
 import {
   getPrometheusRuleGroups,
   getPrometheusRuleTotalRules,
   getPrometheusRuleGroupCount,
 } from '../resource-utils-prometheus'
-import type { PrometheusRuleGroup, PrometheusAlertRule, PrometheusRecordingRule } from '../resource-utils-prometheus'
+import type { PrometheusRuleGroup, PrometheusRule, PrometheusAlertRule, PrometheusRecordingRule } from '../resource-utils-prometheus'
 
 interface PrometheusRuleRendererProps {
   data: any
 }
 
+// Map Prometheus severity names to centralized badge colors
 const SEVERITY_BADGE: Record<string, string> = {
-  critical: 'bg-red-100 text-red-700 border-red-300 dark:bg-red-950/50 dark:text-red-400 dark:border-red-700/40',
-  warning: 'bg-amber-100 text-amber-800 border-amber-300 dark:bg-amber-950/50 dark:text-amber-400 dark:border-amber-700/40',
-  info: 'bg-sky-100 text-sky-700 border-sky-300 dark:bg-sky-950/50 dark:text-sky-400 dark:border-sky-700/40',
+  critical: BADGE_SEVERITY_COLORS.error,
+  warning: BADGE_SEVERITY_COLORS.warning,
+  info: BADGE_SEVERITY_COLORS.info,
+}
+
+function matchesSearch(rule: PrometheusRule, term: string): boolean {
+  if (rule.type === 'alert') {
+    return (
+      rule.alert.toLowerCase().includes(term) ||
+      rule.expr.toLowerCase().includes(term) ||
+      (rule.severity || '').toLowerCase().includes(term) ||
+      (rule.summary || '').toLowerCase().includes(term) ||
+      (rule.description || '').toLowerCase().includes(term)
+    )
+  }
+  return (
+    (rule.record || '').toLowerCase().includes(term) ||
+    rule.expr.toLowerCase().includes(term)
+  )
 }
 
 const EXPR_TRUNCATE_LEN = 200
@@ -86,28 +104,16 @@ function RecordingRuleCard({ rule }: { rule: PrometheusRecordingRule }) {
 }
 
 function RuleGroupSection({ group, searchTerm }: { group: PrometheusRuleGroup; searchTerm: string }) {
-  const defaultExpanded = group.ruleCount <= 10
-  const [expanded, setExpanded] = useState(defaultExpanded)
+  const [manualExpanded, setManualExpanded] = useState(group.ruleCount <= 10)
 
   const filteredRules = useMemo(() => {
     if (!searchTerm) return group.rules
     const term = searchTerm.toLowerCase()
-    return group.rules.filter((rule) => {
-      if (rule.type === 'alert') {
-        return (
-          rule.alert.toLowerCase().includes(term) ||
-          rule.expr.toLowerCase().includes(term) ||
-          (rule.severity || '').toLowerCase().includes(term) ||
-          (rule.summary || '').toLowerCase().includes(term) ||
-          (rule.description || '').toLowerCase().includes(term)
-        )
-      }
-      return (
-        rule.record.toLowerCase().includes(term) ||
-        rule.expr.toLowerCase().includes(term)
-      )
-    })
+    return group.rules.filter((rule) => matchesSearch(rule, term))
   }, [group.rules, searchTerm])
+
+  // Auto-expand when searching so matched rules are visible
+  const expanded = searchTerm ? filteredRules.length > 0 : manualExpanded
 
   // If searching and no matches, hide the group entirely
   if (searchTerm && filteredRules.length === 0) return null
@@ -115,7 +121,7 @@ function RuleGroupSection({ group, searchTerm }: { group: PrometheusRuleGroup; s
   return (
     <div className="card-inner">
       <button
-        onClick={() => setExpanded(!expanded)}
+        onClick={() => setManualExpanded(!manualExpanded)}
         className="flex items-center justify-between w-full text-left"
       >
         <div className="flex items-center gap-2">
@@ -150,11 +156,6 @@ function RuleGroupSection({ group, searchTerm }: { group: PrometheusRuleGroup; s
                 ? <AlertRuleCard key={`alert-${rule.alert}-${i}`} rule={rule} />
                 : <RecordingRuleCard key={`rec-${rule.record}-${i}`} rule={rule} />
             ))}
-            {searchTerm && filteredRules.length === 0 && (
-              <div className="text-xs text-theme-text-tertiary py-2 text-center">
-                No rules match the current filter.
-              </div>
-            )}
           </div>
         </div>
       </div>
@@ -203,21 +204,7 @@ export function PrometheusRuleRenderer({ data }: PrometheusRuleRendererProps) {
             ))}
             {searchTerm && groups.every(g => {
               const term = searchTerm.toLowerCase()
-              return g.rules.every(rule => {
-                if (rule.type === 'alert') {
-                  return !(
-                    rule.alert.toLowerCase().includes(term) ||
-                    rule.expr.toLowerCase().includes(term) ||
-                    (rule.severity || '').toLowerCase().includes(term) ||
-                    (rule.summary || '').toLowerCase().includes(term) ||
-                    (rule.description || '').toLowerCase().includes(term)
-                  )
-                }
-                return !(
-                  rule.record.toLowerCase().includes(term) ||
-                  rule.expr.toLowerCase().includes(term)
-                )
-              })
+              return g.rules.every(rule => !matchesSearch(rule, term))
             }) && (
               <div className="text-xs text-theme-text-tertiary py-3 text-center">
                 No rules match "{searchTerm}".

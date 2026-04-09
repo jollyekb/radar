@@ -148,7 +148,7 @@ export function getPrometheusRuleGroups(resource: any): PrometheusRuleGroup[] {
       }
       return {
         type: 'recording' as const,
-        record: r.record,
+        record: r.record || '',
         expr: r.expr || '',
         labels: r.labels,
       }

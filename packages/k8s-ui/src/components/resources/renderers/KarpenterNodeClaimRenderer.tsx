@@ -3,6 +3,7 @@ import { clsx } from 'clsx'
 import { Section, PropertyList, Property, ConditionsSection, AlertBanner, ResourceLink } from '../../ui/drawer-components'
 import { kindToPlural } from '../../../utils/navigation'
 import {
+  CAPACITY_TYPE_BADGE,
   getNodeClaimStatus,
   getNodeClaimInstanceType,
   getNodeClaimNodeName,
@@ -76,12 +77,7 @@ export function KarpenterNodeClaimRenderer({ data, onNavigate }: KarpenterNodeCl
             <Property
               label="Capacity Type"
               value={
-                <span className={clsx(
-                  'badge-sm',
-                  capacityType === 'spot'
-                    ? 'bg-amber-100 text-amber-800 border-amber-300 dark:bg-amber-950/50 dark:text-amber-400 dark:border-amber-700/40'
-                    : 'bg-sky-100 text-sky-700 border-sky-300 dark:bg-sky-950/50 dark:text-sky-400 dark:border-sky-700/40'
-                )}>
+                <span className={clsx('badge-sm', CAPACITY_TYPE_BADGE[capacityType] || '')}>
                   {capacityType}
                 </span>
               }

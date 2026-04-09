@@ -3,6 +3,7 @@
 import { clsx } from 'clsx'
 import { Tooltip } from '../../ui/Tooltip'
 import {
+  CAPACITY_TYPE_BADGE,
   getNodePoolStatus,
   getNodePoolNodeClassRef,
   getNodePoolLimits,
@@ -75,14 +76,7 @@ export function NodeClaimCell({ resource, column }: { resource: any; column: str
     case 'capacityType': {
       const ct = resource.metadata?.labels?.['karpenter.sh/capacity-type'] || '-'
       return (
-        <span className={clsx(
-          'badge-sm',
-          ct === 'spot'
-            ? 'bg-amber-100 text-amber-800 border-amber-300 dark:bg-amber-950/50 dark:text-amber-400 dark:border-amber-700/40'
-            : ct === 'on-demand'
-              ? 'bg-sky-100 text-sky-700 border-sky-300 dark:bg-sky-950/50 dark:text-sky-400 dark:border-sky-700/40'
-              : ''
-        )}>
+        <span className={clsx('badge-sm', CAPACITY_TYPE_BADGE[ct] || '')}>
           {ct}
         </span>
       )
