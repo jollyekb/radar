@@ -3,6 +3,7 @@
 import { clsx } from 'clsx'
 import { Tooltip } from '../../ui/Tooltip'
 import {
+  CAPACITY_TYPE_BADGE,
   getNodePoolStatus,
   getNodePoolNodeClassRef,
   getNodePoolLimits,
@@ -22,9 +23,11 @@ export function NodePoolCell({ resource, column }: { resource: any; column: stri
     case 'status': {
       const status = getNodePoolStatus(resource)
       return (
-        <span className={clsx('badge', status.color)}>
-          {status.text}
-        </span>
+        <Tooltip content={status.text}>
+          <span className={clsx('badge truncate max-w-[140px]', status.color)}>
+            {status.text}
+          </span>
+        </Tooltip>
       )
     }
     case 'nodeClass': {
@@ -69,6 +72,18 @@ export function NodeClaimCell({ resource, column }: { resource: any; column: str
     case 'nodePool': {
       const pool = getNodeClaimNodePoolRef(resource)
       return <span className="text-sm text-theme-text-secondary">{pool}</span>
+    }
+    case 'capacityType': {
+      const ct = resource.metadata?.labels?.['karpenter.sh/capacity-type'] || '-'
+      return (
+        <span className={clsx('badge-sm', CAPACITY_TYPE_BADGE[ct] || '')}>
+          {ct}
+        </span>
+      )
+    }
+    case 'zone': {
+      const zone = resource.metadata?.labels?.['topology.kubernetes.io/zone'] || '-'
+      return <span className="text-sm text-theme-text-secondary">{zone}</span>
     }
     default:
       return <span className="text-sm text-theme-text-tertiary">-</span>

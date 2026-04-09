@@ -263,6 +263,15 @@ make kill           # Kill running radar on port 9280
 make clean          # Remove build artifacts
 ```
 
+### Visual Testing
+```bash
+./scripts/visual-test-start.sh          # Build + launch on random port (9300-9399)
+./scripts/visual-test-start.sh --skip-build  # Relaunch without rebuilding
+source .playwright-mcp/visual-test-state.env # Load $RADAR_URL, $SCREENSHOT_DIR, etc.
+./scripts/visual-test-stop.sh           # Kill process, open screenshot folder
+```
+Use `/visual-test` command for the full workflow (cluster check, Playwright MCP, screenshots, report). Screenshots go under `.playwright-mcp/visual-test/`.
+
 ### Development Ports
 - **9280**: Backend API server (Go)
 - **9273**: Vite dev server (proxies /api to 9280)
@@ -460,7 +469,8 @@ Error responses are parsed as `{"error": "message"}` and displayed in toasts.
 - Renderers, resource-utils, and table column config live in `packages/k8s-ui/src/components/resources/`
 - Sections with data should use `defaultExpanded` (true) — only collapse empty or low-priority sections
 - Register in: `packages/k8s-ui/src/components/resources/renderers/index.ts` (export), `packages/k8s-ui/src/components/shared/ResourceRendererDispatch.tsx` (KNOWN_KINDS + render line + `getResourceStatus()`)
-- Use `AlertBanner` for problem detection, `ConditionsSection` for K8s conditions
+- Use `AlertBanner` for problem detection, `ProblemAlerts` for multiple warnings/errors, `ConditionsSection` for K8s conditions
+- Use `LabelSelectorDisplay` for rendering K8s label selectors — handles `matchLabels` + `matchExpressions` + flat selectors. Never hand-roll selector badge rendering.
 - Long text in alerts/banners needs `break-all` class for CSS word breaking
 - **Kind collision rule:** When a CRD kind collides with a core K8s kind (e.g., Knative Service vs core Service), you must guard THREE places in `ResourceRendererDispatch.tsx`: (1) the core renderer line, (2) `getResourceStatus()`, (3) action buttons (Port Forward, etc.). Use `data?.apiVersion?.includes('group.name')` checks. Missing any one causes dual rendering bugs.
 - Core K8s renderers: Pod, Service, ConfigMap, Secret, Ingress, PersistentVolume, ReplicaSet, StorageClass, NetworkPolicy, Event, Workload (Deployment/StatefulSet/DaemonSet), Role, ClusterRole, RoleBinding, ClusterRoleBinding, ServiceAccount, IngressClass, PriorityClass, RuntimeClass, Lease, MutatingWebhookConfiguration, ValidatingWebhookConfiguration

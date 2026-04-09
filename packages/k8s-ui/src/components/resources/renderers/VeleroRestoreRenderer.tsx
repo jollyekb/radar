@@ -49,7 +49,7 @@ export function VeleroRestoreRenderer({ data }: VeleroRestoreRendererProps) {
         <AlertBanner
           variant="error"
           title={isFailed ? 'Restore Failed' : 'Restore Partially Failed'}
-          message={`${errors} error(s) occurred during restore.`}
+          message={status.failureReason || `${errors} error(s) occurred during restore.`}
         />
       )}
       {warnings > 0 && !isFailed && (
@@ -76,8 +76,16 @@ export function VeleroRestoreRenderer({ data }: VeleroRestoreRendererProps) {
             <Property label="Completed" value={formatAge(status.completionTimestamp) + ' ago'} />
           )}
           <Property label="Duration" value={getRestoreDuration(data)} />
-          {errors > 0 && <Property label="Errors" value={String(errors)} />}
-          {warnings > 0 && <Property label="Warnings" value={String(warnings)} />}
+          <Property label="Errors" value={
+            errors > 0
+              ? <span className="text-red-500 dark:text-red-400 font-medium">{errors}</span>
+              : '0'
+          } />
+          <Property label="Warnings" value={
+            warnings > 0
+              ? <span className="text-amber-500 dark:text-amber-400 font-medium">{warnings}</span>
+              : '0'
+          } />
         </PropertyList>
       </Section>
 

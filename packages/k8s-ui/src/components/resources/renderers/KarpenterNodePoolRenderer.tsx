@@ -1,4 +1,4 @@
-import { Server, Settings, Shield, Cpu, Tag } from 'lucide-react'
+import { Server, Settings, Shield, Cpu, Tag, BarChart3 } from 'lucide-react'
 import { Section, PropertyList, Property, ConditionsSection, AlertBanner, ResourceLink } from '../../ui/drawer-components'
 import { kindToPlural } from '../../../utils/navigation'
 import {
@@ -8,6 +8,16 @@ import {
   getNodePoolRequirements,
   getNodePoolWeight,
 } from '../resource-utils-karpenter'
+
+function formatCpuCores(value: string): string {
+  // Karpenter status.resources CPU is typically in millicores (e.g. "12000m") or cores (e.g. "12")
+  if (value.endsWith('m')) {
+    const millis = parseInt(value, 10)
+    if (!isNaN(millis)) return String(millis / 1000)
+  }
+  return value
+}
+
 
 interface KarpenterNodePoolRendererProps {
   data: any
@@ -28,6 +38,9 @@ export function KarpenterNodePoolRenderer({ data, onNavigate }: KarpenterNodePoo
   const templateLabels = spec.template?.metadata?.labels || {}
   const templateExpireAfter = spec.template?.spec?.expireAfter
   const nodeClassRef = spec.template?.spec?.nodeClassRef
+  const templateTaints = spec.template?.spec?.taints || []
+  const templateStartupTaints = spec.template?.spec?.startupTaints || []
+  const statusResources = status.resources || {}
 
   return (
     <>
@@ -77,6 +90,26 @@ export function KarpenterNodePoolRenderer({ data, onNavigate }: KarpenterNodePoo
         </PropertyList>
       </Section>
 
+      {/* Resource Usage — from status.resources vs spec.limits */}
+      {(statusResources.cpu || statusResources.memory) && (
+        <Section title="Resource Usage" icon={BarChart3} defaultExpanded>
+          <PropertyList>
+            {statusResources.cpu && (
+              <Property
+                label="CPU"
+                value={`${formatCpuCores(statusResources.cpu)}${spec.limits?.cpu ? ` / ${formatCpuCores(spec.limits.cpu)}` : ''}`}
+              />
+            )}
+            {statusResources.memory && (
+              <Property
+                label="Memory"
+                value={`${statusResources.memory}${spec.limits?.memory ? ` / ${spec.limits.memory}` : ''}`}
+              />
+            )}
+          </PropertyList>
+        </Section>
+      )}
+
       {/* Disruption */}
       <Section title="Disruption" icon={Shield}>
         <PropertyList>
@@ -112,6 +145,38 @@ export function KarpenterNodePoolRenderer({ data, onNavigate }: KarpenterNodePoo
                 className="badge-sm bg-theme-hover text-theme-text-secondary"
               >
                 {key}: {String(val)}
+              </span>
+            ))}
+          </div>
+        </Section>
+      )}
+
+      {/* Template Taints */}
+      {templateTaints.length > 0 && (
+        <Section title={`Template Taints (${templateTaints.length})`} icon={Shield} defaultExpanded>
+          <div className="flex flex-wrap gap-1">
+            {templateTaints.map((taint: any, i: number) => (
+              <span
+                key={i}
+                className="badge-sm bg-theme-hover text-theme-text-secondary"
+              >
+                {taint.key}={taint.value || ''}:{taint.effect || ''}
+              </span>
+            ))}
+          </div>
+        </Section>
+      )}
+
+      {/* Template Startup Taints */}
+      {templateStartupTaints.length > 0 && (
+        <Section title={`Startup Taints (${templateStartupTaints.length})`} icon={Shield} defaultExpanded>
+          <div className="flex flex-wrap gap-1">
+            {templateStartupTaints.map((taint: any, i: number) => (
+              <span
+                key={i}
+                className="badge-sm bg-theme-hover text-theme-text-secondary"
+              >
+                {taint.key}={taint.value || ''}:{taint.effect || ''}
               </span>
             ))}
           </div>

@@ -455,6 +455,8 @@ const KNOWN_COLUMNS: Record<string, Column[]> = {
     { key: 'namespace', label: 'Namespace', width: 'w-36' },
     { key: 'status', label: 'Status', width: 'w-24' },
     { key: 'instanceType', label: 'Instance Type', width: 'w-32' },
+    { key: 'capacityType', label: 'Capacity', width: 'w-24', tooltip: 'Spot or On-Demand' },
+    { key: 'zone', label: 'Zone', width: 'w-28', hideOnMobile: true },
     { key: 'nodePool', label: 'Node Pool', width: 'w-32' },
     { key: 'nodeName', label: 'Node', width: 'w-40', hideOnMobile: true },
     { key: 'age', label: 'Age', width: 'w-20' },

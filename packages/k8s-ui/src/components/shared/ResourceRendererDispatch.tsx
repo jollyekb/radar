@@ -366,8 +366,8 @@ export function ResourceRendererDispatch({
         {kind === 'gitrepositories' && <GitRepositoryRenderer data={data} />}
         {kind === 'ocirepositories' && <OCIRepositoryRenderer data={data} />}
         {kind === 'helmrepositories' && <HelmRepositoryRenderer data={data} />}
-        {kind === 'kustomizations' && <KustomizationRenderer data={data} />}
-        {kind === 'helmreleases' && <FluxHelmReleaseRenderer data={data} />}
+        {kind === 'kustomizations' && <KustomizationRenderer data={data} onNavigate={onNavigate} />}
+        {kind === 'helmreleases' && <FluxHelmReleaseRenderer data={data} onNavigate={onNavigate} />}
         {kind === 'alerts' && <AlertRenderer data={data} />}
         {kind === 'applications' && <ArgoApplicationRenderer data={data} />}
         {kind === 'nodepools' && <KarpenterNodePoolRenderer data={data} onNavigate={onNavigate} />}

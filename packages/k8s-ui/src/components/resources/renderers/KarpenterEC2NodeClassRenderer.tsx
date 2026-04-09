@@ -1,5 +1,5 @@
-import { Server, HardDrive, Shield, Network } from 'lucide-react'
-import { Section, PropertyList, Property, ConditionsSection, AlertBanner } from '../../ui/drawer-components'
+import { Server, HardDrive, Shield, Network, Tag, Image } from 'lucide-react'
+import { Section, PropertyList, Property, ConditionsSection, AlertBanner, KeyValueBadgeList } from '../../ui/drawer-components'
 import { getEC2NodeClassStatus } from '../resource-utils-karpenter'
 
 interface KarpenterEC2NodeClassRendererProps {
@@ -20,6 +20,11 @@ export function KarpenterEC2NodeClassRenderer({ data }: KarpenterEC2NodeClassRen
   const subnetTerms = spec.subnetSelectorTerms || []
   const sgTerms = spec.securityGroupSelectorTerms || []
   const metadataOptions = spec.metadataOptions
+  const statusAMIs = status.amis || []
+  const statusSubnets = status.subnets || []
+  const statusSecurityGroups = status.securityGroups || []
+  const specTags = spec.tags || {}
+  const instanceProfile = status.instanceProfile
 
   return (
     <>
@@ -42,6 +47,7 @@ export function KarpenterEC2NodeClassRenderer({ data }: KarpenterEC2NodeClassRen
             />
           )}
           {spec.amiFamily && <Property label="AMI Family" value={spec.amiFamily} />}
+          {instanceProfile && <Property label="Instance Profile" value={instanceProfile} />}
         </PropertyList>
       </Section>
 
@@ -148,6 +154,64 @@ export function KarpenterEC2NodeClassRenderer({ data }: KarpenterEC2NodeClassRen
               <Property label="HTTP Endpoint" value={metadataOptions.httpEndpoint} />
             )}
           </PropertyList>
+        </Section>
+      )}
+
+      {/* Resolved AMIs from status */}
+      {statusAMIs.length > 0 && (
+        <Section title={`Resolved AMIs (${statusAMIs.length})`} icon={Image} defaultExpanded>
+          <div className="space-y-2">
+            {statusAMIs.map((ami: any, i: number) => (
+              <div key={i} className="card-inner">
+                <div className="text-sm font-medium text-theme-text-primary mb-1">{ami.id || '(unknown AMI)'}</div>
+                {ami.name && (
+                  <div className="text-xs text-theme-text-tertiary mb-1">{ami.name}</div>
+                )}
+                {ami.requirements && ami.requirements.length > 0 && (
+                  <div className="flex flex-wrap gap-1">
+                    {ami.requirements.map((req: any, ri: number) => (
+                      <span key={ri} className="badge-sm bg-theme-hover text-theme-text-secondary">
+                        {req.key}: {req.values?.join(', ') || req.operator}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </Section>
+      )}
+
+      {/* Resolved Subnets from status */}
+      {statusSubnets.length > 0 && (
+        <Section title={`Resolved Subnets (${statusSubnets.length})`} icon={Network} defaultExpanded>
+          <div className="flex flex-wrap gap-1">
+            {statusSubnets.map((subnet: any, i: number) => (
+              <span key={i} className="badge-sm bg-theme-hover text-theme-text-secondary">
+                {subnet.id}{subnet.zone ? ` (${subnet.zone})` : ''}
+              </span>
+            ))}
+          </div>
+        </Section>
+      )}
+
+      {/* Resolved Security Groups from status */}
+      {statusSecurityGroups.length > 0 && (
+        <Section title={`Resolved Security Groups (${statusSecurityGroups.length})`} icon={Shield} defaultExpanded>
+          <div className="flex flex-wrap gap-1">
+            {statusSecurityGroups.map((sg: any, i: number) => (
+              <span key={i} className="badge-sm bg-theme-hover text-theme-text-secondary">
+                {sg.id}{sg.name ? ` (${sg.name})` : ''}
+              </span>
+            ))}
+          </div>
+        </Section>
+      )}
+
+      {/* EC2 Tags */}
+      {Object.keys(specTags).length > 0 && (
+        <Section title={`EC2 Tags (${Object.keys(specTags).length})`} icon={Tag} defaultExpanded>
+          <KeyValueBadgeList items={specTags} />
         </Section>
       )}
 
