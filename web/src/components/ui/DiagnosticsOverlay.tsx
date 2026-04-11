@@ -106,6 +106,7 @@ export function DiagnosticsOverlay({ onClose, isOpen = true }: DiagnosticsOverla
             <>
               <ErrorLogSection data={data} />
               <ConnectionSection data={data} />
+              <KubeconfigSection data={data} />
               <ClusterSection data={data} />
               <CacheSection data={data} />
               <MetricsSection data={data} />
@@ -199,6 +200,19 @@ function ConnectionSection({ data }: { data: DiagnosticsSnapshot }) {
       {c.clusterName && <Row label="Cluster" value={c.clusterName} />}
       {c.error && <Row label="Error" value={c.error} warn />}
       {c.errorType && <Row label="Error Type" value={c.errorType} warn />}
+    </Section>
+  )
+}
+
+function KubeconfigSection({ data }: { data: DiagnosticsSnapshot }) {
+  if (!data.kubeconfig) return null
+  const k = data.kubeconfig
+  return (
+    <Section title="Kubeconfig">
+      <Row label="Mode" value={k.mode || '(not initialized)'} />
+      <Row label="Files Loaded" value={k.fileCount} />
+      <Row label="Contexts (post-merge)" value={k.contextCount} />
+      <Row label="Enriched From Shell" value={k.enrichedFromShell ? 'Yes' : 'No'} />
     </Section>
   )
 }
@@ -411,6 +425,13 @@ function formatForGitHub(data: DiagnosticsSnapshot, includeRawJson = true): stri
     if (c.clusterName) lines.push(`- Cluster: \`${c.clusterName}\``)
     if (c.error) lines.push(`- Error: ${c.error}`)
     if (c.errorType) lines.push(`- Error Type: \`${c.errorType}\``)
+    lines.push(``)
+  }
+
+  if (data.kubeconfig) {
+    const k = data.kubeconfig
+    lines.push(`### Kubeconfig`)
+    lines.push(`- Mode: \`${k.mode || '(not initialized)'}\` | Files: ${k.fileCount} | Contexts (post-merge): ${k.contextCount} | Enriched From Shell: ${k.enrichedFromShell ? 'Yes' : 'No'}`)
     lines.push(``)
   }
 

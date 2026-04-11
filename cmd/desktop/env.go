@@ -10,6 +10,9 @@ import (
 	"runtime"
 	"strings"
 	"time"
+
+	"github.com/skyhook-io/radar/internal/errorlog"
+	"github.com/skyhook-io/radar/internal/k8s"
 )
 
 // shellEnvVars lists environment variables to capture from the user's
@@ -53,9 +56,38 @@ func enrichEnv() {
 		if key == "PATH" {
 			continue
 		}
-		if val, ok := captured[key]; ok && val != "" && os.Getenv(key) == "" {
+		val, found := captured[key]
+		if found && val != "" && os.Getenv(key) == "" {
 			os.Setenv(key, val)
 			log.Printf("Env enriched: %s from login shell", key)
+			if key == "KUBECONFIG" {
+				k8s.EnrichedKubeconfigFromShell = true
+			}
+			continue
+		}
+		// Explain KUBECONFIG skip reasons — the GUI app starts with a stripped
+		// env on macOS/Linux, and if enrichment doesn't fire the user may see
+		// fewer clusters than they expect in the switcher. We surface this via
+		// the errorlog so it shows up in bug report diagnostics.
+		if key != "KUBECONFIG" {
+			continue
+		}
+		switch {
+		case os.Getenv(key) != "":
+			// Pre-existing KUBECONFIG in the process env blocks enrichment.
+			// Most likely cause: launchctl setenv or a parent shell that
+			// already exported a (possibly shorter) value.
+			existing := os.Getenv(key)
+			pathCount := len(filepath.SplitList(existing))
+			log.Printf("KUBECONFIG enrichment skipped: already set in process env (%d path(s))", pathCount)
+			errorlog.Record("env-enrich", "warning",
+				"KUBECONFIG enrichment skipped: already set in process env with %d path(s); "+
+					"login shell value ignored", pathCount)
+		case !found || val == "":
+			log.Printf("KUBECONFIG enrichment skipped: not found in login shell")
+			errorlog.Record("env-enrich", "warning",
+				"KUBECONFIG not found in login shell (%s -l -i); "+
+					"multi-file configs from .zshrc/.bashrc will not be visible", os.Getenv("SHELL"))
 		}
 	}
 }

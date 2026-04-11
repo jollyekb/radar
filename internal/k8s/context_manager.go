@@ -9,6 +9,8 @@ import (
 
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
+
+	"github.com/skyhook-io/radar/internal/errorlog"
 )
 
 // ContextSwitchTimeout is the maximum time allowed for a context switch operation
@@ -236,6 +238,7 @@ func PerformContextSwitch(newContext string) error {
 	log.Printf("Switching K8s client to context %q...", newContext)
 	if err := SwitchContext(newContext); err != nil {
 		log.Printf("[ops] Context switch FAILED at SwitchContext: %v (%v)", err, time.Since(switchStart))
+		errorlog.Record("context-switch", "error", "SwitchContext failed (target=%q): %v", newContext, err)
 		return fmt.Errorf("failed to switch context: %w", err)
 	}
 	logTiming("   [ops] SwitchContext: %v", time.Since(t))
@@ -255,6 +258,7 @@ func PerformContextSwitch(newContext string) error {
 	defer connCancel()
 	if err := TestClusterConnection(connCtx); err != nil {
 		log.Printf("[ops] Context switch FAILED at connectivity test: %v (%v since switch start)", err, time.Since(switchStart))
+		errorlog.Record("context-switch", "error", "connectivity test failed (target=%q): %v", newContext, err)
 		return fmt.Errorf("cluster connection failed: %w", err)
 	}
 	log.Printf("[ops] Cluster connectivity verified (%v)", time.Since(t))
@@ -267,6 +271,7 @@ func PerformContextSwitch(newContext string) error {
 	defer initCancel()
 	if err := InitAllSubsystems(initCtx, reportProgress); err != nil {
 		log.Printf("[ops] Context switch FAILED at subsystem init: %v (%v since switch start)", err, time.Since(switchStart))
+		errorlog.Record("context-switch", "error", "subsystem init failed (target=%q): %v", newContext, err)
 		return fmt.Errorf("subsystem init failed: %w", err)
 	}
 	logTiming("   [ops] InitAllSubsystems: %v", time.Since(t))

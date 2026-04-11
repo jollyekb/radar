@@ -2458,6 +2458,12 @@ export interface DiagnosticsSnapshot {
     error?: string
     errorType?: string
   }
+  kubeconfig?: {
+    mode: string // in-cluster, single, multi-env, multi-dir
+    fileCount: number
+    contextCount: number
+    enrichedFromShell: boolean
+  }
   cluster?: {
     platform: string
     kubernetesVersion: string

@@ -41,6 +41,7 @@ type DiagnosticsSnapshot struct {
 	UptimeSec    int64  `json:"uptimeSec"`
 
 	Connection    *DiagConnection           `json:"connection,omitempty"`
+	Kubeconfig    *DiagKubeconfig           `json:"kubeconfig,omitempty"`
 	Cluster       *DiagCluster              `json:"cluster,omitempty"`
 	Cache         *DiagCache                `json:"cache,omitempty"`
 	Metrics       *k8s.MetricsCollectionHealth `json:"metrics,omitempty"`
@@ -66,6 +67,18 @@ type DiagConnection struct {
 	ClusterName string `json:"clusterName,omitempty"`
 	Error       string `json:"error,omitempty"`
 	ErrorType   string `json:"errorType,omitempty"`
+}
+
+// DiagKubeconfig holds non-sensitive kubeconfig loading state. It never
+// includes resolved file paths — only counts and mode flags suitable for
+// inclusion in a public bug report. Helps triage issues like "some clusters
+// don't show up in the switcher" where the answer depends on whether we
+// loaded one file or many, and how many contexts survived the merge.
+type DiagKubeconfig struct {
+	Mode              string `json:"mode"`              // in-cluster, single, multi-env, multi-dir
+	FileCount         int    `json:"fileCount"`         // Number of kubeconfig files loaded
+	ContextCount      int    `json:"contextCount"`      // Contexts exposed after client-go merge
+	EnrichedFromShell bool   `json:"enrichedFromShell"` // Desktop app captured KUBECONFIG from login shell
 }
 
 // DiagCluster holds cluster detection info.
@@ -194,6 +207,17 @@ func (s *Server) handleDiagnostics(w http.ResponseWriter, r *http.Request) {
 			ClusterName: status.ClusterName,
 			Error:       status.Error,
 			ErrorType:   status.ErrorType,
+		}
+	})
+
+	// Kubeconfig loading state — non-sensitive, always safe to include
+	collectSafe("kubeconfig", &errs, func() {
+		summary := k8s.GetKubeconfigSummary()
+		snap.Kubeconfig = &DiagKubeconfig{
+			Mode:              summary.Mode,
+			FileCount:         summary.FileCount,
+			ContextCount:      summary.ContextCount,
+			EnrichedFromShell: summary.EnrichedFromShell,
 		}
 	})
 

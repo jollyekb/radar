@@ -24,12 +24,19 @@ var (
 	initOnce          sync.Once
 	initErr           error
 	kubeconfigPath    string
-	kubeconfigPaths   []string // Multiple kubeconfig paths when using --kubeconfig-dir
+	kubeconfigPaths   []string // Multiple kubeconfig paths when using --kubeconfig-dir or KUBECONFIG env
+	kubeconfigMode    string   // One of: "in-cluster", "single", "multi-env", "multi-dir"
+	mergedContextCount int     // Number of contexts exposed after client-go merged all kubeconfig files
 	contextName       string
 	clusterName       string
 	contextNamespace  string // Default namespace from kubeconfig context
 	fallbackNamespace string // Explicit namespace from --namespace flag
 	contextUsesExec   bool   // True when the current context uses an exec credential plugin
+	// EnrichedKubeconfigFromShell is set by the desktop app's enrichEnv() when
+	// it successfully captured KUBECONFIG from the user's login shell. Surfaced
+	// in diagnostics so we can tell whether the GUI app's env was enriched or
+	// whether we fell back to whatever the parent process handed us.
+	EnrichedKubeconfigFromShell bool
 	// clientMu protects access to client variables during context switches.
 	// Readers use RLock, context switch uses Lock.
 	clientMu sync.RWMutex
@@ -76,6 +83,7 @@ func doInit(opts InitOptions) error {
 		if err == nil {
 			contextName = "in-cluster"
 			clusterName = "in-cluster"
+			kubeconfigMode = "in-cluster"
 		}
 	}
 
@@ -94,6 +102,7 @@ func doInit(opts InitOptions) error {
 			}
 			log.Printf("Discovered %d kubeconfig files from %d directories", len(configs), len(opts.KubeconfigDirs))
 			kubeconfigPaths = configs
+			kubeconfigMode = "multi-dir"
 			loadingRules = &clientcmd.ClientConfigLoadingRules{Precedence: configs}
 		} else {
 			// Single kubeconfig mode (existing behavior)
@@ -112,10 +121,12 @@ func doInit(opts InitOptions) error {
 			// Split and use Precedence when there are multiple entries.
 			if paths := filepath.SplitList(kubeconfig); len(paths) > 1 {
 				kubeconfigPaths = paths
+				kubeconfigMode = "multi-env"
 				loadingRules = &clientcmd.ClientConfigLoadingRules{Precedence: paths}
 				log.Printf("KUBECONFIG contains %d paths, using merged mode", len(paths))
 			} else {
 				kubeconfigPath = kubeconfig
+				kubeconfigMode = "single"
 				loadingRules = &clientcmd.ClientConfigLoadingRules{ExplicitPath: kubeconfig}
 			}
 		}
@@ -127,6 +138,17 @@ func doInit(opts InitOptions) error {
 		rawConfig, err := kubeConfig.RawConfig()
 		if err == nil {
 			contextName = rawConfig.CurrentContext
+			mergedContextCount = len(rawConfig.Contexts)
+			fileCount := len(kubeconfigPaths)
+			if fileCount == 0 && kubeconfigPath != "" {
+				fileCount = 1
+			}
+			// Log the merged context count so multi-file collisions are visible.
+			// client-go silently drops later duplicates when merging by name, so
+			// this count is the "ground truth" of what the user can actually pick
+			// from the dropdown — not the sum of per-file contexts.
+			log.Printf("Kubeconfig loaded: mode=%s, files=%d, contexts=%d",
+				kubeconfigMode, fileCount, mergedContextCount)
 			if ctx, ok := rawConfig.Contexts[contextName]; ok {
 				clusterName = ctx.Cluster
 				contextNamespace = ctx.Namespace
@@ -247,6 +269,33 @@ func GetKubeconfigPath() string {
 	clientMu.RLock()
 	defer clientMu.RUnlock()
 	return kubeconfigPath
+}
+
+// KubeconfigSummary is a non-sensitive snapshot of kubeconfig loading state,
+// suitable for inclusion in diagnostic output. It never includes the resolved
+// paths themselves, only counts and mode flags.
+type KubeconfigSummary struct {
+	Mode              string // "in-cluster", "single", "multi-env", "multi-dir", or "" if not initialized
+	FileCount         int    // Number of kubeconfig files loaded (0 for in-cluster)
+	ContextCount      int    // Number of contexts exposed after client-go merged all files
+	EnrichedFromShell bool   // Desktop app captured KUBECONFIG from login shell
+}
+
+// GetKubeconfigSummary returns the current kubeconfig loading state for
+// diagnostics. All values are safe to include in a bug report.
+func GetKubeconfigSummary() KubeconfigSummary {
+	clientMu.RLock()
+	defer clientMu.RUnlock()
+	fileCount := len(kubeconfigPaths)
+	if fileCount == 0 && kubeconfigPath != "" {
+		fileCount = 1
+	}
+	return KubeconfigSummary{
+		Mode:              kubeconfigMode,
+		FileCount:         fileCount,
+		ContextCount:      mergedContextCount,
+		EnrichedFromShell: EnrichedKubeconfigFromShell,
+	}
 }
 
 // WriteKubeconfigForCurrentContext creates a temporary kubeconfig file with
@@ -498,6 +547,7 @@ func SwitchContext(name string) error {
 	clusterName = ctx.Cluster
 	contextNamespace = ctx.Namespace
 	contextUsesExec = usesExec
+	mergedContextCount = len(rawConfig.Contexts)
 	clientMu.Unlock()
 
 	return nil
