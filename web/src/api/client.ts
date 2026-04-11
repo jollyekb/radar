@@ -2458,6 +2458,15 @@ export interface DiagnosticsSnapshot {
     error?: string
     errorType?: string
   }
+  kubeconfig?: {
+    mode: '' | 'in-cluster' | 'single' | 'multi-env' | 'multi-dir'
+    fileCount: number
+    contextCount: number
+    enrichedFromShell: boolean
+    currentContextUsesExec: boolean
+    execPluginsPresent?: string[]
+    execPluginsMissing?: string[]
+  }
   cluster?: {
     platform: string
     kubernetesVersion: string

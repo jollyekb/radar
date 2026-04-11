@@ -1,10 +1,13 @@
 package k8s
 
 import (
+	"errors"
 	"fmt"
 	"log"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 
@@ -13,27 +16,56 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
+	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
 	"k8s.io/client-go/util/homedir"
+
+	"github.com/skyhook-io/radar/internal/errorlog"
 )
 
 var (
-	k8sClient         *kubernetes.Clientset
-	k8sConfig         *rest.Config
-	discoveryClient   *discovery.DiscoveryClient
-	dynamicClient     dynamic.Interface
-	initOnce          sync.Once
-	initErr           error
-	kubeconfigPath    string
-	kubeconfigPaths   []string // Multiple kubeconfig paths when using --kubeconfig-dir
-	contextName       string
-	clusterName       string
-	contextNamespace  string // Default namespace from kubeconfig context
-	fallbackNamespace string // Explicit namespace from --namespace flag
-	contextUsesExec   bool   // True when the current context uses an exec credential plugin
+	k8sClient          *kubernetes.Clientset
+	k8sConfig          *rest.Config
+	discoveryClient    *discovery.DiscoveryClient
+	dynamicClient      dynamic.Interface
+	initOnce           sync.Once
+	initErr            error
+	kubeconfigPath     string
+	kubeconfigPaths    []string // Multiple kubeconfig paths when using --kubeconfig-dir or KUBECONFIG env
+	kubeconfigMode     string   // One of: "in-cluster", "single", "multi-env", "multi-dir"
+	mergedContextCount int      // Number of contexts exposed after client-go merged all kubeconfig files
+	contextName        string
+	clusterName        string
+	contextNamespace   string // Default namespace from kubeconfig context
+	fallbackNamespace  string // Explicit namespace from --namespace flag
+	contextUsesExec    bool   // True when the current context uses an exec credential plugin
+	// execPluginCommands is the set of unique exec-auth plugin command basenames
+	// referenced by any context in the merged kubeconfig. Populated from
+	// rawConfig.AuthInfos at load time and refreshed on SwitchContext. Stored
+	// as basenames only so diagnostics never leak full binary paths. Used by
+	// GetKubeconfigSummary() to produce present/missing lists against the
+	// current process PATH.
+	execPluginCommands []string
+	// enrichedKubeconfigFromShell is set by the desktop app's enrichEnv() when
+	// it successfully captured KUBECONFIG from the user's login shell. Surfaced
+	// in diagnostics so we can tell whether the GUI app's env was enriched or
+	// whether we fell back to whatever the parent process handed us. All access
+	// goes through clientMu like the rest of the globals in this file —
+	// callers use SetEnrichedKubeconfigFromShell to write.
+	enrichedKubeconfigFromShell bool
 	// clientMu protects access to client variables during context switches.
 	// Readers use RLock, context switch uses Lock.
 	clientMu sync.RWMutex
 )
+
+// SetEnrichedKubeconfigFromShell records that the desktop app's enrichEnv()
+// successfully captured KUBECONFIG from the user's login shell. Used only for
+// diagnostic reporting — does not affect K8s client behavior. Takes clientMu
+// like every other write to the package-level state.
+func SetEnrichedKubeconfigFromShell(v bool) {
+	clientMu.Lock()
+	defer clientMu.Unlock()
+	enrichedKubeconfigFromShell = v
+}
 
 // InitOptions configures the K8s client initialization
 type InitOptions struct {
@@ -76,6 +108,7 @@ func doInit(opts InitOptions) error {
 		if err == nil {
 			contextName = "in-cluster"
 			clusterName = "in-cluster"
+			kubeconfigMode = "in-cluster"
 		}
 	}
 
@@ -94,6 +127,7 @@ func doInit(opts InitOptions) error {
 			}
 			log.Printf("Discovered %d kubeconfig files from %d directories", len(configs), len(opts.KubeconfigDirs))
 			kubeconfigPaths = configs
+			kubeconfigMode = "multi-dir"
 			loadingRules = &clientcmd.ClientConfigLoadingRules{Precedence: configs}
 		} else {
 			// Single kubeconfig mode (existing behavior)
@@ -112,10 +146,12 @@ func doInit(opts InitOptions) error {
 			// Split and use Precedence when there are multiple entries.
 			if paths := filepath.SplitList(kubeconfig); len(paths) > 1 {
 				kubeconfigPaths = paths
+				kubeconfigMode = "multi-env"
 				loadingRules = &clientcmd.ClientConfigLoadingRules{Precedence: paths}
 				log.Printf("KUBECONFIG contains %d paths, using merged mode", len(paths))
 			} else {
 				kubeconfigPath = kubeconfig
+				kubeconfigMode = "single"
 				loadingRules = &clientcmd.ClientConfigLoadingRules{ExplicitPath: kubeconfig}
 			}
 		}
@@ -123,10 +159,39 @@ func doInit(opts InitOptions) error {
 		configOverrides := &clientcmd.ConfigOverrides{}
 		kubeConfig := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(loadingRules, configOverrides)
 
-		// Get raw config to extract context/cluster names
-		rawConfig, err := kubeConfig.RawConfig()
-		if err == nil {
+		// Get raw config to extract context/cluster names. If this fails
+		// we still let ClientConfig() run below — it's likely to fail too,
+		// but we record the two failures separately so the snapshot shows
+		// the first error without bookkeeping getting silently skipped.
+		// Emitting at "error" severity (not "warning") because a RawConfig
+		// failure zeroes out every downstream diagnostic field this PR
+		// exists to surface — the entry must not be easy to overlook.
+		rawConfig, rawErr := kubeConfig.RawConfig()
+		if rawErr != nil {
+			log.Printf("Kubeconfig metadata load failed (mode=%s): %v", kubeconfigMode, rawErr)
+			errorlog.Record("k8s-init", "error",
+				"RawConfig() failed; context metadata and diagnostic counts unavailable: %v", rawErr)
+		} else {
 			contextName = rawConfig.CurrentContext
+			mergedContextCount = len(rawConfig.Contexts)
+			cmds, emptyAIs := collectExecPluginCommands(&rawConfig)
+			execPluginCommands = cmds
+			if len(emptyAIs) > 0 {
+				// Aggregate into a single errorlog entry — a pathological
+				// kubeconfig with hundreds of broken AuthInfos would otherwise
+				// flood the 200-entry ring buffer and evict other diagnostics.
+				recordEmptyCommandWarning("k8s-init", emptyAIs)
+			}
+			fileCount := len(kubeconfigPaths)
+			if fileCount == 0 && kubeconfigPath != "" {
+				fileCount = 1
+			}
+			// Log the merged context count so multi-file collisions are visible.
+			// client-go silently drops later duplicates when merging by name, so
+			// this count is the "ground truth" of what the user can actually pick
+			// from the dropdown — not the sum of per-file contexts.
+			log.Printf("Kubeconfig loaded: mode=%s, files=%d, contexts=%d, exec-plugins=%d",
+				kubeconfigMode, fileCount, mergedContextCount, len(execPluginCommands))
 			if ctx, ok := rawConfig.Contexts[contextName]; ok {
 				clusterName = ctx.Cluster
 				contextNamespace = ctx.Namespace
@@ -138,6 +203,12 @@ func doInit(opts InitOptions) error {
 
 		config, err = kubeConfig.ClientConfig()
 		if err != nil {
+			// Record to errorlog so the failure lands in the diagnostics
+			// snapshot's recentErrors. Include only the file count and mode —
+			// never the kubeconfig paths — so the snapshot stays shareable.
+			errorlog.Record("k8s-init", "error",
+				"failed to build kubeconfig client config (mode=%s, files=%d): %v",
+				kubeconfigMode, len(kubeconfigPaths), err)
 			if len(kubeconfigPaths) > 0 {
 				return fmt.Errorf("failed to build kubeconfig from %d files: %w", len(kubeconfigPaths), err)
 			}
@@ -180,6 +251,14 @@ func discoverKubeconfigs(dirs []string) ([]string, error) {
 		entries, err := os.ReadDir(dir)
 		if err != nil {
 			log.Printf("Warning: cannot read kubeconfig directory %s: %v", dir, err)
+			// Surface scan failures in the diagnostics snapshot so "my
+			// dropdown is empty" reports can tell permission/missing-dir
+			// apart from "dir was there but held no valid configs".
+			// Strip full paths from the error text via *os.PathError so
+			// the snapshot stays shareable — just Op + underlying cause.
+			errorlog.Record("k8s-init", "warning",
+				"kubeconfig dir %q scan failed: %s",
+				filepath.Base(dir), scrubPathError(err))
 			continue // Skip inaccessible dirs
 		}
 		for _, entry := range entries {
@@ -197,10 +276,37 @@ func discoverKubeconfigs(dirs []string) ([]string, error) {
 				log.Printf("Found kubeconfig: %s", path)
 			} else {
 				log.Printf("Skipping invalid kubeconfig: %s", path)
+				// Per-file parse/validation failures are invisible from
+				// the merged-config counts alone — a broken file lowers
+				// fileCount without explaining why. Record the basename
+				// (never the full path) so the triager knows which file
+				// to ask the user about.
+				errorlog.Record("k8s-init", "warning",
+					"skipping invalid kubeconfig file %q during directory scan",
+					filepath.Base(path))
 			}
 		}
 	}
 	return configs, nil
+}
+
+// scrubPathError returns the underlying error cause (e.g. "permission denied",
+// "no such file or directory") without the filesystem path that produced it,
+// so errorlog entries derived from os.ReadDir / os.Open can safely ship in a
+// bug report. Errors that aren't an `*os.PathError` (or whose inner Err is
+// nil) are *not* passed through via err.Error() — their text may still
+// contain the originating path — so they collapse to a conservative
+// "unscrubbable" placeholder. The helper's entire point is the privacy
+// contract; a future caller adding a non-PathError must not silently leak.
+func scrubPathError(err error) string {
+	if err == nil {
+		return ""
+	}
+	var pErr *os.PathError
+	if errors.As(err, &pErr) && pErr.Err != nil {
+		return pErr.Op + ": " + pErr.Err.Error()
+	}
+	return "(unscrubbable error — omitted to avoid leaking paths)"
 }
 
 // isValidKubeconfig checks if a file is a valid kubeconfig
@@ -247,6 +353,145 @@ func GetKubeconfigPath() string {
 	clientMu.RLock()
 	defer clientMu.RUnlock()
 	return kubeconfigPath
+}
+
+// KubeconfigSummary is a non-sensitive snapshot of kubeconfig loading state,
+// suitable for inclusion in diagnostic output. It never includes the resolved
+// paths themselves, only counts, mode flags, and exec plugin basenames.
+type KubeconfigSummary struct {
+	Mode                   string   // "in-cluster", "single", "multi-env", "multi-dir", or "" if not initialized
+	FileCount              int      // Number of kubeconfig files loaded (0 for in-cluster)
+	ContextCount           int      // Number of contexts exposed after client-go merged all files
+	EnrichedFromShell      bool     // Desktop app captured KUBECONFIG from login shell
+	CurrentContextUsesExec bool     // Current context's AuthInfo uses an exec credential plugin
+	ExecPluginsPresent     []string // Unique exec plugin command basenames (any context) resolvable on $PATH
+	ExecPluginsMissing     []string // Unique exec plugin command basenames (any context) NOT resolvable on $PATH
+}
+
+// GetKubeconfigSummary returns the current kubeconfig loading state for
+// diagnostics. All values are safe to include in a bug report.
+//
+// ExecPluginsPresent/Missing are computed lazily against the *current*
+// process PATH at snapshot time (not init time) so a user who installs
+// `gke-gcloud-auth-plugin` (or similar) *after* launching Radar sees the
+// plugin move from "missing" to "present" in their next snapshot without
+// restarting — and a user whose PATH is smaller in a long-running session
+// still gets accurate data.
+func GetKubeconfigSummary() KubeconfigSummary {
+	clientMu.RLock()
+	mode := kubeconfigMode
+	fileCount := len(kubeconfigPaths)
+	if fileCount == 0 && kubeconfigPath != "" {
+		fileCount = 1
+	}
+	contextCount := mergedContextCount
+	enriched := enrichedKubeconfigFromShell
+	currentExec := contextUsesExec
+	cmds := append([]string(nil), execPluginCommands...)
+	clientMu.RUnlock()
+
+	// LookPath outside the lock — it can stat the filesystem and we don't
+	// want to hold clientMu across I/O.
+	var present, missing []string
+	for _, cmd := range cmds {
+		if _, err := exec.LookPath(cmd); err == nil {
+			present = append(present, cmd)
+		} else {
+			missing = append(missing, cmd)
+		}
+	}
+
+	return KubeconfigSummary{
+		Mode:                   mode,
+		FileCount:              fileCount,
+		ContextCount:           contextCount,
+		EnrichedFromShell:      enriched,
+		CurrentContextUsesExec: currentExec,
+		ExecPluginsPresent:     present,
+		ExecPluginsMissing:     missing,
+	}
+}
+
+// collectExecPluginCommands walks every context in raw and returns:
+//
+//   - cmds: the unique, sorted basenames of any exec plugin command
+//     referenced by a context's AuthInfo. Basenames only — never full
+//     paths — so the result is safe to surface in diagnostics.
+//   - emptyCommandAuthInfos: the unique, sorted names of AuthInfos that
+//     reference an exec block with an empty Command. This is a user
+//     misconfiguration that will fail at auth time — the caller should
+//     record each one via errorlog so it shows up in a bug report.
+//
+// Orphan AuthInfos (not referenced by any context) are intentionally
+// skipped: they can't cause a context switch to fail, so there's no
+// signal in them.
+//
+// The function is pure on its *clientcmdapi.Config argument and touches
+// no shared state, so it is safe to call without any lock held. Callers
+// are responsible for assigning the returned cmds slice to the package
+// global `execPluginCommands` under clientMu.Lock.
+func collectExecPluginCommands(raw *clientcmdapi.Config) (cmds []string, emptyCommandAuthInfos []string) {
+	if raw == nil {
+		return nil, nil
+	}
+	seenCmds := make(map[string]struct{})
+	seenEmpty := make(map[string]struct{})
+	for _, ctx := range raw.Contexts {
+		if ctx == nil {
+			continue
+		}
+		ai, ok := raw.AuthInfos[ctx.AuthInfo]
+		if !ok || ai == nil || ai.Exec == nil {
+			continue
+		}
+		if ai.Exec.Command == "" {
+			// Malformed exec block — surface via the second return
+			// so the caller can record a warning. Dedupe by AuthInfo
+			// name since the same AuthInfo may be referenced by
+			// multiple contexts.
+			if _, dup := seenEmpty[ctx.AuthInfo]; !dup {
+				seenEmpty[ctx.AuthInfo] = struct{}{}
+				emptyCommandAuthInfos = append(emptyCommandAuthInfos, ctx.AuthInfo)
+			}
+			continue
+		}
+		base := filepath.Base(ai.Exec.Command)
+		if _, dup := seenCmds[base]; dup {
+			continue
+		}
+		seenCmds[base] = struct{}{}
+		cmds = append(cmds, base)
+	}
+	sort.Strings(cmds)
+	sort.Strings(emptyCommandAuthInfos)
+	return cmds, emptyCommandAuthInfos
+}
+
+// recordEmptyCommandWarning records a single aggregated errorlog entry for a
+// batch of AuthInfos that reference exec plugins with an empty Command. A
+// single errorlog call (rather than one-per-name) is deliberate — a
+// pathological or corrupted kubeconfig with hundreds of broken AuthInfos
+// would otherwise flood the 200-entry ring buffer and evict unrelated
+// diagnostics. Listing is capped at the first maxListed names so the
+// message text itself stays bounded; the count is always accurate.
+func recordEmptyCommandWarning(source string, authInfos []string) {
+	if len(authInfos) == 0 {
+		return
+	}
+	const maxListed = 10
+	listed := authInfos
+	truncated := false
+	if len(listed) > maxListed {
+		listed = listed[:maxListed]
+		truncated = true
+	}
+	suffix := ""
+	if truncated {
+		suffix = fmt.Sprintf(" (+%d more)", len(authInfos)-maxListed)
+	}
+	errorlog.Record(source, "warning",
+		"%d AuthInfo(s) reference exec plugins with empty command — context switches to these identities will fail at auth time: %v%s",
+		len(authInfos), listed, suffix)
 }
 
 // WriteKubeconfigForCurrentContext creates a temporary kubeconfig file with
@@ -488,6 +733,12 @@ func SwitchContext(name string) error {
 	if ai, ok := rawConfig.AuthInfos[ctx.AuthInfo]; ok && ai.Exec != nil {
 		usesExec = true
 	}
+	// Re-collect exec plugin commands — SwitchContext loads a fresh RawConfig
+	// so the user may have added/removed kubeconfig files since init.
+	execCmds, emptyAIs := collectExecPluginCommands(&rawConfig)
+	if len(emptyAIs) > 0 {
+		recordEmptyCommandWarning("context-switch", emptyAIs)
+	}
 
 	clientMu.Lock()
 	k8sConfig = config
@@ -498,6 +749,8 @@ func SwitchContext(name string) error {
 	clusterName = ctx.Cluster
 	contextNamespace = ctx.Namespace
 	contextUsesExec = usesExec
+	mergedContextCount = len(rawConfig.Contexts)
+	execPluginCommands = execCmds
 	clientMu.Unlock()
 
 	return nil

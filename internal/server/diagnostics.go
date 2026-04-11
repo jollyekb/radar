@@ -10,11 +10,11 @@ import (
 
 	"github.com/skyhook-io/radar/internal/errorlog"
 	"github.com/skyhook-io/radar/internal/k8s"
-	"github.com/skyhook-io/radar/pkg/k8score"
 	prometheuspkg "github.com/skyhook-io/radar/internal/prometheus"
 	"github.com/skyhook-io/radar/internal/timeline"
 	"github.com/skyhook-io/radar/internal/traffic"
 	"github.com/skyhook-io/radar/internal/version"
+	"github.com/skyhook-io/radar/pkg/k8score"
 )
 
 // DiagConfig holds sanitized configuration for the diagnostics endpoint.
@@ -40,23 +40,24 @@ type DiagnosticsSnapshot struct {
 	Uptime       string `json:"uptime"`
 	UptimeSec    int64  `json:"uptimeSec"`
 
-	Connection    *DiagConnection           `json:"connection,omitempty"`
-	Cluster       *DiagCluster              `json:"cluster,omitempty"`
-	Cache         *DiagCache                `json:"cache,omitempty"`
-	Metrics       *k8s.MetricsCollectionHealth `json:"metrics,omitempty"`
-	Timeline      *DiagTimeline             `json:"timeline,omitempty"`
-	EventPipeline *DiagEventPipeline        `json:"eventPipeline,omitempty"`
-	Informers     *DiagInformers            `json:"informers,omitempty"`
-	Prometheus    *DiagPrometheus           `json:"prometheus,omitempty"`
-	Traffic       *DiagTraffic              `json:"traffic,omitempty"`
-	Permissions   *DiagPermissions          `json:"permissions,omitempty"`
-	APIDiscovery  *DiagAPIDiscovery         `json:"apiDiscovery,omitempty"`
-	SSE           *DiagSSE                  `json:"sse,omitempty"`
-	Runtime       *DiagRuntime              `json:"runtime,omitempty"`
-	Config        *DiagConfig               `json:"config,omitempty"`
-	RecentErrors       []errorlog.ErrorEntry `json:"recentErrors,omitempty"`
-	TotalErrorsRecorded int64                `json:"totalErrorsRecorded,omitempty"`
-	Errors        []string                  `json:"errors,omitempty"`
+	Connection          *DiagConnection              `json:"connection,omitempty"`
+	Kubeconfig          *DiagKubeconfig              `json:"kubeconfig,omitempty"`
+	Cluster             *DiagCluster                 `json:"cluster,omitempty"`
+	Cache               *DiagCache                   `json:"cache,omitempty"`
+	Metrics             *k8s.MetricsCollectionHealth `json:"metrics,omitempty"`
+	Timeline            *DiagTimeline                `json:"timeline,omitempty"`
+	EventPipeline       *DiagEventPipeline           `json:"eventPipeline,omitempty"`
+	Informers           *DiagInformers               `json:"informers,omitempty"`
+	Prometheus          *DiagPrometheus              `json:"prometheus,omitempty"`
+	Traffic             *DiagTraffic                 `json:"traffic,omitempty"`
+	Permissions         *DiagPermissions             `json:"permissions,omitempty"`
+	APIDiscovery        *DiagAPIDiscovery            `json:"apiDiscovery,omitempty"`
+	SSE                 *DiagSSE                     `json:"sse,omitempty"`
+	Runtime             *DiagRuntime                 `json:"runtime,omitempty"`
+	Config              *DiagConfig                  `json:"config,omitempty"`
+	RecentErrors        []errorlog.ErrorEntry        `json:"recentErrors,omitempty"`
+	TotalErrorsRecorded int64                        `json:"totalErrorsRecorded,omitempty"`
+	Errors              []string                     `json:"errors,omitempty"`
 }
 
 // DiagConnection holds connection state info.
@@ -66,6 +67,24 @@ type DiagConnection struct {
 	ClusterName string `json:"clusterName,omitempty"`
 	Error       string `json:"error,omitempty"`
 	ErrorType   string `json:"errorType,omitempty"`
+}
+
+// DiagKubeconfig holds non-sensitive kubeconfig loading state. It never
+// includes resolved file paths — only counts, mode flags, and exec plugin
+// command basenames suitable for inclusion in a public bug report. Helps
+// triage issues like "some clusters don't show up in the switcher" or
+// "can't switch clusters on the desktop app" (radar#411) — the answer
+// typically lives in one of: kubeconfig loading mode, context merge
+// collisions, shell env enrichment, or an exec auth plugin missing from
+// the desktop app's PATH.
+type DiagKubeconfig struct {
+	Mode                   string   `json:"mode"`                             // in-cluster, single, multi-env, multi-dir, or "" if not initialized
+	FileCount              int      `json:"fileCount"`                        // Number of kubeconfig files loaded
+	ContextCount           int      `json:"contextCount"`                     // Contexts exposed after client-go merge
+	EnrichedFromShell      bool     `json:"enrichedFromShell"`                // Desktop app captured KUBECONFIG from login shell
+	CurrentContextUsesExec bool     `json:"currentContextUsesExec"`           // Current context's AuthInfo uses an exec credential plugin
+	ExecPluginsPresent     []string `json:"execPluginsPresent,omitempty"`     // Exec plugin command basenames resolvable on $PATH
+	ExecPluginsMissing     []string `json:"execPluginsMissing,omitempty"`     // Exec plugin command basenames NOT resolvable on $PATH (smoking gun for desktop-app multi-cluster failures)
 }
 
 // DiagCluster holds cluster detection info.
@@ -95,11 +114,11 @@ type DiagTimeline struct {
 
 // DiagEventPipeline holds event pipeline metrics.
 type DiagEventPipeline struct {
-	Received    map[string]int64        `json:"received"`
-	Dropped     map[string]int64        `json:"dropped"`
-	Recorded    map[string]int64        `json:"recorded"`
-	RecentDrops []timeline.DropRecord   `json:"recentDrops"`
-	Uptime      string                  `json:"uptime"`
+	Received    map[string]int64      `json:"received"`
+	Dropped     map[string]int64      `json:"dropped"`
+	Recorded    map[string]int64      `json:"recorded"`
+	RecentDrops []timeline.DropRecord `json:"recentDrops"`
+	Uptime      string                `json:"uptime"`
 }
 
 // DiagInformers holds informer counts and sync status.
@@ -194,6 +213,20 @@ func (s *Server) handleDiagnostics(w http.ResponseWriter, r *http.Request) {
 			ClusterName: status.ClusterName,
 			Error:       status.Error,
 			ErrorType:   status.ErrorType,
+		}
+	})
+
+	// Kubeconfig loading state — non-sensitive, always safe to include
+	collectSafe("kubeconfig", &errs, func() {
+		summary := k8s.GetKubeconfigSummary()
+		snap.Kubeconfig = &DiagKubeconfig{
+			Mode:                   summary.Mode,
+			FileCount:              summary.FileCount,
+			ContextCount:           summary.ContextCount,
+			EnrichedFromShell:      summary.EnrichedFromShell,
+			CurrentContextUsesExec: summary.CurrentContextUsesExec,
+			ExecPluginsPresent:     summary.ExecPluginsPresent,
+			ExecPluginsMissing:     summary.ExecPluginsMissing,
 		}
 	})
 

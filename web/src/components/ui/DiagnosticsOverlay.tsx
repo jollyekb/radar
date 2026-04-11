@@ -106,6 +106,7 @@ export function DiagnosticsOverlay({ onClose, isOpen = true }: DiagnosticsOverla
             <>
               <ErrorLogSection data={data} />
               <ConnectionSection data={data} />
+              <KubeconfigSection data={data} />
               <ClusterSection data={data} />
               <CacheSection data={data} />
               <MetricsSection data={data} />
@@ -199,6 +200,40 @@ function ConnectionSection({ data }: { data: DiagnosticsSnapshot }) {
       {c.clusterName && <Row label="Cluster" value={c.clusterName} />}
       {c.error && <Row label="Error" value={c.error} warn />}
       {c.errorType && <Row label="Error Type" value={c.errorType} warn />}
+    </Section>
+  )
+}
+
+function KubeconfigSection({ data }: { data: DiagnosticsSnapshot }) {
+  if (!data.kubeconfig) return null
+  const k = data.kubeconfig
+  // Missing exec plugins are the single strongest signal for desktop-app
+  // multi-cluster failures (radar#411) — GUI apps often don't inherit the
+  // user's PATH, so aws/gcloud/doctl/kubelogin can be invisible even though
+  // the CLI works fine. Highlight the whole section when that's the case.
+  const missing = k.execPluginsMissing ?? []
+  const present = k.execPluginsPresent ?? []
+  const hasMissing = missing.length > 0
+  return (
+    <Section title="Kubeconfig" warn={hasMissing}>
+      <Row label="Mode" value={k.mode || '(not initialized)'} />
+      <Row label="Files Loaded" value={k.fileCount} />
+      <Row label="Contexts (post-merge)" value={k.contextCount} />
+      <Row label="Enriched From Shell" value={k.enrichedFromShell ? 'Yes' : 'No'} />
+      <Row
+        label="Current Context Uses Exec"
+        value={k.currentContextUsesExec ? 'Yes' : 'No'}
+      />
+      {present.length > 0 && (
+        <Row label="Exec Plugins on PATH" value={present.join(', ')} />
+      )}
+      {hasMissing && (
+        <Row
+          label="Exec Plugins MISSING from PATH"
+          value={missing.join(', ')}
+          warn
+        />
+      )}
     </Section>
   )
 }
@@ -411,6 +446,20 @@ function formatForGitHub(data: DiagnosticsSnapshot, includeRawJson = true): stri
     if (c.clusterName) lines.push(`- Cluster: \`${c.clusterName}\``)
     if (c.error) lines.push(`- Error: ${c.error}`)
     if (c.errorType) lines.push(`- Error Type: \`${c.errorType}\``)
+    lines.push(``)
+  }
+
+  if (data.kubeconfig) {
+    const k = data.kubeconfig
+    lines.push(`### Kubeconfig`)
+    lines.push(`- Mode: \`${k.mode || '(not initialized)'}\` | Files: ${k.fileCount} | Contexts (post-merge): ${k.contextCount} | Enriched From Shell: ${k.enrichedFromShell ? 'Yes' : 'No'}`)
+    lines.push(`- Current Context Uses Exec: ${k.currentContextUsesExec ? 'Yes' : 'No'}`)
+    if (k.execPluginsPresent && k.execPluginsPresent.length > 0) {
+      lines.push(`- Exec Plugins on PATH: \`${k.execPluginsPresent.join('`, `')}\``)
+    }
+    if (k.execPluginsMissing && k.execPluginsMissing.length > 0) {
+      lines.push(`- **Exec Plugins MISSING from PATH:** \`${k.execPluginsMissing.join('`, `')}\``)
+    }
     lines.push(``)
   }
 
