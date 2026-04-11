@@ -238,7 +238,7 @@ func PerformContextSwitch(newContext string) error {
 	log.Printf("Switching K8s client to context %q...", newContext)
 	if err := SwitchContext(newContext); err != nil {
 		elapsed := time.Since(switchStart).Truncate(time.Millisecond)
-		log.Printf("[ops] Context switch FAILED at SwitchContext: %v (%v)", err, elapsed)
+		log.Printf("[ops] Context switch FAILED at SwitchContext: %v (%v since switch start)", err, elapsed)
 		errorlog.Record("context-switch", "error",
 			"stage=SwitchContext target=%q elapsed=%v: %v", newContext, elapsed, err)
 		return fmt.Errorf("failed to switch context: %w", err)

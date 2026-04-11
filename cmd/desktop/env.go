@@ -86,8 +86,13 @@ func enrichEnv() {
 		case !found || val == "":
 			// Use Base() so a user with a custom shell binary under $HOME
 			// (e.g. nix-profile) doesn't leak their username into a public
-			// bug report.
-			shellName := filepath.Base(os.Getenv("SHELL"))
+			// bug report. Fall back to a placeholder when $SHELL is unset
+			// — filepath.Base("") returns "." which would be a confusing
+			// diagnostic message.
+			shellName := "unknown"
+			if s := os.Getenv("SHELL"); s != "" {
+				shellName = filepath.Base(s)
+			}
 			log.Printf("KUBECONFIG enrichment skipped: not found in login shell")
 			errorlog.Record("env-enrich", "warning",
 				"KUBECONFIG not found in login shell (%s -l -i); "+

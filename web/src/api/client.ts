@@ -2459,7 +2459,7 @@ export interface DiagnosticsSnapshot {
     errorType?: string
   }
   kubeconfig?: {
-    mode: string // in-cluster, single, multi-env, multi-dir
+    mode: '' | 'in-cluster' | 'single' | 'multi-env' | 'multi-dir'
     fileCount: number
     contextCount: number
     enrichedFromShell: boolean
