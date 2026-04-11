@@ -61,7 +61,7 @@ func enrichEnv() {
 			os.Setenv(key, val)
 			log.Printf("Env enriched: %s from login shell", key)
 			if key == "KUBECONFIG" {
-				k8s.EnrichedKubeconfigFromShell = true
+				k8s.SetEnrichedKubeconfigFromShell(true)
 			}
 			continue
 		}
@@ -84,10 +84,14 @@ func enrichEnv() {
 				"KUBECONFIG enrichment skipped: already set in process env with %d path(s); "+
 					"login shell value ignored", pathCount)
 		case !found || val == "":
+			// Use Base() so a user with a custom shell binary under $HOME
+			// (e.g. nix-profile) doesn't leak their username into a public
+			// bug report.
+			shellName := filepath.Base(os.Getenv("SHELL"))
 			log.Printf("KUBECONFIG enrichment skipped: not found in login shell")
 			errorlog.Record("env-enrich", "warning",
 				"KUBECONFIG not found in login shell (%s -l -i); "+
-					"multi-file configs from .zshrc/.bashrc will not be visible", os.Getenv("SHELL"))
+					"multi-file configs from .zshrc/.bashrc will not be visible", shellName)
 		}
 	}
 }

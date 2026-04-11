@@ -2463,6 +2463,9 @@ export interface DiagnosticsSnapshot {
     fileCount: number
     contextCount: number
     enrichedFromShell: boolean
+    currentContextUsesExec: boolean
+    execPluginsPresent?: string[]
+    execPluginsMissing?: string[]
   }
   cluster?: {
     platform: string
