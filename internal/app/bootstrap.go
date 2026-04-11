@@ -38,6 +38,7 @@ type AppConfig struct {
 	DisableHelmWrite bool
 	DisableExec          bool
 	DisableLocalTerminal bool
+	PodShellDefault      string
 	TimelineStorage      string
 	TimelineDBPath   string
 	PrometheusURL    string
@@ -54,6 +55,7 @@ func SetGlobals(cfg AppConfig) {
 	k8s.ForceDisableHelmWrite = cfg.DisableHelmWrite
 	k8s.ForceDisableExec = cfg.DisableExec
 	k8s.ForceDisableLocalTerminal = cfg.DisableLocalTerminal
+	server.DefaultPodShellCommand = cfg.PodShellDefault
 	versionpkg.SetCurrent(cfg.Version)
 }
 

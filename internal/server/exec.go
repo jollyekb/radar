@@ -26,6 +26,54 @@ var upgrader = websocket.Upgrader{
 	},
 }
 
+// defaultShellScript is the built-in fallback command used when no shell is
+// requested explicitly via ?shell= and no override is set via --pod-shell-default.
+// It exports TERM so colours and cursor movement work in container shells that
+// don't set it, then detects the best available shell with `command -v` and
+// execs into it.
+//
+// We detect with `command -v` *before* execing, rather than relying on
+// `exec bash || exec ash || exec sh`, because POSIX requires a non-interactive
+// shell to exit immediately when `exec` fails to find the requested command.
+// That behaviour breaks the naive `||` cascade: once `exec bash` fails in an
+// image without bash, the outer `sh -c` exits 127 and the `|| exec ash`
+// branch never runs. The `command -v` check confirms existence first, so
+// `exec` can only fail for exotic reasons (e.g. permission denied), which
+// POSIX does treat as fatal — and in that case the session surfaces the
+// error to the frontend, which is the correct behaviour.
+//
+// bash is run as `bash -il` (interactive login) so it picks up the image's
+// startup files. Per the bash manual, a login shell reads /etc/profile and
+// then the first existing of ~/.bash_profile, ~/.bash_login, or ~/.profile.
+// Debian-family images typically also chain in /etc/bash.bashrc (via a
+// distro hook in /etc/profile) and then ~/.bashrc (via the canonical
+// `[ -f ~/.bashrc ] && . ~/.bashrc` line in ~/.bash_profile). One of those
+// files sets PS1 — almost always containing \w — which fixes the missing
+// working-directory-in-prompt symptom from skyhook-io/radar#452.
+const defaultShellScript = "export TERM=xterm-256color; if command -v bash >/dev/null 2>&1; then exec bash -il; elif command -v ash >/dev/null 2>&1; then exec ash; else exec sh; fi"
+
+// DefaultPodShellCommand, when non-empty, overrides defaultShellScript as the
+// script passed to `sh -c`. Set by the bootstrap layer from the
+// --pod-shell-default CLI flag. Empty means "use the built-in default".
+var DefaultPodShellCommand string
+
+// defaultExecCommand builds the command argv for a pod exec session.
+//
+// Precedence:
+//  1. If override is non-empty (from ?shell=), use it verbatim as a single argv
+//     element — the caller is explicitly asking for that shell.
+//  2. If fallback is non-empty (from --pod-shell-default), run it as `sh -c fallback`.
+//  3. Otherwise run `sh -c defaultShellScript`.
+func defaultExecCommand(override, fallback string) []string {
+	if override != "" {
+		return []string{override}
+	}
+	if fallback != "" {
+		return []string{"sh", "-c", fallback}
+	}
+	return []string{"sh", "-c", defaultShellScript}
+}
+
 // ExecSession tracks an active exec WebSocket connection
 type ExecSession struct {
 	ID        string `json:"id"`
@@ -113,11 +161,10 @@ func (s *Server) handlePodExec(w http.ResponseWriter, r *http.Request) {
 	podName := chi.URLParam(r, "name")
 	container := r.URL.Query().Get("container")
 
-	// Get shell - prefer bash, fall back to sh
-	shell := r.URL.Query().Get("shell")
-	if shell == "" {
-		shell = "/bin/sh"
-	}
+	// Build the argv for the exec. If the caller explicitly requested a shell
+	// via ?shell=, honour it; otherwise use defaultExecCommand, which runs the
+	// configured fallback (or the built-in bash/ash/sh detection script) under sh -c.
+	command := defaultExecCommand(r.URL.Query().Get("shell"), DefaultPodShellCommand)
 
 	// Upgrade to WebSocket
 	conn, err := upgrader.Upgrade(w, r, nil)
@@ -160,7 +207,7 @@ func (s *Server) handlePodExec(w http.ResponseWriter, r *http.Request) {
 	auth.AuditLog(r, namespace, podName)
 
 	// Create SPDY executor
-	exec, err := k8score.NewPodExecExecutor(client, config, namespace, podName, container, []string{shell}, true)
+	exec, err := k8score.NewPodExecExecutor(client, config, namespace, podName, container, command, true)
 	if err != nil {
 		sendWSError(conn, fmt.Sprintf("Failed to create executor: %v", err))
 		return
@@ -231,6 +278,14 @@ func (s *Server) handlePodExec(w http.ResponseWriter, r *http.Request) {
 				errorType := "exec_error"
 				if isShellNotFoundError(errMsg) {
 					errorType = "shell_not_found"
+				} else if looksLikeShellNotFound(errMsg) {
+					// Drift canary: the error has shell-not-found hallmarks but
+					// isShellNotFoundError's substring matcher didn't recognize
+					// it. Most likely kubelet/runc/containerd reworded the
+					// upstream error text. Log a breadcrumb so we notice before
+					// users start filing "Failed to connect" bugs. See the
+					// looksLikeShellNotFound doc comment for rationale.
+					log.Printf("[exec] WARNING: error looks shell-related but isShellNotFoundError did not match — kubelet error text may have drifted; update isShellNotFoundError patterns if this recurs. errMsg=%q", errMsg)
 				}
 				log.Printf("Exec failed (%s): %v", errorType, err)
 				sendWSErrorWithType(conn, errorType, errMsg)
@@ -327,6 +382,32 @@ func isShellNotFoundError(errMsg string) bool {
 		if strings.Contains(errLower, pattern) {
 			return true
 		}
+	}
+	return false
+}
+
+// looksLikeShellNotFound is a drift canary for isShellNotFoundError. It
+// returns true when an error message has shell-not-found hallmarks using
+// broader heuristics than the substring patterns above: (a) the message
+// contains both "exec" and "not found", which catches most variants of
+// missing-executable errors across container runtimes, or (b) the message
+// contains "exit code 127", which is POSIX's reserved exit status for
+// "command not found" and is what kubelet surfaces when our `sh -c` script
+// can't exec the detected shell.
+//
+// The caller uses this only for logging, never for classification — if
+// this matches but isShellNotFoundError doesn't, we log a WARNING so a
+// maintainer can update the patterns. False positives here are harmless
+// (noisier logs on unrelated errors) but silent false negatives there
+// would demote shell-missing errors to the generic "exec_error" branch,
+// losing the frontend's "Start debug container" CTA.
+func looksLikeShellNotFound(errMsg string) bool {
+	errLower := strings.ToLower(errMsg)
+	if strings.Contains(errLower, "exec") && strings.Contains(errLower, "not found") {
+		return true
+	}
+	if strings.Contains(errLower, "exit code 127") {
+		return true
 	}
 	return false
 }
