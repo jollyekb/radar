@@ -26,6 +26,50 @@ var upgrader = websocket.Upgrader{
 	},
 }
 
+// defaultShellScript is the built-in fallback command used when no shell is
+// requested explicitly via ?shell= and no override is set via --pod-shell-default.
+// It exports TERM so colours and cursor movement work in container shells that
+// don't set it, then detects the best available shell with `command -v` and
+// execs into it.
+//
+// We detect with `command -v` *before* execing, rather than relying on
+// `exec bash || exec ash || exec sh`, because POSIX requires a non-interactive
+// shell to exit immediately when `exec` fails to find the requested command.
+// That behaviour breaks the naive `||` cascade: once `exec bash` fails in an
+// image without bash, the outer `sh -c` exits 127 and the `|| exec ash`
+// branch never runs. The `command -v` check confirms existence first, so
+// `exec` can only fail for exotic reasons (e.g. permission denied), which
+// POSIX does treat as fatal — and in that case the session surfaces the
+// error to the frontend, which is the correct behaviour.
+//
+// bash is run as `bash -il` (interactive login) so it sources /etc/profile,
+// /etc/bash.bashrc, and the user's rc files. That picks up the image's PS1
+// (typically containing \w for the working directory), which is the third
+// symptom from skyhook-io/radar#452.
+const defaultShellScript = "export TERM=xterm-256color; if command -v bash >/dev/null 2>&1; then exec bash -il; elif command -v ash >/dev/null 2>&1; then exec ash; else exec sh; fi"
+
+// DefaultPodShellCommand, when non-empty, overrides defaultShellScript as the
+// script passed to `sh -c`. Set by the bootstrap layer from the
+// --pod-shell-default CLI flag. Empty means "use the built-in default".
+var DefaultPodShellCommand string
+
+// defaultExecCommand builds the command argv for a pod exec session.
+//
+// Precedence:
+//  1. If override is non-empty (from ?shell=), use it verbatim as a single argv
+//     element — the caller is explicitly asking for that shell.
+//  2. If fallback is non-empty (from --pod-shell-default), run it as `sh -c fallback`.
+//  3. Otherwise run `sh -c defaultShellScript`.
+func defaultExecCommand(override, fallback string) []string {
+	if override != "" {
+		return []string{override}
+	}
+	if fallback != "" {
+		return []string{"sh", "-c", fallback}
+	}
+	return []string{"sh", "-c", defaultShellScript}
+}
+
 // ExecSession tracks an active exec WebSocket connection
 type ExecSession struct {
 	ID        string `json:"id"`
@@ -113,11 +157,10 @@ func (s *Server) handlePodExec(w http.ResponseWriter, r *http.Request) {
 	podName := chi.URLParam(r, "name")
 	container := r.URL.Query().Get("container")
 
-	// Get shell - prefer bash, fall back to sh
-	shell := r.URL.Query().Get("shell")
-	if shell == "" {
-		shell = "/bin/sh"
-	}
+	// Build the argv for the exec. If the caller explicitly requested a shell
+	// via ?shell=, honour it; otherwise use defaultExecCommand, which runs the
+	// configured fallback (or the built-in bash → ash → sh cascade) under sh -c.
+	command := defaultExecCommand(r.URL.Query().Get("shell"), DefaultPodShellCommand)
 
 	// Upgrade to WebSocket
 	conn, err := upgrader.Upgrade(w, r, nil)
@@ -160,7 +203,7 @@ func (s *Server) handlePodExec(w http.ResponseWriter, r *http.Request) {
 	auth.AuditLog(r, namespace, podName)
 
 	// Create SPDY executor
-	exec, err := k8score.NewPodExecExecutor(client, config, namespace, podName, container, []string{shell}, true)
+	exec, err := k8score.NewPodExecExecutor(client, config, namespace, podName, container, command, true)
 	if err != nil {
 		sendWSError(conn, fmt.Sprintf("Failed to create executor: %v", err))
 		return
