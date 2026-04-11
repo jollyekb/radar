@@ -137,6 +137,19 @@ body {
   }
 }
 
+/* Expand animation for timeline swimlane children — GPU-composited (transform + opacity only).
+   Slides down from the parent row with a fade. Collapse is instant (unmount). */
+@keyframes swimlane-expand {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 @keyframes fade-out {
   from {
     opacity: 1;

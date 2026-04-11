@@ -109,6 +109,22 @@ export function Tooltip({
     }
   }, [])
 
+  // When disabled flips true, proactively cancel any pending show timer and
+  // clear visible state. Without this, a tooltip that was visible (or armed)
+  // when disabled became true would pop back on as soon as disabled flips
+  // false — even though the cursor is elsewhere and no fresh mouseenter has
+  // fired. Also covers the case where the trigger becomes unreachable via
+  // pointer-events-none and never fires mouseleave.
+  useEffect(() => {
+    if (disabled) {
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current)
+        timeoutRef.current = null
+      }
+      setIsVisible(false)
+    }
+  }, [disabled])
+
   if (disabled || !content) {
     return <>{children}</>
   }

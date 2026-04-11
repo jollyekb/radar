@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, useRef, forwardRef } from 'react'
+import { useState, useMemo, useEffect, useRef, useCallback, forwardRef } from 'react'
 import {
   Search,
   ChevronDown,
@@ -44,6 +44,9 @@ export interface ResourcesSidebarProps {
   onNavigate?: (path: string) => void
   /** Base path for generating navigation URLs (e.g., '/org/clusters/id/k8s-resources') */
   basePath?: string
+  /** Called when a kind is selected via keyboard (Enter in the filter). Parent uses this
+   *  to move focus to the next UI level (e.g., the table search input). */
+  onKindNavigated?: () => void
 }
 
 // Persisted across remounts so collapsed categories survive tab switches
@@ -93,6 +96,8 @@ interface ResourceTypeButtonProps {
   resource: APIResource
   count: number
   isSelected: boolean
+  /** Keyboard-highlight state (arrow nav in the filter input). */
+  isHighlighted?: boolean
   isForbidden?: boolean
   isPinned?: boolean
   onTogglePin?: () => void
@@ -100,7 +105,7 @@ interface ResourceTypeButtonProps {
 }
 
 const ResourceTypeButton = forwardRef<HTMLButtonElement, ResourceTypeButtonProps>(
-  function ResourceTypeButton({ resource, count, isSelected, isForbidden: forbidden, isPinned, onTogglePin, onClick }, ref) {
+  function ResourceTypeButton({ resource, count, isSelected, isHighlighted, isForbidden: forbidden, isPinned, onTogglePin, onClick }, ref) {
     const Icon = getResourceIcon(resource.kind)
     return (
       <button
@@ -110,9 +115,11 @@ const ResourceTypeButton = forwardRef<HTMLButtonElement, ResourceTypeButtonProps
           'w-full flex items-center gap-2 px-2 xl:px-3 py-1.5 rounded-lg text-sm transition-colors group/kind min-w-0',
           isSelected
             ? 'selection-strong selection-text'
-            : forbidden
-              ? 'text-theme-text-disabled hover:bg-theme-elevated hover:text-theme-text-secondary'
-              : 'text-theme-text-secondary hover:bg-theme-elevated hover:text-theme-text-primary'
+            : isHighlighted
+              ? 'bg-theme-hover text-theme-text-primary'
+              : forbidden
+                ? 'text-theme-text-disabled hover:bg-theme-elevated hover:text-theme-text-secondary'
+                : 'text-theme-text-secondary hover:bg-theme-elevated hover:text-theme-text-primary'
         )}
       >
         <Icon className="w-4 h-4 shrink-0" />
@@ -172,6 +179,7 @@ export function ResourcesSidebar({
   className,
   onNavigate,
   basePath,
+  onKindNavigated,
 }: ResourcesSidebarProps) {
   // Wraps kind selection to also navigate when basePath/onNavigate are provided
   const selectKind = (kind: SelectedKindInfo) => {
@@ -194,6 +202,15 @@ export function ResourcesSidebar({
 
   // Ref to selected sidebar item for scrolling into view on deeplink
   const selectedSidebarRef = useRef<HTMLButtonElement>(null)
+
+  // Ref to kind search input — auto-focused on mount so users can type a kind name immediately
+  const kindSearchRef = useRef<HTMLInputElement>(null)
+  useEffect(() => {
+    // Only focus on fine-pointer devices to avoid popping up the virtual keyboard on touch
+    if (typeof window !== 'undefined' && window.matchMedia('(pointer: fine)').matches) {
+      kindSearchRef.current?.focus()
+    }
+  }, [])
 
   // Effective selected kind — fall back to a safe default
   const effectiveSelectedKind = selectedKind ?? { name: 'pods', kind: 'Pod', group: '' }
@@ -335,6 +352,69 @@ export function ResourcesSidebar({
     })
   }
 
+  // --- Keyboard navigation ---
+  // Flat list of all navigable kinds in the order they appear in the sidebar.
+  const flatVisibleKinds = useMemo<SelectedKindInfo[]>(() => {
+    const kinds: SelectedKindInfo[] = []
+    if (favoritesExpanded) {
+      for (const p of pinned) {
+        kinds.push({ name: p.name, kind: p.kind, group: p.group })
+      }
+    }
+    if (filteredCategories) {
+      for (const cat of filteredCategories) {
+        if (effectiveExpandedCategories.has(cat.name)) {
+          for (const r of cat.visibleResources) {
+            kinds.push({ name: r.name, kind: r.kind, group: r.group })
+          }
+        }
+      }
+    }
+    return kinds
+  }, [favoritesExpanded, pinned, filteredCategories, effectiveExpandedCategories])
+
+  const [highlightedIndex, setHighlightedIndex] = useState(-1)
+  // Reset highlight when the filter or kind list changes
+  useEffect(() => {
+    setHighlightedIndex(kindFilter ? 0 : -1)
+  }, [kindFilter]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const highlightedKind = highlightedIndex >= 0 && highlightedIndex < flatVisibleKinds.length
+    ? flatVisibleKinds[highlightedIndex]
+    : null
+
+  // Scroll the highlighted kind button into view
+  const highlightedRef = useRef<HTMLButtonElement>(null)
+  useEffect(() => {
+    if (highlightedRef.current) {
+      highlightedRef.current.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+    }
+  }, [highlightedIndex])
+
+  const handleSearchKeyDown = useCallback((e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Escape') {
+      setKindFilter('')
+      setHighlightedIndex(-1)
+      ;(e.target as HTMLInputElement).blur()
+    } else if (e.key === 'ArrowDown') {
+      e.preventDefault()
+      setHighlightedIndex(prev => Math.min(prev + 1, flatVisibleKinds.length - 1))
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault()
+      setHighlightedIndex(prev => Math.max(prev - 1, 0))
+    } else if (e.key === 'Enter' && highlightedKind) {
+      e.preventDefault()
+      selectKind(highlightedKind)
+      setHighlightedIndex(-1)
+      setKindFilter('')
+      onKindNavigated?.()
+    }
+  }, [flatVisibleKinds.length, highlightedKind, selectKind, onKindNavigated]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const isKindHighlighted = useCallback((name: string, group: string) => {
+    return highlightedKind?.name === name && highlightedKind?.group === group
+  }, [highlightedKind])
+
   // Scroll sidebar to show selected kind on mount (deep linking) and on kind changes (keyboard nav)
   const lastScrolledKind = useRef<string | null>(null)
   const isInitialScroll = useRef(true)
@@ -362,11 +442,12 @@ export function ResourcesSidebar({
         <div className="relative">
           <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-theme-text-tertiary" />
           <input
+            ref={kindSearchRef}
             type="text"
             placeholder="Filter resources..."
             value={kindFilter}
             onChange={(e) => setKindFilter(e.target.value)}
-            onKeyDown={(e) => { if (e.key === 'Escape') { setKindFilter(''); (e.target as HTMLInputElement).blur() } }}
+            onKeyDown={handleSearchKeyDown}
             className="w-full pl-7 pr-7 py-2 bg-theme-elevated border border-theme-border-light rounded-lg text-sm text-theme-text-primary placeholder-theme-text-disabled focus:outline-none focus:ring-2 focus:ring-skyhook-500"
           />
           {kindFilter && (
@@ -398,34 +479,41 @@ export function ResourcesSidebar({
               </span>
             )}
           </button>
-          {favoritesExpanded && (
-            <div className="space-y-0.5">
-              {pinned.length === 0 ? (
-                <div className="px-3 py-2 text-xs text-theme-text-disabled">
-                  No pinned resources. Click <Pin className="w-3 h-3 inline" /> on any resource type to pin it here.
-                </div>
-              ) : (
-                pinned.map((p) => {
-                  const isResourceSelected =
-                    (effectiveSelectedKind.name === p.name && effectiveSelectedKind.group === p.group) ||
-                    (effectiveSelectedKind.kind.toLowerCase() === p.kind.toLowerCase() && effectiveSelectedKind.group === p.group)
-                  return (
-                    <ResourceTypeButton
-                      key={`${p.name}-${p.group}`}
-                      ref={isResourceSelected ? selectedSidebarRef : null}
-                      resource={{ name: p.name, kind: p.kind, group: p.group, version: '', namespaced: true, isCrd: false, verbs: [] }}
-                      count={counts?.[(p.group ? `${p.group}/${p.kind}` : p.kind)] ?? 0}
-                      isSelected={isResourceSelected}
-                      isForbidden={forbiddenKinds.has(p.group ? `${p.group}/${p.kind}` : p.kind)}
-                      isPinned={true}
-                      onTogglePin={() => togglePin(p)}
-                      onClick={() => selectKind({ name: p.name, kind: p.kind, group: p.group })}
-                    />
-                  )
-                })
-              )}
+          <div className={clsx(
+            'grid transition-[grid-template-rows] duration-200',
+            favoritesExpanded ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'
+          )} style={{ transitionTimingFunction: 'cubic-bezier(0.16, 1, 0.3, 1)' }}>
+            <div className="overflow-hidden">
+              <div className="space-y-0.5">
+                {pinned.length === 0 ? (
+                  <div className="px-3 py-2 text-xs text-theme-text-disabled">
+                    No pinned resources. Click <Pin className="w-3 h-3 inline" /> on any resource type to pin it here.
+                  </div>
+                ) : (
+                  pinned.map((p) => {
+                    const isResourceSelected =
+                      (effectiveSelectedKind.name === p.name && effectiveSelectedKind.group === p.group) ||
+                      (effectiveSelectedKind.kind.toLowerCase() === p.kind.toLowerCase() && effectiveSelectedKind.group === p.group)
+                    const highlighted = isKindHighlighted(p.name, p.group)
+                    return (
+                      <ResourceTypeButton
+                        key={`${p.name}-${p.group}`}
+                        ref={highlighted ? highlightedRef : (isResourceSelected ? selectedSidebarRef : null)}
+                        resource={{ name: p.name, kind: p.kind, group: p.group, version: '', namespaced: true, isCrd: false, verbs: [] }}
+                        count={counts?.[(p.group ? `${p.group}/${p.kind}` : p.kind)] ?? 0}
+                        isSelected={isResourceSelected}
+                        isHighlighted={highlighted}
+                        isForbidden={forbiddenKinds.has(p.group ? `${p.group}/${p.kind}` : p.kind)}
+                        isPinned={true}
+                        onTogglePin={() => togglePin(p)}
+                        onClick={() => selectKind({ name: p.name, kind: p.kind, group: p.group })}
+                      />
+                    )
+                  })
+                )}
+              </div>
             </div>
-          )}
+          </div>
         </div>
         {filteredCategories ? (
           // Dynamic categories from API
@@ -449,31 +537,38 @@ export function ResourcesSidebar({
                     </span>
                   )}
                 </button>
-                {isExpanded && (
-                  <div className="space-y-0.5">
-                    {category.visibleResources.map((resource) => {
-                      const resourceIsPinned = isPinned(resource.name, resource.group)
-                      const isResourceSelected =
-                        (effectiveSelectedKind.name === resource.name && effectiveSelectedKind.group === resource.group) ||
-                        (effectiveSelectedKind.kind.toLowerCase() === resource.kind.toLowerCase() && effectiveSelectedKind.group === resource.group)
-                      // If the resource is pinned, let the Favorites section own the highlight
-                      const showSelected = isResourceSelected && !resourceIsPinned
-                      return (
-                      <ResourceTypeButton
-                        key={resource.name}
-                        ref={isResourceSelected ? selectedSidebarRef : null}
-                        resource={resource}
-                        count={counts?.[(resource.group ? `${resource.group}/${resource.kind}` : resource.kind)] ?? 0}
-                        isSelected={showSelected}
-                        isForbidden={forbiddenKinds.has(resource.group ? `${resource.group}/${resource.kind}` : resource.kind)}
-                        isPinned={resourceIsPinned}
-                        onTogglePin={() => togglePin({ name: resource.name, kind: resource.kind, group: resource.group })}
-                        onClick={() => selectKind({ name: resource.name, kind: resource.kind, group: resource.group })}
-                      />
-                      )
-                    })}
+                <div className={clsx(
+                  'grid transition-[grid-template-rows] duration-200',
+                  isExpanded ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'
+                )} style={{ transitionTimingFunction: 'cubic-bezier(0.16, 1, 0.3, 1)' }}>
+                  <div className="overflow-hidden">
+                    <div className="space-y-0.5">
+                      {category.visibleResources.map((resource) => {
+                        const resourceIsPinned = isPinned(resource.name, resource.group)
+                        const isResourceSelected =
+                          (effectiveSelectedKind.name === resource.name && effectiveSelectedKind.group === resource.group) ||
+                          (effectiveSelectedKind.kind.toLowerCase() === resource.kind.toLowerCase() && effectiveSelectedKind.group === resource.group)
+                        // If the resource is pinned, let the Favorites section own the highlight
+                        const showSelected = isResourceSelected && !resourceIsPinned
+                        const highlighted = isKindHighlighted(resource.name, resource.group)
+                        return (
+                        <ResourceTypeButton
+                          key={resource.name}
+                          ref={highlighted ? highlightedRef : (isResourceSelected ? selectedSidebarRef : null)}
+                          resource={resource}
+                          count={counts?.[(resource.group ? `${resource.group}/${resource.kind}` : resource.kind)] ?? 0}
+                          isSelected={showSelected}
+                          isHighlighted={highlighted}
+                          isForbidden={forbiddenKinds.has(resource.group ? `${resource.group}/${resource.kind}` : resource.kind)}
+                          isPinned={resourceIsPinned}
+                          onTogglePin={() => togglePin({ name: resource.name, kind: resource.kind, group: resource.group })}
+                          onClick={() => selectKind({ name: resource.name, kind: resource.kind, group: resource.group })}
+                        />
+                        )
+                      })}
+                    </div>
                   </div>
-                )}
+                </div>
               </div>
             )
           })

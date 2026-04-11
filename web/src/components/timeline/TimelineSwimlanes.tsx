@@ -755,7 +755,10 @@ export function TimelineSwimlanes({ events, isLoading, onResourceClick, viewMode
 
                   {/* Child lanes (when expanded) - includes parent as first row */}
                   {isExpanded && hasChildren && (
-                    <div className="border-l-2 border-blue-500/40 ml-3 bg-theme-surface/30">
+                    <div
+                      className="border-l-2 border-blue-500/40 ml-3 bg-theme-surface/30"
+                      style={{ animation: 'swimlane-expand 250ms ease-out both' }}
+                    >
                       {/* Parent's own events as first row (only if it has events) */}
                       {lane.events.length > 0 && (
                         <div className="border-b-subtle">

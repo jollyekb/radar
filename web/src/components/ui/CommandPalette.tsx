@@ -1,12 +1,12 @@
 import { useState, useMemo, useRef, useEffect, useCallback } from 'react'
 import { TRANSITION_BACKDROP, TRANSITION_PANEL } from '../../utils/animation'
 import { Search, X, ChevronRight } from 'lucide-react'
-import { Home, Network, List, Clock, Package, Activity, Sun, Stethoscope } from 'lucide-react'
+import { Home, Network, List, Clock, Package, Activity, Sun, Stethoscope, DollarSign, ShieldCheck } from 'lucide-react'
 import { clsx } from 'clsx'
 import { useNamespaces, useContexts } from '../../api/client'
 import { CORE_RESOURCES, useAPIResources } from '../../api/apiResources'
 import { getResourceIcon } from '../../utils/resource-icons'
-type MainView = 'home' | 'topology' | 'resources' | 'timeline' | 'helm' | 'traffic'
+type MainView = 'home' | 'topology' | 'resources' | 'timeline' | 'helm' | 'traffic' | 'cost' | 'audit'
 
 interface CommandPaletteProps {
   onClose: () => void
@@ -112,6 +112,8 @@ export function CommandPalette({
       { view: 'timeline', label: 'Timeline', icon: Clock, shortcut: '4' },
       { view: 'helm', label: 'Helm', icon: Package, shortcut: '5' },
       { view: 'traffic', label: 'Traffic', icon: Activity, shortcut: '6' },
+      { view: 'cost', label: 'Cost', icon: DollarSign, shortcut: '7' },
+      { view: 'audit', label: 'Audit', icon: ShieldCheck, shortcut: '8' },
     ]
     for (const v of viewEntries) {
       result.push({

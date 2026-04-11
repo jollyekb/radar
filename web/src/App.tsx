@@ -16,7 +16,7 @@ import { TrafficView } from './components/traffic/TrafficView'
 import { CostView } from './components/cost/CostView'
 import { AuditView } from './components/audit/AuditView'
 import { HelmReleaseDrawer } from './components/helm/HelmReleaseDrawer'
-import { PortForwardManager, usePortForwardCount } from './components/portforward/PortForwardManager'
+import { PortForwardProvider, PortForwardIndicator, PortForwardPanel } from './components/portforward/PortForwardManager'
 import { DockProvider, BottomDock, useDock, useOpenLocalTerminal } from './components/dock'
 import { DURATION_DOCK } from '@skyhook-io/k8s-ui/utils/animation'
 import { ContextSwitcher } from './components/ContextSwitcher'
@@ -36,7 +36,7 @@ import { useNamespaces, useSwitchContext, useAuthMe, setAuthQueryClient } from '
 import { KeyboardShortcutProvider, useRegisterShortcut, useRegisterShortcuts } from './hooks/useKeyboardShortcuts'
 import { useAnimatedUnmount } from './hooks/useAnimatedUnmount'
 import { Loader2 } from 'lucide-react'
-import { RefreshCw, Network, List, Clock, Package, Sun, Moon, Activity, Home, Star, Search, Bug, Settings, SquareTerminal } from 'lucide-react'
+import { RefreshCw, Network, List, Clock, Package, Sun, Moon, Activity, Home, Star, Search, Bug, Settings, SquareTerminal, ShieldCheck } from 'lucide-react'
 import { useTheme } from './context/ThemeContext'
 import { Tooltip } from './components/ui/Tooltip'
 import { LargeClusterNamespacePicker } from './components/shared/LargeClusterNamespacePicker'
@@ -716,6 +716,7 @@ function AppInner() {
   }, [])
 
   return (
+    <PortForwardProvider>
     <div className="flex flex-col h-screen bg-theme-base min-w-[800px]">
       {/* Header */}
       <header className="relative z-50 flex items-center justify-between px-4 py-2 bg-theme-base/90 backdrop-blur-sm border-b border-theme-border/50">
@@ -769,6 +770,8 @@ function AppInner() {
                 </button>
               )}
             </div>
+            {/* Port forwards indicator — shown only when sessions exist */}
+            <PortForwardIndicator />
           </div>
         </div>
 
@@ -781,18 +784,22 @@ function AppInner() {
             { view: 'timeline' as const, icon: Clock, label: 'Timeline' },
             { view: 'helm' as const, icon: Package, label: 'Helm' },
             { view: 'traffic' as const, icon: Activity, label: 'Traffic' },
+            // Cost is intentionally hidden from the pill bar for now — the view still
+            // exists and is reachable via /cost, the Home dashboard card, and the
+            // command palette (⌘K). Remove this comment to restore it.
+            { view: 'audit' as const, icon: ShieldCheck, label: 'Audit' },
           ] as const).map(({ view, icon: Icon, label }) => (
             <Tooltip key={view} content={label} delay={100} position="bottom">
               <button
                 onClick={() => setMainView(view)}
-                className={`flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-full transition-colors ${
+                className={`flex items-center gap-1.5 px-2.5 py-1.5 text-sm rounded-full transition-colors ${
                   mainView === view
                     ? 'bg-skyhook-600 dark:bg-skyhook-500 text-white shadow-glow-brand-sm'
                     : 'text-theme-text-secondary hover:text-theme-text-primary hover:bg-theme-hover'
                 }`}
               >
                 <Icon className="w-4 h-4" />
-                <span className="hidden lg:inline">{label}</span>
+                <span className="hidden xl:inline">{label}</span>
               </button>
             </Tooltip>
           ))}
@@ -1198,8 +1205,8 @@ function AppInner() {
         />
       )}
 
-      {/* Port Forward Manager */}
-      <PortForwardManagerWrapper />
+      {/* Port Forward floating panel (indicator lives in header) */}
+      <PortForwardPanel />
 
       {/* Update notification */}
       <UpdateNotification />
@@ -1233,6 +1240,11 @@ function AppInner() {
               else params.delete('apiGroup')
               params.delete('resource')
               navigate({ pathname: `/resources/${kind}`, search: params.toString() })
+              // Focus the table search after navigation — the user came from ⌘K
+              // (keyboard flow) and expects to type a resource name immediately.
+              setTimeout(() => {
+                (document.querySelector('input[placeholder="Search... (press /)"]') as HTMLInputElement)?.focus()
+              }, 100)
             }
           }}
           onSwitchContext={(name) => switchContext.mutate({ name })}
@@ -1258,6 +1270,7 @@ function AppInner() {
             if (pendingKindNav.group) params.set('apiGroup', pendingKindNav.group)
             navigate({ pathname: `/resources/${pendingKindNav.kind}`, search: params.toString() })
             setPendingKindNav(null)
+            setTimeout(() => { (document.querySelector('input[placeholder="Search... (press /)"]') as HTMLInputElement)?.focus() }, 100)
           }}
           onKeep={() => {
             const params = new URLSearchParams(searchParams)
@@ -1267,6 +1280,7 @@ function AppInner() {
             params.delete('resource')
             navigate({ pathname: `/resources/${pendingKindNav.kind}`, search: params.toString() })
             setPendingKindNav(null)
+            setTimeout(() => { (document.querySelector('input[placeholder="Search... (press /)"]') as HTMLInputElement)?.focus() }, 100)
           }}
           onClose={() => setPendingKindNav(null)}
         />
@@ -1275,6 +1289,7 @@ function AppInner() {
       {/* Debug overlay - only in dev mode */}
       {import.meta.env.DEV && <DebugOverlay />}
     </div>
+    </PortForwardProvider>
   )
 }
 
@@ -1550,21 +1565,6 @@ function ThemeToggle() {
         <Moon className="w-4 h-4" />
       )}
     </button>
-  )
-}
-
-// Wrapper component that conditionally renders PortForwardManager
-function PortForwardManagerWrapper() {
-  const [minimized, setMinimized] = useState(false)
-  const count = usePortForwardCount()
-
-  if (count === 0) return null
-
-  return (
-    <PortForwardManager
-      minimized={minimized}
-      onToggleMinimize={() => setMinimized(!minimized)}
-    />
   )
 }
 
