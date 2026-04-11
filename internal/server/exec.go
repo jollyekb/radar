@@ -278,6 +278,14 @@ func (s *Server) handlePodExec(w http.ResponseWriter, r *http.Request) {
 				errorType := "exec_error"
 				if isShellNotFoundError(errMsg) {
 					errorType = "shell_not_found"
+				} else if looksLikeShellNotFound(errMsg) {
+					// Drift canary: the error has shell-not-found hallmarks but
+					// isShellNotFoundError's substring matcher didn't recognize
+					// it. Most likely kubelet/runc/containerd reworded the
+					// upstream error text. Log a breadcrumb so we notice before
+					// users start filing "Failed to connect" bugs. See the
+					// looksLikeShellNotFound doc comment for rationale.
+					log.Printf("[exec] WARNING: error looks shell-related but isShellNotFoundError did not match — kubelet error text may have drifted; update isShellNotFoundError patterns if this recurs. errMsg=%q", errMsg)
 				}
 				log.Printf("Exec failed (%s): %v", errorType, err)
 				sendWSErrorWithType(conn, errorType, errMsg)
@@ -374,6 +382,32 @@ func isShellNotFoundError(errMsg string) bool {
 		if strings.Contains(errLower, pattern) {
 			return true
 		}
+	}
+	return false
+}
+
+// looksLikeShellNotFound is a drift canary for isShellNotFoundError. It
+// returns true when an error message has shell-not-found hallmarks using
+// broader heuristics than the substring patterns above: (a) the message
+// contains both "exec" and "not found", which catches most variants of
+// missing-executable errors across container runtimes, or (b) the message
+// contains "exit code 127", which is POSIX's reserved exit status for
+// "command not found" and is what kubelet surfaces when our `sh -c` script
+// can't exec the detected shell.
+//
+// The caller uses this only for logging, never for classification — if
+// this matches but isShellNotFoundError doesn't, we log a WARNING so a
+// maintainer can update the patterns. False positives here are harmless
+// (noisier logs on unrelated errors) but silent false negatives there
+// would demote shell-missing errors to the generic "exec_error" branch,
+// losing the frontend's "Start debug container" CTA.
+func looksLikeShellNotFound(errMsg string) bool {
+	errLower := strings.ToLower(errMsg)
+	if strings.Contains(errLower, "exec") && strings.Contains(errLower, "not found") {
+		return true
+	}
+	if strings.Contains(errLower, "exit code 127") {
+		return true
 	}
 	return false
 }

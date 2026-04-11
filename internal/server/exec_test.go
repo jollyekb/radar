@@ -83,3 +83,63 @@ func TestDefaultShellScript(t *testing.T) {
 		t.Error("defaultShellScript must run bash as `-il` (interactive login) so it sources the image's startup files and picks up a PS1 with \\w — that's the PWD-in-prompt fix from skyhook-io/radar#452")
 	}
 }
+
+// TestLooksLikeShellNotFound covers the drift canary. The function is a
+// broader heuristic than isShellNotFoundError and intentionally tolerates
+// some false positives — the goal is to log a breadcrumb when an error
+// LOOKS shell-related but the precise substring matcher didn't recognise
+// it, so maintainers notice kubelet error-text drift before users do.
+func TestLooksLikeShellNotFound(t *testing.T) {
+	tests := []struct {
+		name    string
+		errMsg  string
+		want    bool
+		comment string
+	}{
+		{
+			name:    "current kubelet: executable file not found",
+			errMsg:  `rpc error: code = Unknown desc = failed to exec in container: failed to start exec: cannot exec in a stopped container: executable file not found in $PATH: unknown`,
+			want:    true,
+			comment: "contains 'exec' and 'not found' — catches the error our isShellNotFoundError already handles, ensuring the canary overlap is intact",
+		},
+		{
+			name:    "hypothetical kubelet reword: exec missing",
+			errMsg:  `unable to start container process: exec: "bash": not found`,
+			want:    true,
+			comment: "new phrasing with 'exec' + 'not found' — the exact drift scenario the canary is designed to catch",
+		},
+		{
+			name:    "exit code 127 from sh -c script",
+			errMsg:  `command terminated with exit code 127`,
+			want:    true,
+			comment: "POSIX's reserved 'command not found' exit code — what kubelet surfaces when sh -c can't run",
+		},
+		{
+			name:    "unrelated websocket error",
+			errMsg:  `unable to upgrade connection: timeout`,
+			want:    false,
+			comment: "no exec/not-found/127 signals — must not fire",
+		},
+		{
+			name:    "permission denied",
+			errMsg:  `forbidden: pods "foo" is forbidden: User cannot exec`,
+			want:    false,
+			comment: "contains 'exec' but no 'not found' or exit 127 — must not fire",
+		},
+		{
+			name:    "k8s not found (pod, not shell)",
+			errMsg:  `pods "nonexistent-pod" not found`,
+			want:    false,
+			comment: "contains 'not found' but no 'exec' signal — must not fire",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := looksLikeShellNotFound(tc.errMsg)
+			if got != tc.want {
+				t.Errorf("looksLikeShellNotFound(%q) = %v, want %v (%s)", tc.errMsg, got, tc.want, tc.comment)
+			}
+		})
+	}
+}
