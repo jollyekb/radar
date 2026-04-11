@@ -2,6 +2,7 @@ package server
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -53,19 +54,32 @@ func TestDefaultExecCommand(t *testing.T) {
 	}
 }
 
-// TestDefaultShellScript documents the exact script content. Its role is to
-// fail loudly if someone edits defaultShellScript without updating the
-// verification checklist in the plan — the script is load-bearing for
-// skyhook-io/radar#452.
+// TestDefaultShellScript is a tripwire that pins the exact script content.
+// The script is load-bearing for skyhook-io/radar#452 — any edit should be
+// manually re-verified against the scenarios documented in the PR that
+// introduced it (bash present, ash-only, sh-only, --pod-shell-default
+// override, multi-container pod). If you're here because this test failed,
+// update `expected` AND re-run those scenarios before merging.
 //
-// Note: earlier drafts used `exec bash || exec ash || exec sh`, but POSIX
-// requires non-interactive shells to exit immediately when `exec` fails to
-// find the target. That broke the fallback chain on images without bash.
-// The current form detects each shell with `command -v` before execing,
-// so exec only runs for commands that are known to exist.
+// Earlier drafts used `exec bash || exec ash || exec sh`, but POSIX requires
+// non-interactive shells to exit immediately when `exec` fails to find the
+// target — so that cascade died with exit 127 on the first missing shell.
+// The current form detects each shell with `command -v` before execing, so
+// exec only runs for commands that are known to exist.
 func TestDefaultShellScript(t *testing.T) {
 	const expected = "export TERM=xterm-256color; if command -v bash >/dev/null 2>&1; then exec bash -il; elif command -v ash >/dev/null 2>&1; then exec ash; else exec sh; fi"
 	if defaultShellScript != expected {
 		t.Errorf("defaultShellScript changed:\n  got:  %q\n  want: %q", defaultShellScript, expected)
+	}
+
+	// Behavioral asserts — pin the load-bearing properties so a future edit
+	// that drops one of them fails with a specific message, not just a
+	// string-diff. These would have caught the `exec bash || exec ash` draft
+	// that broke live in alpine during this PR's development.
+	if !strings.Contains(defaultShellScript, "command -v bash") {
+		t.Error("defaultShellScript must detect bash with `command -v` before exec'ing — naive `exec bash || ...` fails under POSIX because non-interactive shells exit on exec-not-found")
+	}
+	if !strings.Contains(defaultShellScript, "bash -il") {
+		t.Error("defaultShellScript must run bash as `-il` (interactive login) so it sources the image's startup files and picks up a PS1 with \\w — that's the PWD-in-prompt fix from skyhook-io/radar#452")
 	}
 }

@@ -42,10 +42,14 @@ var upgrader = websocket.Upgrader{
 // POSIX does treat as fatal — and in that case the session surfaces the
 // error to the frontend, which is the correct behaviour.
 //
-// bash is run as `bash -il` (interactive login) so it sources /etc/profile,
-// /etc/bash.bashrc, and the user's rc files. That picks up the image's PS1
-// (typically containing \w for the working directory), which is the third
-// symptom from skyhook-io/radar#452.
+// bash is run as `bash -il` (interactive login) so it picks up the image's
+// startup files. Per the bash manual, a login shell reads /etc/profile and
+// then the first existing of ~/.bash_profile, ~/.bash_login, or ~/.profile.
+// Debian-family images typically also chain in /etc/bash.bashrc (via a
+// distro hook in /etc/profile) and then ~/.bashrc (via the canonical
+// `[ -f ~/.bashrc ] && . ~/.bashrc` line in ~/.bash_profile). One of those
+// files sets PS1 — almost always containing \w — which fixes the missing
+// working-directory-in-prompt symptom from skyhook-io/radar#452.
 const defaultShellScript = "export TERM=xterm-256color; if command -v bash >/dev/null 2>&1; then exec bash -il; elif command -v ash >/dev/null 2>&1; then exec ash; else exec sh; fi"
 
 // DefaultPodShellCommand, when non-empty, overrides defaultShellScript as the
@@ -159,7 +163,7 @@ func (s *Server) handlePodExec(w http.ResponseWriter, r *http.Request) {
 
 	// Build the argv for the exec. If the caller explicitly requested a shell
 	// via ?shell=, honour it; otherwise use defaultExecCommand, which runs the
-	// configured fallback (or the built-in bash → ash → sh cascade) under sh -c.
+	// configured fallback (or the built-in bash/ash/sh detection script) under sh -c.
 	command := defaultExecCommand(r.URL.Query().Get("shell"), DefaultPodShellCommand)
 
 	// Upgrade to WebSocket
