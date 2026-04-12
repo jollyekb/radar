@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Server, Globe, Network, Layers, Download, CheckCircle, AlertCircle } from 'lucide-react'
 import { Section, PropertyList, Property, ConditionsSection, AlertBanner, ResourceLink } from '../../ui/drawer-components'
 import { kindToPlural } from '../../../utils/navigation'
+import { formatAge } from '../resource-utils'
 import { getClusterStatus, getClusterClass, getClusterVersion, getClusterEndpoint, getProviderFromInfraKind } from '../resource-utils-capi'
 
 interface Props {
@@ -93,6 +94,14 @@ export function CAPIClusterRenderer({ data, onNavigate, apiBase = '' }: Props) {
 
   return (
     <>
+      {spec.paused && (
+        <AlertBanner
+          variant="warning"
+          title="Cluster Paused"
+          message="Reconciliation is paused. Infrastructure and machine changes will not be applied until resumed."
+        />
+      )}
+
       {isFailed && (
         <AlertBanner
           variant="error"
@@ -109,7 +118,9 @@ export function CAPIClusterRenderer({ data, onNavigate, apiBase = '' }: Props) {
           {infrastructureRef.kind && <Property label="Provider" value={getProviderFromInfraKind(infrastructureRef.kind)} />}
           {className !== '-' && <Property label="Cluster Class" value={className} />}
           {endpoint !== '-' && <Property label="Control Plane Endpoint" value={endpoint} />}
-          {spec.paused && <Property label="Paused" value="Yes" />}
+          {readyCond?.lastTransitionTime && (
+            <Property label="Since" value={formatAge(readyCond.lastTransitionTime)} />
+          )}
         </PropertyList>
       </Section>
 
@@ -117,7 +128,7 @@ export function CAPIClusterRenderer({ data, onNavigate, apiBase = '' }: Props) {
       <div className="px-3 py-2 flex items-center gap-2">
         <button
           onClick={handleConnectToCluster}
-          disabled={connectState === 'loading'}
+          disabled={connectState === 'loading' || connectState === 'success'}
           className="btn-brand flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-md"
         >
           {connectState === 'loading' && <Globe className="w-3.5 h-3.5 animate-pulse" />}

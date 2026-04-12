@@ -1,5 +1,7 @@
 import { Server, Settings } from 'lucide-react'
-import { Section, PropertyList, Property, ConditionsSection, AlertBanner } from '../../ui/drawer-components'
+import { Section, PropertyList, Property, ConditionsSection, AlertBanner, ResourceLink } from '../../ui/drawer-components'
+import { kindToPlural } from '../../../utils/navigation'
+import { formatAge } from '../resource-utils'
 import { getMachineDeploymentStatus, getMachineDeploymentVersion, getMachineClusterName } from '../resource-utils-capi'
 
 interface Props {
@@ -7,7 +9,7 @@ interface Props {
   onNavigate?: (ref: { kind: string; namespace: string; name: string; group?: string }) => void
 }
 
-export function CAPIMachineDeploymentRenderer({ data }: Props) {
+export function CAPIMachineDeploymentRenderer({ data, onNavigate }: Props) {
   const status = data.status || {}
   const spec = data.spec || {}
   const conditions = status.v1beta2?.conditions || status.conditions || []
@@ -30,6 +32,14 @@ export function CAPIMachineDeploymentRenderer({ data }: Props) {
 
   return (
     <>
+      {paused && (
+        <AlertBanner
+          variant="warning"
+          title="MachineDeployment Paused"
+          message="Reconciliation is paused. Changes will not be applied until resumed."
+        />
+      )}
+
       {isFailed && (
         <AlertBanner
           variant="error"
@@ -44,7 +54,9 @@ export function CAPIMachineDeploymentRenderer({ data }: Props) {
           <Property label="Phase" value={phase} />
           <Property label="Cluster" value={clusterName} />
           <Property label="Version" value={version} />
-          {paused && <Property label="Paused" value="Yes" />}
+          {readyCond?.lastTransitionTime && (
+            <Property label="Since" value={formatAge(readyCond.lastTransitionTime)} />
+          )}
         </PropertyList>
       </Section>
 
@@ -78,10 +90,28 @@ export function CAPIMachineDeploymentRenderer({ data }: Props) {
         <Section title="Machine Template" icon={Settings}>
           <PropertyList>
             {infraRef.kind && (
-              <Property label="Infrastructure" value={`${infraRef.kind}/${infraRef.name}`} />
+              <Property label="Infrastructure" value={
+                <ResourceLink
+                  name={infraRef.name}
+                  kind={kindToPlural(infraRef.kind)}
+                  namespace={infraRef.namespace || data.metadata?.namespace}
+                  group={infraRef.apiVersion?.split('/')?.[0]}
+                  label={`${infraRef.kind}/${infraRef.name}`}
+                  onNavigate={onNavigate}
+                />
+              } />
             )}
             {bootstrapRef.kind && (
-              <Property label="Bootstrap" value={`${bootstrapRef.kind}/${bootstrapRef.name}`} />
+              <Property label="Bootstrap" value={
+                <ResourceLink
+                  name={bootstrapRef.name}
+                  kind={kindToPlural(bootstrapRef.kind)}
+                  namespace={bootstrapRef.namespace || data.metadata?.namespace}
+                  group={bootstrapRef.apiVersion?.split('/')?.[0]}
+                  label={`${bootstrapRef.kind}/${bootstrapRef.name}`}
+                  onNavigate={onNavigate}
+                />
+              } />
             )}
           </PropertyList>
         </Section>

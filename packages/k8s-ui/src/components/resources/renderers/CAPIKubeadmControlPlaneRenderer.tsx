@@ -1,5 +1,7 @@
 import { Server, Shield, Settings } from 'lucide-react'
-import { Section, PropertyList, Property, ConditionsSection, AlertBanner } from '../../ui/drawer-components'
+import { Section, PropertyList, Property, ConditionsSection, AlertBanner, ResourceLink } from '../../ui/drawer-components'
+import { kindToPlural } from '../../../utils/navigation'
+import { formatAge } from '../resource-utils'
 import { getKCPStatus, getKCPVersion, getKCPInitialized, getMachineClusterName } from '../resource-utils-capi'
 
 interface Props {
@@ -7,7 +9,7 @@ interface Props {
   onNavigate?: (ref: { kind: string; namespace: string; name: string; group?: string }) => void
 }
 
-export function CAPIKubeadmControlPlaneRenderer({ data }: Props) {
+export function CAPIKubeadmControlPlaneRenderer({ data, onNavigate }: Props) {
   const status = data.status || {}
   const spec = data.spec || {}
   const conditions = status.v1beta2?.conditions || status.conditions || []
@@ -46,6 +48,9 @@ export function CAPIKubeadmControlPlaneRenderer({ data }: Props) {
           <Property label="Version" value={version} />
           <Property label="Initialized" value={initialized ? 'Yes' : 'No'} />
           {updateStrategy && <Property label="Update Strategy" value={updateStrategy} />}
+          {readyCond?.lastTransitionTime && (
+            <Property label="Since" value={formatAge(readyCond.lastTransitionTime)} />
+          )}
         </PropertyList>
       </Section>
 
@@ -63,7 +68,16 @@ export function CAPIKubeadmControlPlaneRenderer({ data }: Props) {
       {infraRef.kind && (
         <Section title="Machine Template" icon={Settings}>
           <PropertyList>
-            <Property label="Infrastructure" value={`${infraRef.kind}/${infraRef.name}`} />
+            <Property label="Infrastructure" value={
+              <ResourceLink
+                name={infraRef.name}
+                kind={kindToPlural(infraRef.kind)}
+                namespace={infraRef.namespace || data.metadata?.namespace}
+                group={infraRef.apiVersion?.split('/')?.[0]}
+                label={`${infraRef.kind}/${infraRef.name}`}
+                onNavigate={onNavigate}
+              />
+            } />
             {machineTemplate.nodeDrainTimeout && (
               <Property label="Node Drain Timeout" value={machineTemplate.nodeDrainTimeout} />
             )}

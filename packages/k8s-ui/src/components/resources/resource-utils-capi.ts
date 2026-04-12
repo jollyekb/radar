@@ -20,12 +20,12 @@ const PHASE_MAP: Record<string, { text: string; level: StatusBadge['level'] }> =
   failed: { text: 'Failed', level: 'unhealthy' },
 }
 
-function getCAPIConditions(resource: any): any[] {
+export function getCAPIConditions(resource: any): any[] {
   // v1beta2 uses status.v1beta2.conditions, v1beta1 uses status.conditions
   return resource.status?.v1beta2?.conditions || resource.status?.conditions || []
 }
 
-function getCAPIReadyCondition(resource: any): any | undefined {
+export function getCAPIReadyCondition(resource: any): any | undefined {
   const conditions = getCAPIConditions(resource)
   return conditions.find((c: any) => c.type === 'Ready') || conditions.find((c: any) => c.type === 'Available')
 }
@@ -48,7 +48,7 @@ function getCAPIPhaseStatus(resource: any): StatusBadge {
   return { text: 'Unknown', color: healthColors.unknown, level: 'unknown' }
 }
 
-function getCAPIReadyStatus(resource: any): StatusBadge {
+export function getCAPIReadyStatus(resource: any): StatusBadge {
   const readyCond = getCAPIReadyCondition(resource)
   if (readyCond?.status === 'True') {
     return { text: 'Ready', color: healthColors.healthy, level: 'healthy' }
@@ -148,15 +148,15 @@ export interface InfraProvider {
 export function parseProviderID(providerID: string): InfraProvider | null {
   if (!providerID || providerID === '-') return null
 
-  // AWS: aws:///us-east-1a/i-0abcdef1234567890
+  // AWS: aws:///us-east-1a/i-0abcdef1234567890 (or aws://us-east-1a/...)
   if (providerID.startsWith('aws://')) {
-    const parts = providerID.replace('aws:///', '').split('/')
+    const parts = providerID.replace(/^aws:\/\/\/?/, '').split('/')
     return { provider: 'AWS', region: parts[0] || undefined, instanceId: parts[1] || undefined }
   }
 
-  // GCP: gce:///my-project/us-central1-a/my-instance
+  // GCP: gce:///my-project/us-central1-a/my-instance (or gce://...)
   if (providerID.startsWith('gce://')) {
-    const parts = providerID.replace('gce:///', '').split('/')
+    const parts = providerID.replace(/^gce:\/\/\/?/, '').split('/')
     return { provider: 'GCP', region: parts[1] || undefined, instanceId: parts[2] || undefined }
   }
 
@@ -169,12 +169,12 @@ export function parseProviderID(providerID: string): InfraProvider | null {
 
   // vSphere: vsphere://42305a8e-...
   if (providerID.startsWith('vsphere://')) {
-    return { provider: 'vSphere', instanceId: providerID.replace('vsphere://', '') }
+    return { provider: 'vSphere', instanceId: providerID.replace(/^vsphere:\/\/\/?/, '') }
   }
 
-  // Docker (CAPD): docker:///container-name
+  // Docker (CAPD): docker:///container-name (or docker://...)
   if (providerID.startsWith('docker://')) {
-    return { provider: 'Docker', instanceId: providerID.replace('docker:///', '') }
+    return { provider: 'Docker', instanceId: providerID.replace(/^docker:\/\/\/?/, '') }
   }
 
   return { provider: providerID.split(':')[0] || 'Unknown' }
@@ -289,4 +289,10 @@ export function getMachineHealthCheckHealthy(resource: any): string {
   const expected = resource.status?.expectedMachines ?? 0
   const healthy = resource.status?.currentHealthy ?? 0
   return `${healthy}/${expected}`
+}
+
+export function getClusterProvider(resource: any): string {
+  const infraKind = resource.spec?.infrastructureRef?.kind || ''
+  if (infraKind) return getProviderFromInfraKind(infraKind)
+  return '-'
 }

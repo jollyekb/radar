@@ -97,14 +97,14 @@
 .topology-icon-nodeclaim { background: #6366f1; }
 .topology-icon-nodeclass { background: #6366f1; }
 .topology-icon-httpproxy { background: #7c3aed; }
-.topology-icon-capicluster { background: #6366f1; }
-.topology-icon-machinedeployment { background: #6366f1; }
-.topology-icon-machineset { background: #6366f1; }
-.topology-icon-machine { background: #818cf8; }
-.topology-icon-machinepool { background: #6366f1; }
-.topology-icon-kubeadmcontrolplane { background: #4f46e5; }
-.topology-icon-clusterclass { background: #4f46e5; }
-.topology-icon-machinehealthcheck { background: #818cf8; }
+.topology-icon-capicluster { background: #4338ca; }
+.topology-icon-machinedeployment { background: #5b4fcf; }
+.topology-icon-machineset { background: #6d5fd6; }
+.topology-icon-machine { background: #7c6fdd; }
+.topology-icon-machinepool { background: #5b4fcf; }
+.topology-icon-kubeadmcontrolplane { background: #4338ca; }
+.topology-icon-clusterclass { background: #3b2fba; }
+.topology-icon-machinehealthcheck { background: #8b7fe4; }
 
 /* Background dots - uses CSS variable for theme awareness */
 .react-flow__background pattern circle {

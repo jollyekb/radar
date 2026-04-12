@@ -67,6 +67,7 @@ import {
 } from '../resources/resource-utils-knative'
 import { getHTTPProxyStatus } from '../resources/resource-utils-contour'
 import { getClusterStatus as getCAPIClusterStatus, getMachineStatus, getMachineDeploymentStatus, getMachineSetStatus, getMachinePoolStatus, getKCPStatus, getClusterClassStatus, getMachineHealthCheckStatus } from '../resources/resource-utils-capi'
+import { getAWSMCPStatus, getAWSMMPStatus, getAWSMachineStatus, getAWSManagedClusterStatus } from '../resources/resource-utils-aws-capi'
 import {
   PodRenderer,
   WorkloadRenderer,
@@ -185,6 +186,11 @@ import {
   CAPIMachineHealthCheckRenderer,
   CAPIMachineDrainRuleRenderer,
   CAPIKubeadmConfigRenderer,
+  AWSManagedControlPlaneRenderer,
+  AWSManagedMachinePoolRenderer,
+  AWSMachineRenderer,
+  AWSMachineTemplateRenderer,
+  AWSManagedClusterRenderer,
 } from '../resources/renderers'
 import type { SelectedResource, Relationships, ResourceRef, SecretCertificateInfo, ResolvedEnvFrom } from '../../types'
 import type { CopyHandler } from '../ui/drawer-components'
@@ -258,6 +264,9 @@ const KNOWN_KINDS = new Set([
   'kubeadmcontrolplanes', 'clusterclasses', 'machinehealthchecks',
   'machinedrainrules', 'kubeadmconfigs', 'kubeadmconfigtemplates',
   'kubeadmcontrolplanetemplates',
+  // AWS CAPI Infrastructure Provider
+  'awsmanagedcontrolplanes', 'awsmanagedmachinepools', 'awsmachines',
+  'awsmachinetemplates', 'awsmanagedclusters',
 ])
 
 // ============================================================================
@@ -417,7 +426,7 @@ export function ResourceRendererDispatch({
         {kind === 'scheduledbackups' && <CNPGScheduledBackupRenderer data={data} onNavigate={onNavigate} />}
         {kind === 'poolers' && <CNPGPoolerRenderer data={data} onNavigate={onNavigate} />}
         {/* Cluster API (CAPI) */}
-        {data?.metadata?.labels?.['topology.cluster.x-k8s.io/owned'] && (
+        {'topology.cluster.x-k8s.io/owned' in (data?.metadata?.labels ?? {}) && data?.apiVersion?.includes('cluster.x-k8s.io') && (
           <div className="px-3 py-2">
             <div className="flex items-start gap-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-700/40 dark:bg-amber-950/30 dark:text-amber-400">
               <svg className="mt-0.5 h-3.5 w-3.5 shrink-0" viewBox="0 0 16 16" fill="currentColor"><path d="M8 1a7 7 0 100 14A7 7 0 008 1zm0 2.5a1 1 0 110 2 1 1 0 010-2zM6.75 7h1.5v4.5h-1.5V7z"/></svg>
@@ -426,14 +435,20 @@ export function ResourceRendererDispatch({
           </div>
         )}
         {kind === 'machines' && data?.apiVersion?.includes('cluster.x-k8s.io') && <CAPIMachineRenderer data={data} onNavigate={onNavigate} />}
-        {kind === 'machinedeployments' && <CAPIMachineDeploymentRenderer data={data} />}
-        {kind === 'machinesets' && data?.apiVersion?.includes('cluster.x-k8s.io') && <CAPIMachineSetRenderer data={data} />}
-        {kind === 'machinepools' && <CAPIMachinePoolRenderer data={data} />}
-        {kind === 'kubeadmcontrolplanes' && <CAPIKubeadmControlPlaneRenderer data={data} />}
+        {kind === 'machinedeployments' && <CAPIMachineDeploymentRenderer data={data} onNavigate={onNavigate} />}
+        {kind === 'machinesets' && data?.apiVersion?.includes('cluster.x-k8s.io') && <CAPIMachineSetRenderer data={data} onNavigate={onNavigate} />}
+        {kind === 'machinepools' && <CAPIMachinePoolRenderer data={data} onNavigate={onNavigate} />}
+        {kind === 'kubeadmcontrolplanes' && <CAPIKubeadmControlPlaneRenderer data={data} onNavigate={onNavigate} />}
         {kind === 'clusterclasses' && <CAPIClusterClassRenderer data={data} />}
         {kind === 'machinehealthchecks' && <CAPIMachineHealthCheckRenderer data={data} />}
         {kind === 'machinedrainrules' && <CAPIMachineDrainRuleRenderer data={data} />}
         {(kind === 'kubeadmconfigs' || kind === 'kubeadmconfigtemplates') && <CAPIKubeadmConfigRenderer data={data} />}
+        {/* AWS CAPI Infrastructure Provider */}
+        {kind === 'awsmanagedcontrolplanes' && <AWSManagedControlPlaneRenderer data={data} onNavigate={onNavigate} />}
+        {kind === 'awsmanagedmachinepools' && <AWSManagedMachinePoolRenderer data={data} onNavigate={onNavigate} />}
+        {kind === 'awsmachines' && <AWSMachineRenderer data={data} onNavigate={onNavigate} />}
+        {kind === 'awsmachinetemplates' && <AWSMachineTemplateRenderer data={data} />}
+        {kind === 'awsmanagedclusters' && <AWSManagedClusterRenderer data={data} />}
         {kind === 'virtualservices' && <IstioVirtualServiceRenderer data={data} onNavigate={onNavigate} />}
         {kind === 'destinationrules' && <IstioDestinationRuleRenderer data={data} onNavigate={onNavigate} />}
         {kind === 'serviceentries' && <IstioServiceEntryRenderer data={data} />}
@@ -591,6 +606,11 @@ export function getResourceStatus(kind: string, data: any): { text: string; colo
   if (k === 'kubeadmcontrolplanes') return getKCPStatus(data)
   if (k === 'clusterclasses') return getClusterClassStatus(data)
   if (k === 'machinehealthchecks') return getMachineHealthCheckStatus(data)
+  // AWS CAPI Infrastructure Provider
+  if (k === 'awsmanagedcontrolplanes') return getAWSMCPStatus(data)
+  if (k === 'awsmanagedmachinepools') return getAWSMMPStatus(data)
+  if (k === 'awsmachines') return getAWSMachineStatus(data)
+  if (k === 'awsmanagedclusters') return getAWSManagedClusterStatus(data)
   if (k === 'scheduledbackups') return getCNPGScheduledBackupStatus(data)
   if (k === 'poolers') return getCNPGPoolerStatus(data)
   if (k === 'virtualservices') return getVirtualServiceStatus(data)
