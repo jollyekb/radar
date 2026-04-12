@@ -9,6 +9,7 @@ import pkgauth "github.com/skyhook-io/radar/pkg/auth"
 // All callers can continue to import "internal/auth" without changes.
 type Config = pkgauth.Config
 type User = pkgauth.User
+type Session = pkgauth.Session
 type UserPermissions = pkgauth.UserPermissions
 type PermissionCache = pkgauth.PermissionCache
 
@@ -17,15 +18,14 @@ const DefaultCookieName = pkgauth.DefaultCookieName
 
 // Re-export functions from pkg/auth
 var (
-	UserFromContext      = pkgauth.UserFromContext
-	ContextWithUser      = pkgauth.ContextWithUser
-	NewPermissionCache   = pkgauth.NewPermissionCache
-	DiscoverNamespaces   = pkgauth.DiscoverNamespaces
-	SubjectCanI          = pkgauth.SubjectCanI
-	FilterNamespacesForUser = pkgauth.FilterNamespacesForUser
-	CreateSessionCookie          = pkgauth.CreateSessionCookie
-	CreateSessionCookieWithIDToken = pkgauth.CreateSessionCookieWithIDToken
-	ParseSessionCookie           = pkgauth.ParseSessionCookie
-	ClearSessionCookie           = pkgauth.ClearSessionCookie
-	IDTokenFromCookie            = pkgauth.IDTokenFromCookie
+	UserFromContext          = pkgauth.UserFromContext
+	ContextWithUser          = pkgauth.ContextWithUser
+	NewPermissionCache       = pkgauth.NewPermissionCache
+	DiscoverNamespaces       = pkgauth.DiscoverNamespaces
+	SubjectCanI              = pkgauth.SubjectCanI
+	FilterNamespacesForUser  = pkgauth.FilterNamespacesForUser
+	CreateSessionCookie      = pkgauth.CreateSessionCookie
+	NewSessionID             = pkgauth.NewSessionID
+	ParseSessionCookie       = pkgauth.ParseSessionCookie
+	ClearSessionCookie       = pkgauth.ClearSessionCookie
 )

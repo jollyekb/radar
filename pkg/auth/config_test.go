@@ -32,8 +32,8 @@ func TestConfig_Defaults(t *testing.T) {
 	cfg := Config{Mode: "proxy"}
 	cfg.Defaults()
 
-	if cfg.CookieTTL != 24*time.Hour {
-		t.Errorf("CookieTTL = %v, want 24h", cfg.CookieTTL)
+	if cfg.CookieTTL != 4*time.Hour {
+		t.Errorf("CookieTTL = %v, want 4h", cfg.CookieTTL)
 	}
 	if cfg.UserHeader != "X-Forwarded-User" {
 		t.Errorf("UserHeader = %q, want %q", cfg.UserHeader, "X-Forwarded-User")

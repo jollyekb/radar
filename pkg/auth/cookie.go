@@ -2,8 +2,10 @@ package auth
 
 import (
 	"crypto/hmac"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -15,23 +17,71 @@ import (
 // DefaultCookieName is the default session cookie name
 const DefaultCookieName = "radar_session"
 
+// Session represents a parsed session cookie.
+type Session struct {
+	User      *User
+	SID       string    // stable session identifier (empty for pre-upgrade cookies)
+	IDToken   string    // raw OIDC id_token for RP-Initiated Logout
+	ExpiresAt time.Time // when the cookie expires
+}
+
 // cookiePayload is the data stored in the session cookie
 type cookiePayload struct {
 	Username  string   `json:"u"`
 	Groups    []string `json:"g,omitempty"`
 	ExpiresAt int64    `json:"e"`
 	IDToken   string   `json:"t,omitempty"` // raw OIDC id_token for RP-Initiated Logout
+	SID       string   `json:"s,omitempty"` // session ID for backchannel logout revocation
+}
+
+// NewSessionID generates a random 16-byte hex session ID.
+func NewSessionID() string {
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		panic(fmt.Sprintf("[auth] Failed to generate session ID: %v", err))
+	}
+	return hex.EncodeToString(b)
 }
 
 // CreateSessionCookie creates a signed session cookie for the given user.
-// Format: base64(json) + "." + base64(hmac-sha256)
-func CreateSessionCookie(user *User, secret string, ttl time.Duration, secure bool) *http.Cookie {
-	return CreateSessionCookieWithIDToken(user, "", secret, ttl, secure)
+// Format: base64(json) + "." + base64(hmac-sha256).
+// The sid must be non-empty — use NewSessionID() to generate one.
+func CreateSessionCookie(user *User, sid, idToken, secret string, ttl time.Duration, secure bool) *http.Cookie {
+	if sid == "" {
+		panic(fmt.Sprintf("[auth] CreateSessionCookie called with empty sid for user %s", user.Username))
+	}
+
+	payload := cookiePayload{
+		Username:  user.Username,
+		Groups:    user.Groups,
+		ExpiresAt: time.Now().Add(ttl).Unix(),
+		IDToken:   idToken,
+		SID:       sid,
+	}
+
+	data, err := json.Marshal(payload)
+	if err != nil {
+		log.Fatalf("[auth] Failed to marshal session cookie payload for user %s: %v", user.Username, err)
+	}
+	encoded := base64.RawURLEncoding.EncodeToString(data)
+
+	sig := signData(encoded, secret)
+
+	return &http.Cookie{
+		Name:     DefaultCookieName,
+		Value:    encoded + "." + sig,
+		Path:     "/",
+		HttpOnly: true,
+		Secure:   secure,
+		SameSite: http.SameSiteLaxMode,
+		MaxAge:   int(ttl.Seconds()),
+	}
 }
 
 // ParseSessionCookie validates and parses a session cookie.
 // Returns nil if the cookie is missing, invalid, or expired.
-func ParseSessionCookie(r *http.Request, secret string) *User {
+// Pre-upgrade cookies without a SID parse successfully with Session.SID == "".
+func ParseSessionCookie(r *http.Request, secret string) *Session {
 	cookie, err := r.Cookie(DefaultCookieName)
 	if err != nil {
 		return nil
@@ -68,76 +118,15 @@ func ParseSessionCookie(r *http.Request, secret string) *User {
 		return nil
 	}
 
-	return &User{
-		Username: p.Username,
-		Groups:   p.Groups,
+	return &Session{
+		User: &User{
+			Username: p.Username,
+			Groups:   p.Groups,
+		},
+		SID:       p.SID,
+		IDToken:   p.IDToken,
+		ExpiresAt: time.Unix(p.ExpiresAt, 0),
 	}
-}
-
-// CreateSessionCookieWithIDToken creates a signed session cookie that also stores
-// the raw OIDC ID token for use as id_token_hint during RP-Initiated Logout.
-func CreateSessionCookieWithIDToken(user *User, idToken string, secret string, ttl time.Duration, secure bool) *http.Cookie {
-	payload := cookiePayload{
-		Username:  user.Username,
-		Groups:    user.Groups,
-		ExpiresAt: time.Now().Add(ttl).Unix(),
-		IDToken:   idToken,
-	}
-
-	data, err := json.Marshal(payload)
-	if err != nil {
-		log.Fatalf("[auth] Failed to marshal session cookie payload for user %s: %v", user.Username, err)
-	}
-	encoded := base64.RawURLEncoding.EncodeToString(data)
-
-	sig := signData(encoded, secret)
-
-	return &http.Cookie{
-		Name:     DefaultCookieName,
-		Value:    encoded + "." + sig,
-		Path:     "/",
-		HttpOnly: true,
-		Secure:   secure,
-		SameSite: http.SameSiteLaxMode,
-		MaxAge:   int(ttl.Seconds()),
-	}
-}
-
-// IDTokenFromCookie extracts the raw OIDC ID token from the session cookie.
-// Returns "" if the cookie is missing, invalid, expired, or has no ID token.
-func IDTokenFromCookie(r *http.Request, secret string) string {
-	cookie, err := r.Cookie(DefaultCookieName)
-	if err != nil {
-		return ""
-	}
-
-	parts := strings.SplitN(cookie.Value, ".", 2)
-	if len(parts) != 2 {
-		return ""
-	}
-
-	encoded, sig := parts[0], parts[1]
-
-	expected := signData(encoded, secret)
-	if !hmac.Equal([]byte(sig), []byte(expected)) {
-		return ""
-	}
-
-	data, err := base64.RawURLEncoding.DecodeString(encoded)
-	if err != nil {
-		return ""
-	}
-
-	var p cookiePayload
-	if err := json.Unmarshal(data, &p); err != nil {
-		return ""
-	}
-
-	if time.Now().Unix() > p.ExpiresAt {
-		return ""
-	}
-
-	return p.IDToken
 }
 
 // ClearSessionCookie returns a cookie that clears the session
