@@ -129,7 +129,7 @@ func TestMiddleware_SessionCookie(t *testing.T) {
 
 	// Create a valid session cookie
 	user := &User{Username: "bob", Groups: []string{"ops"}}
-	cookie := CreateSessionCookie(user, cfg.Secret, cfg.CookieTTL, false)
+	cookie := CreateSessionCookie(user, NewSessionID(), "", cfg.Secret, cfg.CookieTTL, false)
 
 	req := httptest.NewRequest("GET", "/api/topology", nil)
 	req.AddCookie(cookie)
@@ -154,7 +154,7 @@ func TestMiddleware_SessionCookie_TakesPrecedence(t *testing.T) {
 	handler := mw(http.HandlerFunc(echoUser))
 
 	// Cookie says "bob", proxy header says "alice"
-	cookie := CreateSessionCookie(&User{Username: "bob"}, cfg.Secret, cfg.CookieTTL, false)
+	cookie := CreateSessionCookie(&User{Username: "bob"}, NewSessionID(), "", cfg.Secret, cfg.CookieTTL, false)
 
 	req := httptest.NewRequest("GET", "/api/topology", nil)
 	req.AddCookie(cookie)
@@ -191,7 +191,7 @@ func TestMiddleware_SoftAuthPath_WithUser(t *testing.T) {
 	handler := mw(http.HandlerFunc(echoUser))
 
 	// /api/auth/me with valid cookie should include user
-	cookie := CreateSessionCookie(&User{Username: "carol"}, cfg.Secret, cfg.CookieTTL, false)
+	cookie := CreateSessionCookie(&User{Username: "carol"}, NewSessionID(), "", cfg.Secret, cfg.CookieTTL, false)
 	req := httptest.NewRequest("GET", "/api/auth/me", nil)
 	req.AddCookie(cookie)
 	rec := httptest.NewRecorder()

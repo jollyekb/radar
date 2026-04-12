@@ -232,9 +232,20 @@ func (h *OIDCHandler) HandleCallback(w http.ResponseWriter, r *http.Request) {
 
 	user := &User{Username: username, Groups: groups}
 
+	// Extract session ID from ID token if present (needed for backchannel logout matching),
+	// otherwise generate a random one.
+	var sid string
+	if s, ok := claims["sid"].(string); ok && s != "" {
+		sid = s
+		log.Printf("[oidc] Using IdP-provided session ID (sid claim present)")
+	} else {
+		sid = NewSessionID()
+		log.Printf("[oidc] Generated local session ID (IdP did not provide sid claim)")
+	}
+
 	// Create session cookie (include raw ID token for RP-Initiated Logout)
 	secure := true // OIDC typically behind TLS
-	http.SetCookie(w, CreateSessionCookieWithIDToken(user, rawIDToken, h.cfg.Secret, h.cfg.CookieTTL, secure))
+	http.SetCookie(w, CreateSessionCookie(user, sid, rawIDToken, h.cfg.Secret, h.cfg.CookieTTL, secure))
 
 	log.Printf("[oidc] User %s authenticated (groups: %v)", username, groups)
 
@@ -248,7 +259,10 @@ func (h *OIDCHandler) HandleCallback(w http.ResponseWriter, r *http.Request) {
 // the SSO session.
 func (h *OIDCHandler) HandleLogout(w http.ResponseWriter, r *http.Request) {
 	// Extract ID token before clearing the cookie (needed as id_token_hint)
-	idToken := IDTokenFromCookie(r, h.cfg.Secret)
+	var idToken string
+	if session := ParseSessionCookie(r, h.cfg.Secret); session != nil {
+		idToken = session.IDToken
+	}
 
 	http.SetCookie(w, ClearSessionCookie())
 

@@ -28,8 +28,8 @@ func Authenticate(cfg Config) func(http.Handler) http.Handler {
 			secure := cfg.Mode == "oidc" || r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https"
 
 			// Try to get user from session cookie first
-			if user := ParseSessionCookie(r, cfg.Secret); user != nil {
-				ctx := ContextWithUser(r.Context(), user)
+			if session := ParseSessionCookie(r, cfg.Secret); session != nil {
+				ctx := ContextWithUser(r.Context(), session.User)
 				next.ServeHTTP(w, r.WithContext(ctx))
 				return
 			}
@@ -50,7 +50,8 @@ func Authenticate(cfg Config) func(http.Handler) http.Handler {
 					user := &User{Username: username, Groups: groups}
 
 					// Set session cookie so subsequent requests don't need headers
-					http.SetCookie(w, CreateSessionCookie(user, cfg.Secret, cfg.CookieTTL, secure))
+					// Header-auth creates a fresh session (new sid each time)
+					http.SetCookie(w, CreateSessionCookie(user, NewSessionID(), "", cfg.Secret, cfg.CookieTTL, secure))
 
 					ctx := ContextWithUser(r.Context(), user)
 					next.ServeHTTP(w, r.WithContext(ctx))

@@ -1,6 +1,8 @@
 package auth
 
 import (
+	"encoding/base64"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -10,9 +12,10 @@ import (
 func TestCreateAndParseSessionCookie(t *testing.T) {
 	secret := "test-secret-key"
 	user := &User{Username: "alice", Groups: []string{"devs", "admins"}}
+	sid := NewSessionID()
 	ttl := 1 * time.Hour
 
-	cookie := CreateSessionCookie(user, secret, ttl, false)
+	cookie := CreateSessionCookie(user, sid, "", secret, ttl, false)
 
 	// Verify cookie properties
 	if cookie.Name != DefaultCookieName {
@@ -39,17 +42,20 @@ func TestCreateAndParseSessionCookie(t *testing.T) {
 	if parsed == nil {
 		t.Fatal("ParseSessionCookie returned nil for valid cookie")
 	}
-	if parsed.Username != "alice" {
-		t.Errorf("username = %q, want %q", parsed.Username, "alice")
+	if parsed.User.Username != "alice" {
+		t.Errorf("username = %q, want %q", parsed.User.Username, "alice")
 	}
-	if len(parsed.Groups) != 2 || parsed.Groups[0] != "devs" || parsed.Groups[1] != "admins" {
-		t.Errorf("groups = %v, want [devs admins]", parsed.Groups)
+	if len(parsed.User.Groups) != 2 || parsed.User.Groups[0] != "devs" || parsed.User.Groups[1] != "admins" {
+		t.Errorf("groups = %v, want [devs admins]", parsed.User.Groups)
+	}
+	if parsed.SID != sid {
+		t.Errorf("SID = %q, want %q", parsed.SID, sid)
 	}
 }
 
 func TestParseSessionCookie_WrongSecret(t *testing.T) {
 	user := &User{Username: "alice"}
-	cookie := CreateSessionCookie(user, "secret-1", 1*time.Hour, false)
+	cookie := CreateSessionCookie(user, NewSessionID(), "", "secret-1", 1*time.Hour, false)
 
 	req := httptest.NewRequest("GET", "/", nil)
 	req.AddCookie(cookie)
@@ -63,7 +69,7 @@ func TestParseSessionCookie_WrongSecret(t *testing.T) {
 func TestParseSessionCookie_Expired(t *testing.T) {
 	user := &User{Username: "alice"}
 	// TTL of -1 second = already expired
-	cookie := CreateSessionCookie(user, "secret", -1*time.Second, false)
+	cookie := CreateSessionCookie(user, NewSessionID(), "", "secret", -1*time.Second, false)
 
 	req := httptest.NewRequest("GET", "/", nil)
 	req.AddCookie(cookie)
@@ -84,7 +90,7 @@ func TestParseSessionCookie_NoCookie(t *testing.T) {
 
 func TestParseSessionCookie_TamperedPayload(t *testing.T) {
 	user := &User{Username: "alice"}
-	cookie := CreateSessionCookie(user, "secret", 1*time.Hour, false)
+	cookie := CreateSessionCookie(user, NewSessionID(), "", "secret", 1*time.Hour, false)
 
 	// Tamper with the payload (change first char)
 	val := cookie.Value
@@ -115,7 +121,7 @@ func TestParseSessionCookie_MalformedValue(t *testing.T) {
 
 func TestCreateSessionCookie_Secure(t *testing.T) {
 	user := &User{Username: "alice"}
-	cookie := CreateSessionCookie(user, "secret", 1*time.Hour, true)
+	cookie := CreateSessionCookie(user, NewSessionID(), "", "secret", 1*time.Hour, true)
 	if !cookie.Secure {
 		t.Error("cookie should be Secure when secure=true")
 	}
@@ -123,7 +129,7 @@ func TestCreateSessionCookie_Secure(t *testing.T) {
 
 func TestCreateSessionCookie_NoGroups(t *testing.T) {
 	user := &User{Username: "bob"}
-	cookie := CreateSessionCookie(user, "secret", 1*time.Hour, false)
+	cookie := CreateSessionCookie(user, NewSessionID(), "", "secret", 1*time.Hour, false)
 
 	req := httptest.NewRequest("GET", "/", nil)
 	req.AddCookie(cookie)
@@ -132,11 +138,11 @@ func TestCreateSessionCookie_NoGroups(t *testing.T) {
 	if parsed == nil {
 		t.Fatal("ParseSessionCookie returned nil")
 	}
-	if parsed.Username != "bob" {
-		t.Errorf("username = %q, want %q", parsed.Username, "bob")
+	if parsed.User.Username != "bob" {
+		t.Errorf("username = %q, want %q", parsed.User.Username, "bob")
 	}
-	if len(parsed.Groups) != 0 {
-		t.Errorf("groups = %v, want empty", parsed.Groups)
+	if len(parsed.User.Groups) != 0 {
+		t.Errorf("groups = %v, want empty", parsed.User.Groups)
 	}
 }
 
@@ -174,14 +180,14 @@ func TestSignData_DifferentSecrets(t *testing.T) {
 	}
 }
 
-func TestCreateSessionCookieWithIDToken(t *testing.T) {
+func TestCreateSessionCookie_WithIDToken(t *testing.T) {
 	secret := "test-secret"
 	user := &User{Username: "alice", Groups: []string{"devs"}}
+	sid := NewSessionID()
 	idToken := "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.test-payload.test-sig"
 
-	cookie := CreateSessionCookieWithIDToken(user, idToken, secret, 1*time.Hour, false)
+	cookie := CreateSessionCookie(user, sid, idToken, secret, 1*time.Hour, false)
 
-	// Should still parse as a valid session cookie
 	req := httptest.NewRequest("GET", "/", nil)
 	req.AddCookie(cookie)
 
@@ -189,60 +195,126 @@ func TestCreateSessionCookieWithIDToken(t *testing.T) {
 	if parsed == nil {
 		t.Fatal("ParseSessionCookie returned nil for cookie with ID token")
 	}
-	if parsed.Username != "alice" {
-		t.Errorf("username = %q, want %q", parsed.Username, "alice")
+	if parsed.User.Username != "alice" {
+		t.Errorf("username = %q, want %q", parsed.User.Username, "alice")
 	}
-
-	// Should be able to extract ID token
-	got := IDTokenFromCookie(req, secret)
-	if got != idToken {
-		t.Errorf("IDTokenFromCookie = %q, want %q", got, idToken)
+	if parsed.IDToken != idToken {
+		t.Errorf("IDToken = %q, want %q", parsed.IDToken, idToken)
+	}
+	if parsed.SID != sid {
+		t.Errorf("SID = %q, want %q", parsed.SID, sid)
 	}
 }
 
-func TestIDTokenFromCookie_NoIDToken(t *testing.T) {
+func TestSessionIDToken_NoIDToken(t *testing.T) {
 	secret := "test-secret"
 	user := &User{Username: "alice"}
 
-	// Cookie created without ID token (e.g., proxy mode or pre-upgrade session)
-	cookie := CreateSessionCookie(user, secret, 1*time.Hour, false)
+	cookie := CreateSessionCookie(user, NewSessionID(), "", secret, 1*time.Hour, false)
 	req := httptest.NewRequest("GET", "/", nil)
 	req.AddCookie(cookie)
 
-	got := IDTokenFromCookie(req, secret)
-	if got != "" {
-		t.Errorf("IDTokenFromCookie = %q, want empty string", got)
+	parsed := ParseSessionCookie(req, secret)
+	if parsed == nil {
+		t.Fatal("ParseSessionCookie returned nil")
+	}
+	if parsed.IDToken != "" {
+		t.Errorf("IDToken = %q, want empty string", parsed.IDToken)
 	}
 }
 
-func TestIDTokenFromCookie_NoCookie(t *testing.T) {
-	req := httptest.NewRequest("GET", "/", nil)
-	got := IDTokenFromCookie(req, "secret")
-	if got != "" {
-		t.Errorf("IDTokenFromCookie = %q, want empty string", got)
-	}
-}
-
-func TestIDTokenFromCookie_WrongSecret(t *testing.T) {
+func TestCreateSessionCookie_WithSID(t *testing.T) {
+	secret := "test-secret"
 	user := &User{Username: "alice"}
-	cookie := CreateSessionCookieWithIDToken(user, "some-token", "secret-1", 1*time.Hour, false)
+	sid := "abcdef0123456789abcdef0123456789"
+
+	cookie := CreateSessionCookie(user, sid, "", secret, 1*time.Hour, false)
+
 	req := httptest.NewRequest("GET", "/", nil)
 	req.AddCookie(cookie)
 
-	got := IDTokenFromCookie(req, "secret-2")
-	if got != "" {
-		t.Errorf("IDTokenFromCookie should return empty string for wrong secret")
+	parsed := ParseSessionCookie(req, secret)
+	if parsed == nil {
+		t.Fatal("ParseSessionCookie returned nil")
+	}
+	if parsed.SID != sid {
+		t.Errorf("SID = %q, want %q", parsed.SID, sid)
 	}
 }
 
-func TestIDTokenFromCookie_Expired(t *testing.T) {
+func TestParseSessionCookie_LegacyCookieWithoutSID(t *testing.T) {
+	// Simulate a pre-upgrade cookie that doesn't have the "s" field
+	secret := "test-secret"
+	payload := struct {
+		Username  string   `json:"u"`
+		Groups    []string `json:"g,omitempty"`
+		ExpiresAt int64    `json:"e"`
+		IDToken   string   `json:"t,omitempty"`
+	}{
+		Username:  "alice",
+		Groups:    []string{"devs"},
+		ExpiresAt: time.Now().Add(1 * time.Hour).Unix(),
+	}
+
+	data, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded := base64.RawURLEncoding.EncodeToString(data)
+	sig := signData(encoded, secret)
+
+	req := httptest.NewRequest("GET", "/", nil)
+	req.AddCookie(&http.Cookie{
+		Name:  DefaultCookieName,
+		Value: encoded + "." + sig,
+	})
+
+	parsed := ParseSessionCookie(req, secret)
+	if parsed == nil {
+		t.Fatal("ParseSessionCookie should handle legacy cookies without sid")
+	}
+	if parsed.User.Username != "alice" {
+		t.Errorf("username = %q, want %q", parsed.User.Username, "alice")
+	}
+	if parsed.SID != "" {
+		t.Errorf("SID = %q, want empty string for legacy cookie", parsed.SID)
+	}
+}
+
+func TestNewSessionID_Unique(t *testing.T) {
+	id1 := NewSessionID()
+	id2 := NewSessionID()
+
+	if id1 == id2 {
+		t.Error("NewSessionID should produce unique values")
+	}
+	if len(id1) != 32 {
+		t.Errorf("NewSessionID length = %d, want 32 (16 bytes hex)", len(id1))
+	}
+	if len(id2) != 32 {
+		t.Errorf("NewSessionID length = %d, want 32 (16 bytes hex)", len(id2))
+	}
+}
+
+func TestParseSessionCookie_ExpiresAt(t *testing.T) {
+	secret := "test-secret"
 	user := &User{Username: "alice"}
-	cookie := CreateSessionCookieWithIDToken(user, "some-token", "secret", -1*time.Second, false)
+	ttl := 2 * time.Hour
+
+	cookie := CreateSessionCookie(user, NewSessionID(), "", secret, ttl, false)
+
 	req := httptest.NewRequest("GET", "/", nil)
 	req.AddCookie(cookie)
 
-	got := IDTokenFromCookie(req, "secret")
-	if got != "" {
-		t.Errorf("IDTokenFromCookie should return empty string for expired cookie")
+	parsed := ParseSessionCookie(req, secret)
+	if parsed == nil {
+		t.Fatal("ParseSessionCookie returned nil")
+	}
+
+	// ExpiresAt should be approximately now + ttl (within a few seconds)
+	expected := time.Now().Add(ttl)
+	diff := parsed.ExpiresAt.Sub(expected)
+	if diff < -5*time.Second || diff > 5*time.Second {
+		t.Errorf("ExpiresAt off by %v, want within 5s of now+2h", diff)
 	}
 }
