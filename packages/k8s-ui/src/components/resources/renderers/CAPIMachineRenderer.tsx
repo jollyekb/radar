@@ -1,6 +1,7 @@
-import { Cpu, Server, Network } from 'lucide-react'
+import { Cpu, Server, Network, Cloud } from 'lucide-react'
 import { Section, PropertyList, Property, ConditionsSection, AlertBanner, ResourceLink } from '../../ui/drawer-components'
-import { getMachineStatus, getMachineRole, getMachineClusterName, getMachineNodeRef, getMachineVersion, getMachineProviderID } from '../resource-utils-capi'
+import { kindToPlural } from '../../../utils/navigation'
+import { getMachineStatus, getMachineRole, getMachineClusterName, getMachineNodeRef, getMachineVersion, getMachineProviderID, parseProviderID, getProviderFromInfraKind } from '../resource-utils-capi'
 
 interface Props {
   data: any
@@ -27,6 +28,8 @@ export function CAPIMachineRenderer({ data, onNavigate }: Props) {
   const nodeRef = status.nodeRef || {}
   const bootstrapRef = spec.bootstrap?.configRef || {}
   const infraRef = spec.infrastructureRef || {}
+  const parsedProvider = parseProviderID(providerID)
+  const infraProvider = infraRef.kind ? getProviderFromInfraKind(infraRef.kind) : parsedProvider?.provider
 
   return (
     <>
@@ -45,10 +48,23 @@ export function CAPIMachineRenderer({ data, onNavigate }: Props) {
           <Property label="Role" value={role} />
           <Property label="Cluster" value={clusterName} />
           <Property label="Version" value={version} />
-          {providerID !== '-' && <Property label="Provider ID" value={providerID} />}
+          {infraProvider && <Property label="Provider" value={infraProvider} />}
           {spec.failureDomain && <Property label="Failure Domain" value={spec.failureDomain} />}
         </PropertyList>
       </Section>
+
+      {/* Infrastructure (parsed from providerID) */}
+      {parsedProvider && (
+        <Section title="Infrastructure" icon={Cloud}>
+          <PropertyList>
+            {parsedProvider.region && <Property label="Zone / Region" value={parsedProvider.region} />}
+            {parsedProvider.instanceId && <Property label="Instance ID" value={parsedProvider.instanceId} />}
+            {providerID !== '-' && <Property label="Provider ID" value={
+              <span className="font-mono text-[10px] break-all">{providerID}</span>
+            } />}
+          </PropertyList>
+        </Section>
+      )}
 
       {/* Node Reference */}
       {nodeName !== '-' && (
@@ -79,7 +95,16 @@ export function CAPIMachineRenderer({ data, onNavigate }: Props) {
               <Property label="Bootstrap" value={`${bootstrapRef.kind}/${bootstrapRef.name}`} />
             )}
             {infraRef.kind && (
-              <Property label="Infrastructure" value={`${infraRef.kind}/${infraRef.name}`} />
+              <Property label="Infrastructure" value={
+                <ResourceLink
+                  name={infraRef.name}
+                  kind={kindToPlural(infraRef.kind)}
+                  namespace={infraRef.namespace || data.metadata?.namespace}
+                  group={infraRef.apiVersion?.split('/')?.[0]}
+                  label={`${infraRef.kind}/${infraRef.name}`}
+                  onNavigate={onNavigate}
+                />
+              } />
             )}
           </PropertyList>
         </Section>

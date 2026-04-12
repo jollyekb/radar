@@ -135,6 +135,64 @@ export function getMachineProviderID(resource: any): string {
 }
 
 // ============================================================================
+// PROVIDER DETECTION UTILITIES
+// ============================================================================
+
+export interface InfraProvider {
+  provider: string        // 'AWS' | 'GCP' | 'Azure' | 'vSphere' | 'Docker' | unknown
+  region?: string         // availability zone or region
+  instanceId?: string     // cloud instance identifier
+}
+
+/** Parse spec.providerID to extract cloud provider, region, and instance ID */
+export function parseProviderID(providerID: string): InfraProvider | null {
+  if (!providerID || providerID === '-') return null
+
+  // AWS: aws:///us-east-1a/i-0abcdef1234567890
+  if (providerID.startsWith('aws://')) {
+    const parts = providerID.replace('aws:///', '').split('/')
+    return { provider: 'AWS', region: parts[0] || undefined, instanceId: parts[1] || undefined }
+  }
+
+  // GCP: gce:///my-project/us-central1-a/my-instance
+  if (providerID.startsWith('gce://')) {
+    const parts = providerID.replace('gce:///', '').split('/')
+    return { provider: 'GCP', region: parts[1] || undefined, instanceId: parts[2] || undefined }
+  }
+
+  // Azure: azure:///subscriptions/{sub}/resourceGroups/{rg}/providers/Microsoft.Compute/virtualMachines/{name}
+  if (providerID.startsWith('azure://')) {
+    const vmMatch = providerID.match(/virtualMachines\/([^/]+)/)
+    const rgMatch = providerID.match(/resourceGroups\/([^/]+)/)
+    return { provider: 'Azure', region: rgMatch?.[1], instanceId: vmMatch?.[1] }
+  }
+
+  // vSphere: vsphere://42305a8e-...
+  if (providerID.startsWith('vsphere://')) {
+    return { provider: 'vSphere', instanceId: providerID.replace('vsphere://', '') }
+  }
+
+  // Docker (CAPD): docker:///container-name
+  if (providerID.startsWith('docker://')) {
+    return { provider: 'Docker', instanceId: providerID.replace('docker:///', '') }
+  }
+
+  return { provider: providerID.split(':')[0] || 'Unknown' }
+}
+
+/** Detect provider from an infrastructureRef kind name */
+export function getProviderFromInfraKind(kind: string): string {
+  const k = kind.toLowerCase()
+  if (k.startsWith('aws') || k.startsWith('ec2')) return 'AWS'
+  if (k.startsWith('gcp') || k.startsWith('gce')) return 'GCP'
+  if (k.startsWith('azure') || k.startsWith('aks')) return 'Azure'
+  if (k.startsWith('vsphere')) return 'vSphere'
+  if (k.startsWith('docker')) return 'Docker'
+  if (k.startsWith('metal') || k.startsWith('byoh')) return 'Bare Metal'
+  return kind // Return raw kind as fallback
+}
+
+// ============================================================================
 // CAPI MACHINEDEPLOYMENT UTILITIES
 // ============================================================================
 

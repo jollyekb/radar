@@ -743,10 +743,15 @@ func summarizeCAPIMachine(obj *unstructured.Unstructured) *ResourceSummary {
 		s.Node = nodeName
 	}
 
-	// Provider ID
+	// Provider — parse from providerID or infrastructureRef
 	providerID, _, _ := unstructured.NestedString(obj.Object, "spec", "providerID")
 	if providerID != "" {
-		s.Type = providerID
+		s.Type = parseProviderName(providerID)
+	} else {
+		infraKind, _, _ := unstructured.NestedString(obj.Object, "spec", "infrastructureRef", "kind")
+		if infraKind != "" {
+			s.Type = infraKind
+		}
 	}
 
 	return s
@@ -948,6 +953,35 @@ func extractCAPICondition(obj *unstructured.Unstructured) string {
 	}
 
 	return bestStatus
+}
+
+// parseProviderName extracts a short provider label from a CAPI providerID URI.
+// e.g., "aws:///us-east-1a/i-123" → "AWS/us-east-1a", "gce:///proj/zone/inst" → "GCP/zone"
+func parseProviderName(providerID string) string {
+	switch {
+	case strings.HasPrefix(providerID, "aws://"):
+		parts := strings.Split(strings.TrimPrefix(providerID, "aws:///"), "/")
+		if len(parts) >= 1 && parts[0] != "" {
+			return "AWS/" + parts[0]
+		}
+		return "AWS"
+	case strings.HasPrefix(providerID, "gce://"):
+		parts := strings.Split(strings.TrimPrefix(providerID, "gce:///"), "/")
+		if len(parts) >= 2 && parts[1] != "" {
+			return "GCP/" + parts[1]
+		}
+		return "GCP"
+	case strings.HasPrefix(providerID, "azure://"):
+		return "Azure"
+	case strings.HasPrefix(providerID, "vsphere://"):
+		return "vSphere"
+	case strings.HasPrefix(providerID, "docker://"):
+		return "Docker"
+	}
+	if i := strings.Index(providerID, ":"); i > 0 {
+		return providerID[:i]
+	}
+	return providerID
 }
 
 // extractConditionByType extracts the status of a specific condition type from a K8s resource.

@@ -288,6 +288,7 @@ Use `/visual-test` command for the full workflow (cluster check, Playwright MCP,
 - GitOps: `/api/argo/applications/...`, `/api/flux/{kind}/...`
 - Nodes: `/api/nodes/{name}/...` (cordon, uncordon, drain, debug)
 - Audit: `/api/audit`, `/api/audit/resource/{kind}/{ns}/{name}`, `/api/settings/audit` (GET/PUT)
+- CAPI: `/api/capi/clusters/{ns}/{name}/kubeconfig` (GET), `/api/capi/clusters/{ns}/{name}/connect` (POST)
 
 ## Key Patterns
 
@@ -322,7 +323,7 @@ Use `/visual-test` command for the full workflow (cluster check, Playwright MCP,
 - Two view modes:
   - `traffic`: Network flow (Ingress/Gateway → HTTPRoute → Service → Pod, also IstioGateway → VirtualService → Service, also IngressRoute → TraefikService → Service)
   - `resources`: Full hierarchy (Deployment → ReplicaSet → Pod)
-- Node types: Internet, Ingress, Gateway, GatewayClass, HTTPRoute, GRPCRoute, TCPRoute, TLSRoute, Service, Deployment, DaemonSet, StatefulSet, ReplicaSet, Pod, Job, CronJob, ConfigMap, Secret, HorizontalPodAutoscaler, PersistentVolumeClaim, PersistentVolume, StorageClass, PodDisruptionBudget, VerticalPodAutoscaler, Rollout (Argo), Node, Namespace, NodePool, NodeClaim, NodeClass (Karpenter), ScaledObject, ScaledJob (KEDA), NetworkPolicy, CiliumNetworkPolicy, CiliumClusterwideNetworkPolicy
+- Node types: Internet, Ingress, Gateway, GatewayClass, HTTPRoute, GRPCRoute, TCPRoute, TLSRoute, Service, Deployment, DaemonSet, StatefulSet, ReplicaSet, Pod, Job, CronJob, ConfigMap, Secret, HorizontalPodAutoscaler, PersistentVolumeClaim, PersistentVolume, StorageClass, PodDisruptionBudget, VerticalPodAutoscaler, Rollout (Argo), Node, Namespace, NodePool, NodeClaim, NodeClass (Karpenter), ScaledObject, ScaledJob (KEDA), NetworkPolicy, CiliumNetworkPolicy, CiliumClusterwideNetworkPolicy, CAPICluster (Cluster API), MachineDeployment, MachineSet, Machine, MachinePool, KubeadmControlPlane, ClusterClass, MachineHealthCheck
 - Edge type semantics (these drive UI grouping in Related Resources): `EdgeManages` (owner), `EdgeUses` (autoscalers like HPA/VPA/KEDA → Scalers group), `EdgeProtects` (PDB/NetworkPolicy/CiliumNetworkPolicy → Policies group), `EdgeConfigures` (ConfigMap/Secret/DestinationRule), `EdgeExposes` (Service/Ingress/Gateway/VirtualService). Choose the right edge type — don't reuse one just because the code pattern is similar.
 - Istio service mesh nodes: VirtualService, DestinationRule, IstioGateway (note: uses "istiogateway" node ID prefix to disambiguate from Gateway API's "gateway")
   - VirtualService → Service edges (EdgeExposes, via spec.http/tcp/tls route destinations, parses short/FQDN Istio host format)
@@ -351,6 +352,19 @@ Use `/visual-test` command for the full workflow (cluster check, Playwright MCP,
   - IngressRoute → TLSOption/TLSStore edges (EdgeConfigures, via spec.tls.options/store)
   - Traffic view uses two-phase processing for TraefikService (Phase 1: nodes + ID map, Phase 2: edges) to handle forward references
   - Kubernetes informers strip kind/apiVersion from cached objects — use stored prefix from `def.prefix` for ServersTransport lookups, not `GetKind()`
+- Cluster API (CAPI) nodes: CAPICluster, MachineDeployment, MachineSet, Machine, MachinePool, KubeadmControlPlane, ClusterClass, MachineHealthCheck
+  - Uses "capicluster/" node ID prefix to disambiguate from CNPG's Cluster (postgresql.cnpg.io)
+  - Uses `GetGVRWithGroup("Cluster", "cluster.x-k8s.io")` for collision-prone kinds (Cluster, Machine, MachineSet)
+  - Cluster → KCP edges (EdgeManages, via ownerRef on KCP)
+  - Cluster → MachineDeployment/MachinePool edges (EdgeManages, via ownerRef)
+  - MachineDeployment → MachineSet → Machine chain (EdgeManages, via ownerRef)
+  - KubeadmControlPlane → Machine edges (EdgeManages, via ownerRef)
+  - Machine → Node edges (EdgeManages, via status.nodeRef.name — semantic, not owner-ref)
+  - ClusterClass → Cluster edges (EdgeConfigures, via spec.topology.class match)
+  - MachineHealthCheck → Cluster edges (EdgeProtects, via ownerRef)
+  - v1beta1/v1beta2 dual support: status extractors check status.v1beta2.conditions then fall back to status.conditions
+  - Frontend detects CAPI vs CNPG clusters via `data?.apiVersion?.includes('cluster.x-k8s.io')`
+  - Topology-controlled badge: resources with label `topology.cluster.x-k8s.io/owned` show a warning banner
 - GitOps nodes: Application (ArgoCD), Kustomization, HelmRelease, GitRepository (FluxCD)
   - Connected to managed resources via status.resources (ArgoCD) or status.inventory (FluxCD Kustomization)
   - HelmRelease connects to resources via FluxCD labels (`helm.toolkit.fluxcd.io/name`) or standard Helm label (`app.kubernetes.io/instance`). Matches Deployment, Service, StatefulSet, DaemonSet, Job, CronJob, Rollout.
@@ -472,7 +486,7 @@ Error responses are parsed as `{"error": "message"}` and displayed in toasts.
 - Use `AlertBanner` for problem detection, `ProblemAlerts` for multiple warnings/errors, `ConditionsSection` for K8s conditions
 - Use `LabelSelectorDisplay` for rendering K8s label selectors — handles `matchLabels` + `matchExpressions` + flat selectors. Never hand-roll selector badge rendering.
 - Long text in alerts/banners needs `break-all` class for CSS word breaking
-- **Kind collision rule:** When a CRD kind collides with a core K8s kind (e.g., Knative Service vs core Service), you must guard THREE places in `ResourceRendererDispatch.tsx`: (1) the core renderer line, (2) `getResourceStatus()`, (3) action buttons (Port Forward, etc.). Use `data?.apiVersion?.includes('group.name')` checks. Missing any one causes dual rendering bugs.
+- **Kind collision rule:** When a CRD kind collides with a core K8s kind (e.g., Knative Service vs core Service) or two CRD kinds collide (e.g., CNPG Cluster `postgresql.cnpg.io` vs CAPI Cluster `cluster.x-k8s.io`), you must guard THREE places in `ResourceRendererDispatch.tsx`: (1) the core renderer line, (2) `getResourceStatus()`, (3) action buttons (Port Forward, etc.). Use `data?.apiVersion?.includes('group.name')` checks. Missing any one causes dual rendering bugs.
 - Core K8s renderers: Pod, Service, ConfigMap, Secret, Ingress, PersistentVolume, ReplicaSet, StorageClass, NetworkPolicy, Event, Workload (Deployment/StatefulSet/DaemonSet), Role, ClusterRole, RoleBinding, ClusterRoleBinding, ServiceAccount, IngressClass, PriorityClass, RuntimeClass, Lease, MutatingWebhookConfiguration, ValidatingWebhookConfiguration
 - 100+ CRD renderer components across 20+ integrations — see `packages/k8s-ui/src/components/resources/renderers/` for the full list, and **[docs/INTEGRATION_GUIDE.md](docs/INTEGRATION_GUIDE.md)** for the step-by-step checklist when adding new ones
 

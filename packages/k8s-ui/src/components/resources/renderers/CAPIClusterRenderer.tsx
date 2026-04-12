@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { Server, Globe, Network, Layers, Download, CheckCircle, AlertCircle } from 'lucide-react'
 import { Section, PropertyList, Property, ConditionsSection, AlertBanner, ResourceLink } from '../../ui/drawer-components'
 import { kindToPlural } from '../../../utils/navigation'
-import { getClusterStatus, getClusterClass, getClusterVersion, getClusterEndpoint } from '../resource-utils-capi'
+import { getClusterStatus, getClusterClass, getClusterVersion, getClusterEndpoint, getProviderFromInfraKind } from '../resource-utils-capi'
 
 interface Props {
   data: any
@@ -106,6 +106,7 @@ export function CAPIClusterRenderer({ data, onNavigate, apiBase = '' }: Props) {
         <PropertyList>
           <Property label="Phase" value={phase} />
           <Property label="Version" value={version} />
+          {infrastructureRef.kind && <Property label="Provider" value={getProviderFromInfraKind(infrastructureRef.kind)} />}
           {className !== '-' && <Property label="Cluster Class" value={className} />}
           {endpoint !== '-' && <Property label="Control Plane Endpoint" value={endpoint} />}
           {spec.paused && <Property label="Paused" value="Yes" />}
@@ -174,7 +175,16 @@ export function CAPIClusterRenderer({ data, onNavigate, apiBase = '' }: Props) {
             />
           )}
           {infrastructureRef.kind && (
-            <Property label="Infrastructure" value={`${infrastructureRef.kind}/${infrastructureRef.name}`} />
+            <Property label="Infrastructure" value={
+              <ResourceLink
+                name={infrastructureRef.name}
+                kind={kindToPlural(infrastructureRef.kind)}
+                namespace={infrastructureRef.namespace || data.metadata?.namespace}
+                group={infrastructureRef.apiVersion?.split('/')?.[0]}
+                label={`${infrastructureRef.kind}/${infrastructureRef.name}`}
+                onNavigate={onNavigate}
+              />
+            } />
           )}
         </PropertyList>
       </Section>

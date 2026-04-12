@@ -65,6 +65,80 @@ All provider-specific NodeClass variants are automatically detected and supporte
 
 ---
 
+## Cluster API (CAPI)
+
+[Cluster API](https://cluster-api.sigs.k8s.io/) is the Kubernetes sub-project for declarative cluster lifecycle management. Used by platform teams to provision and manage workload clusters.
+
+### What Radar Shows
+
+**Topology:** Full CAPI ownership chain — ClusterClass → Cluster → KubeadmControlPlane → Machine → Node, and Cluster → MachineDeployment → MachineSet → Machine → Node. MachineHealthCheck → Cluster protection edges. Machine → Node edges use status.nodeRef (semantic, not owner-ref).
+
+**Cluster Detail View:**
+- Phase, version, cluster class, control plane endpoint
+- Control plane and worker replica counts (v1beta2-aware)
+- Control plane and infrastructure references (clickable)
+- ClusterClass topology section (worker MachineDeployments table)
+- "Connect to Cluster" button — auto-connects Radar to the workload cluster
+- "Download Kubeconfig" button
+- Conditions
+
+**Machine Detail View:**
+- Phase, role (Control Plane / Worker), version, provider ID
+- Clickable Node reference (via status.nodeRef)
+- Addresses table, node info (OS, architecture, kernel, kubelet)
+- Bootstrap and infrastructure references
+
+**MachineDeployment Detail View:**
+- Phase, replicas (desired/ready/available/up-to-date), strategy
+- Version, cluster name
+- Machine template references
+- Owned machines label hint (copyable)
+
+**KubeadmControlPlane Detail View:**
+- Replicas, version, initialized status (v1beta2-aware)
+- Machine template with drain/volume detach/deletion timeouts
+- Kubeadm config highlights (cert SANs)
+- Last remediation info
+- Owned machines label hint
+
+**ClusterClass Detail View:**
+- Infrastructure, control plane, worker topology tables
+- Variables with schema types
+- Patches with definitions and enabledIf expressions
+
+**MachineHealthCheck Detail View:**
+- Expected/healthy machine counts, remediations allowed
+- Label selector display
+- Unhealthy conditions tables (v1beta1 + v1beta2 formats)
+- Remediation template
+
+**Additional renderers:** MachineSet, MachinePool, MachineDrainRule, KubeadmConfig/Template
+
+**Resource Browser:** Smart columns for all CAPI kinds — phase badges, replica counts, cluster names, roles, versions.
+
+**Topology-controlled badge:** Resources managed by ClusterClass (label `topology.cluster.x-k8s.io/owned`) show a warning banner.
+
+### Supported CRDs
+
+| CRD | Group | Topology | Detail View | AI Summary |
+|-----|-------|----------|-------------|------------|
+| Cluster | `cluster.x-k8s.io` | Yes | Yes | Yes |
+| ClusterClass | `cluster.x-k8s.io` | Yes | Yes | Yes |
+| Machine | `cluster.x-k8s.io` | Yes | Yes | Yes |
+| MachineSet | `cluster.x-k8s.io` | Yes | Yes | Yes |
+| MachineDeployment | `cluster.x-k8s.io` | Yes | Yes | Yes |
+| MachinePool | `cluster.x-k8s.io` | Yes | Yes | Yes |
+| MachineHealthCheck | `cluster.x-k8s.io` | Yes | Yes | Yes |
+| MachineDrainRule | `cluster.x-k8s.io` | No | Yes | No |
+| KubeadmControlPlane | `controlplane.cluster.x-k8s.io` | Yes | Yes | Yes |
+| KubeadmControlPlaneTemplate | `controlplane.cluster.x-k8s.io` | No | Generic | No |
+| KubeadmConfig | `bootstrap.cluster.x-k8s.io` | No | Yes | No |
+| KubeadmConfigTemplate | `bootstrap.cluster.x-k8s.io` | No | Generic | No |
+
+Provider-specific CRDs (AWSMachine, AzureMachine, etc.) are automatically discovered and displayed with generic columns.
+
+---
+
 ## KEDA
 
 [KEDA](https://keda.sh/) (Kubernetes Event-Driven Autoscaling) is a CNCF graduated project that scales workloads based on external event sources — queues, streams, cron schedules, Prometheus metrics, and 60+ other triggers.
