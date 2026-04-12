@@ -11,6 +11,7 @@ import {
   getKCPStatus, getKCPReplicas, getKCPVersion, getKCPInitialized,
   getClusterClassStatus,
   getMachineHealthCheckStatus, getMachineHealthCheckHealthy, getMachineHealthCheckClusterName,
+  getClusterProvider,
 } from '../resource-utils-capi'
 
 function StatusBadge({ resource, getStatus }: { resource: any; getStatus: (r: any) => { text: string; color: string } }) {
@@ -30,6 +31,8 @@ export function CAPIClusterCell({ resource, column }: { resource: any; column: s
   switch (column) {
     case 'phase':
       return <StatusBadge resource={resource} getStatus={getClusterStatus} />
+    case 'provider':
+      return <TextCell value={getClusterProvider(resource)} />
     case 'class':
       return <TextCell value={getClusterClass(resource)} />
     case 'cpReplicas':

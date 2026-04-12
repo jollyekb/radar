@@ -118,6 +118,40 @@ All provider-specific NodeClass variants are automatically detected and supporte
 
 **Topology-controlled badge:** Resources managed by ClusterClass (label `topology.cluster.x-k8s.io/owned`) show a warning banner.
 
+**Fleet topology mode:** Dedicated "Fleet" view in topology filters CAPI and infrastructure provider resources, giving a clean cluster-management view without application workload noise.
+
+![CAPI Fleet Topology](images/capi/topology.png)
+
+### AWS Infrastructure Provider
+
+Radar has first-class support for AWS CAPI provider resources (CAPA). These renderers surface EKS-specific operational data — instance types, scaling config, VPC topology, security groups, EKS addons — that would otherwise be buried in raw YAML.
+
+**AWSManagedControlPlane** (EKS control plane):
+
+![AWSManagedControlPlane Detail](images/capi/aws-controlplane.png)
+
+- EKS cluster name, region, version, endpoint access (public/private)
+- VPC ID and CIDR, subnets table with AZ and Public/Private badges
+- Security groups (cluster, node, node-eks-additional)
+- EKS addons with version and status (vpc-cni, coredns, kube-proxy)
+- NAT gateway IPs, failure domains, IAM role
+- 18 conditions
+
+**AWSManagedMachinePool** (EKS managed node group):
+
+![AWSManagedMachinePool Detail](images/capi/aws-machinepool.png)
+
+- Node group name, instance type, AMI type, capacity type (On-Demand/Spot badge)
+- Scaling config (min/max/current), update config
+- Subnet IDs, node labels, IAM role
+
+**AWSMachine** (EC2 instance):
+- Instance type, ID, state badge (running/pending/terminated)
+- Provider ID, subnet, IAM instance profile
+- Addresses table, conditions
+
+**AWSMachineTemplate**, **AWSManagedCluster**: Lightweight renderers for instance templates (with resolved capacity from status) and cluster stubs (endpoint + failure domains).
+
 ### Supported CRDs
 
 | CRD | Group | Topology | Detail View | AI Summary |
@@ -134,8 +168,11 @@ All provider-specific NodeClass variants are automatically detected and supporte
 | KubeadmControlPlaneTemplate | `controlplane.cluster.x-k8s.io` | No | Generic | No |
 | KubeadmConfig | `bootstrap.cluster.x-k8s.io` | No | Yes | No |
 | KubeadmConfigTemplate | `bootstrap.cluster.x-k8s.io` | No | Generic | No |
-
-Provider-specific CRDs (AWSMachine, AzureMachine, etc.) are automatically discovered and displayed with generic columns.
+| AWSManagedControlPlane | `controlplane.cluster.x-k8s.io` | Yes | Yes | No |
+| AWSManagedMachinePool | `infrastructure.cluster.x-k8s.io` | Yes | Yes | No |
+| AWSMachine | `infrastructure.cluster.x-k8s.io` | Yes | Yes | No |
+| AWSMachineTemplate | `infrastructure.cluster.x-k8s.io` | No | Yes | No |
+| AWSManagedCluster | `infrastructure.cluster.x-k8s.io` | No | Yes | No |
 
 ---
 

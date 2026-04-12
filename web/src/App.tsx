@@ -41,7 +41,7 @@ import { useTheme } from './context/ThemeContext'
 import { Tooltip } from './components/ui/Tooltip'
 import { LargeClusterNamespacePicker } from './components/shared/LargeClusterNamespacePicker'
 import { SettingsDialog } from './components/settings/SettingsDialog'
-import type { TopologyNode, GroupingMode, MainView, SelectedResource, SelectedHelmRelease, NodeKind, Topology, K8sEvent } from './types'
+import type { TopologyNode, GroupingMode, MainView, SelectedResource, SelectedHelmRelease, NodeKind, TopologyMode, Topology, K8sEvent } from './types'
 import { kindToPlural, openExternal } from './utils/navigation'
 
 // All possible node kinds (core + GitOps)
@@ -65,6 +65,17 @@ const DEFAULT_VISIBLE_KINDS = ALL_NODE_KINDS.filter(k => k !== 'ReplicaSet')
 // CRD kinds hidden by default in the topology (infrastructure plumbing).
 // Users can re-enable via the filter sidebar.
 const CRD_HIDDEN_BY_DEFAULT = new Set(['GatewayClass', 'IngressClass', 'NodePool', 'NodeClaim', 'NodeClass'])
+
+// CAPI kinds shown in Fleet topology mode (+ Node for Machine→Node edges)
+// Includes core CAPI kinds and AWS infrastructure provider kinds
+const FLEET_MODE_KINDS = new Set<NodeKind>([
+  'CAPICluster', 'MachineDeployment', 'MachineSet', 'Machine', 'MachinePool',
+  'KubeadmControlPlane', 'ClusterClass', 'MachineHealthCheck', 'Node',
+  // AWS provider infrastructure resources (kind names from dynamic CRD discovery)
+  'AWSManagedControlPlane', 'AWSManagedMachinePool', 'AWSMachine',
+  'AWSMachineTemplate', 'AWSManagedCluster', 'AWSClusterControllerIdentity',
+  'EKSConfig', 'EKSConfigTemplate',
+])
 
 // Convert API resource name back to topology node ID prefix
 function apiResourceToNodeIdPrefix(apiResource: string): string {
@@ -188,7 +199,7 @@ function AppInner() {
     const namespaces = parseNamespacesFromURL(searchParams)
     return {
       namespaces,
-      topologyMode: (searchParams.get('mode') as 'resources' | 'traffic') || 'resources',
+      topologyMode: (searchParams.get('mode') as TopologyMode) || 'resources',
       // Default to namespace grouping when viewing all namespaces
       grouping: (searchParams.get('group') as GroupingMode) || (namespaces.length === 0 ? 'namespace' : 'none'),
     }
@@ -224,7 +235,7 @@ function AppInner() {
   const [selectedResource, setSelectedResource] = useState<SelectedResource | null>(null)
   const [drawerInitialTab, setDrawerInitialTab] = useState<'detail' | 'yaml'>('detail')
   const [selectedHelmRelease, setSelectedHelmRelease] = useState<SelectedHelmRelease | null>(null)
-  const [topologyMode, setTopologyMode] = useState<'resources' | 'traffic'>(getInitialState().topologyMode)
+  const [topologyMode, setTopologyMode] = useState<TopologyMode>(getInitialState().topologyMode)
   const [groupingMode, setGroupingMode] = useState<GroupingMode>(getInitialState().grouping)
   const [showPolicyEffect, setShowPolicyEffect] = useState(false)
   // Topology filter state
@@ -448,7 +459,9 @@ function AppInner() {
 
   // SSE connection for real-time updates — no namespace filter for small/medium clusters (frontend filters).
   // forceNamespaceFilter is only set for large clusters that require server-side filtering.
-  const { topology, connected, reconnect: reconnectSSE } = useEventSource(namespaces, topologyMode, {
+  // Fleet mode uses 'resources' topology on the backend — filtering is client-side
+  const sseMode = topologyMode === 'fleet' ? 'resources' : topologyMode
+  const { topology, connected, reconnect: reconnectSSE } = useEventSource(namespaces, sseMode as 'resources' | 'traffic', {
     onContextSwitchComplete: endSwitch,
     onContextSwitchProgress: updateProgress,
     onContextChanged: () => {
@@ -668,10 +681,13 @@ function AppInner() {
   const filteredTopology = useMemo((): Topology | null => {
     if (!displayedTopology) return null
 
+    // Fleet mode overrides visible kinds to show only CAPI resources + Node
+    const effectiveKinds = topologyMode === 'fleet' ? FLEET_MODE_KINDS : visibleKinds
+
     // Filter by namespace (frontend-side) and by visible kinds
     const nsSet = namespaces.length > 0 ? new Set(namespaces) : null
     const filteredNodes = displayedTopology.nodes.filter(node =>
-      visibleKinds.has(node.kind) &&
+      effectiveKinds.has(node.kind) &&
       (!nsSet || nsSet.has(node.data.namespace as string) || !(node.data.namespace as string))
     )
     const filteredNodeIds = new Set(filteredNodes.map(n => n.id))
@@ -684,7 +700,7 @@ function AppInner() {
         return false
       }
       // If this is a shortcut edge, hide it when the intermediate kind is visible
-      if (edge.skipIfKindVisible && visibleKinds.has(edge.skipIfKindVisible as NodeKind)) {
+      if (edge.skipIfKindVisible && effectiveKinds.has(edge.skipIfKindVisible as NodeKind)) {
         return false
       }
       return true
@@ -694,7 +710,7 @@ function AppInner() {
       nodes: filteredNodes,
       edges: filteredEdges,
     }
-  }, [displayedTopology, visibleKinds, namespaces])
+  }, [displayedTopology, visibleKinds, namespaces, topologyMode])
 
   // Filter handlers
   const handleToggleKind = useCallback((kind: NodeKind) => {
@@ -1076,6 +1092,7 @@ function AppInner() {
                     showNoGrouping={hasNamespaceFilter}
                     showPolicyEffect={showPolicyEffect}
                     onShowPolicyEffectChange={setShowPolicyEffect}
+                    showFleetMode={displayedTopology?.nodes?.some(n => FLEET_MODE_KINDS.has(n.kind as NodeKind)) ?? false}
                   />
                 </div>
               </>

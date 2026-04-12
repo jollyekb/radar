@@ -140,6 +140,7 @@ import { KnativeServiceCell, ConfigurationCell as KnativeConfigurationCell, Revi
 import { IngressRouteCell, MiddlewareCell, TraefikServiceCell, ServersTransportCell, TLSOptionCell } from './renderers/traefik-cells'
 import { HTTPProxyCell } from './renderers/contour-cells'
 import { CAPIClusterCell, CAPIMachineCell, CAPIMachineDeploymentCell, CAPIMachineSetCell, CAPIMachinePoolCell, CAPIKubeadmControlPlaneCell, CAPIClusterClassCell, CAPIMachineHealthCheckCell } from './renderers/capi-cells'
+import { AWSManagedControlPlaneCell, AWSManagedMachinePoolCell, AWSMachineCell, AWSMachineTemplateCell, AWSManagedClusterCell } from './renderers/aws-capi-cells'
 import { useRegisterShortcut, useRegisterShortcuts } from '../../hooks/useKeyboardShortcuts'
 import { ResourcesSidebar } from './ResourcesSidebar'
 import type { SelectedKindInfo } from './ResourcesSidebar'
@@ -1285,9 +1286,10 @@ const KNOWN_COLUMNS: Record<string, Column[]> = {
   capiclusters: [
     { key: 'name', label: 'Name', width: 'min-w-40' },
     { key: 'namespace', label: 'Namespace', width: 'w-36 shrink-0' },
+    { key: 'provider', label: 'Provider', width: 'w-20 shrink-0' },
     { key: 'class', label: 'Class', width: 'w-32 shrink-0' },
     { key: 'cpReplicas', label: 'CP Ready', width: 'w-24 shrink-0', tooltip: 'Control plane replicas (ready/desired)' },
-    { key: 'workerReplicas', label: 'Workers Ready', width: 'w-28 shrink-0', tooltip: 'Worker replicas (ready/desired)' },
+    { key: 'workerReplicas', label: 'Workers', width: 'w-20 shrink-0', tooltip: 'Worker replicas (ready/desired)' },
     { key: 'phase', label: 'Phase', width: 'w-28 shrink-0' },
     { key: 'version', label: 'Version', width: 'w-24 shrink-0' },
     { key: 'age', label: 'Age', width: 'w-16 shrink-0' },
@@ -1347,6 +1349,48 @@ const KNOWN_COLUMNS: Record<string, Column[]> = {
     { key: 'namespace', label: 'Namespace', width: 'w-36 shrink-0' },
     { key: 'cluster', label: 'Cluster', width: 'w-32 shrink-0' },
     { key: 'healthy', label: 'Healthy', width: 'w-20 shrink-0', tooltip: 'Healthy machines / expected' },
+    { key: 'status', label: 'Status', width: 'w-24 shrink-0' },
+    { key: 'age', label: 'Age', width: 'w-16 shrink-0' },
+  ],
+  // AWS CAPI Infrastructure Provider
+  awsmanagedcontrolplanes: [
+    { key: 'name', label: 'Name', width: 'min-w-40' },
+    { key: 'namespace', label: 'Namespace', width: 'w-36 shrink-0' },
+    { key: 'eksCluster', label: 'EKS Cluster', width: 'w-36 shrink-0' },
+    { key: 'region', label: 'Region', width: 'w-28 shrink-0' },
+    { key: 'version', label: 'Version', width: 'w-24 shrink-0' },
+    { key: 'status', label: 'Status', width: 'w-24 shrink-0' },
+    { key: 'age', label: 'Age', width: 'w-16 shrink-0' },
+  ],
+  awsmanagedmachinepools: [
+    { key: 'name', label: 'Name', width: 'min-w-40' },
+    { key: 'namespace', label: 'Namespace', width: 'w-36 shrink-0' },
+    { key: 'instanceType', label: 'Instance', width: 'w-28 shrink-0' },
+    { key: 'replicas', label: 'Ready', width: 'w-20 shrink-0', tooltip: 'Ready replicas' },
+    { key: 'capacityType', label: 'Capacity', width: 'w-28 shrink-0' },
+    { key: 'status', label: 'Status', width: 'w-24 shrink-0' },
+    { key: 'age', label: 'Age', width: 'w-16 shrink-0' },
+  ],
+  awsmachines: [
+    { key: 'name', label: 'Name', width: 'min-w-40' },
+    { key: 'namespace', label: 'Namespace', width: 'w-36 shrink-0' },
+    { key: 'instanceType', label: 'Instance', width: 'w-28 shrink-0' },
+    { key: 'instanceState', label: 'State', width: 'w-24 shrink-0' },
+    { key: 'instanceID', label: 'Instance ID', width: 'w-40 shrink-0' },
+    { key: 'status', label: 'Status', width: 'w-24 shrink-0' },
+    { key: 'age', label: 'Age', width: 'w-16 shrink-0' },
+  ],
+  awsmachinetemplates: [
+    { key: 'name', label: 'Name', width: 'min-w-40' },
+    { key: 'namespace', label: 'Namespace', width: 'w-36 shrink-0' },
+    { key: 'instanceType', label: 'Instance', width: 'w-28 shrink-0' },
+    { key: 'capacity', label: 'Capacity', width: 'w-32 shrink-0', tooltip: 'Computed CPU/memory' },
+    { key: 'age', label: 'Age', width: 'w-16 shrink-0' },
+  ],
+  awsmanagedclusters: [
+    { key: 'name', label: 'Name', width: 'min-w-40' },
+    { key: 'namespace', label: 'Namespace', width: 'w-36 shrink-0' },
+    { key: 'endpoint', label: 'Endpoint', width: 'min-w-44' },
     { key: 'status', label: 'Status', width: 'w-24 shrink-0' },
     { key: 'age', label: 'Age', width: 'w-16 shrink-0' },
   ],
@@ -3980,6 +4024,17 @@ function CellContent({ resource, kind, column, group, majorityNodeMinorVersion }
     case 'kubeadmcontrolplanetemplates':
       // These use default columns — no custom cell renderer needed
       return <GenericCell resource={resource} column={column} />
+    // AWS CAPI Infrastructure Provider
+    case 'awsmanagedcontrolplanes':
+      return <AWSManagedControlPlaneCell resource={resource} column={column} />
+    case 'awsmanagedmachinepools':
+      return <AWSManagedMachinePoolCell resource={resource} column={column} />
+    case 'awsmachines':
+      return <AWSMachineCell resource={resource} column={column} />
+    case 'awsmachinetemplates':
+      return <AWSMachineTemplateCell resource={resource} column={column} />
+    case 'awsmanagedclusters':
+      return <AWSManagedClusterCell resource={resource} column={column} />
     default:
       // Generic cell for CRDs and unknown resources
       return <GenericCell resource={resource} column={column} />

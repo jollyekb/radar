@@ -326,8 +326,8 @@ export type MainView = 'home' | 'topology' | 'resources' | 'timeline' | 'helm'
 
 // Topology view mode (for backwards compatibility, also exported as ViewMode)
 // NOTE: Must match Go backend constants in internal/topology/types.go
-export type TopologyMode = 'resources' | 'traffic'
-export type ViewMode = 'resources' | 'traffic'
+export type TopologyMode = 'resources' | 'traffic' | 'fleet'
+export type ViewMode = 'resources' | 'traffic' | 'fleet'
 
 // Grouping mode
 export type GroupingMode = 'none' | 'namespace' | 'app' | 'label'

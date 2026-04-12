@@ -204,6 +204,13 @@ const KIND_ICON_MAP: Record<string, LucideIcon> = {
   clusterclass: BookOpen,
   machinehealthcheck: HeartPulse,
 
+  // AWS CAPI Infrastructure Provider
+  awsmanagedcontrolplane: Shield,
+  awsmanagedmachinepool: Layers,
+  awsmachine: Cpu,
+  awsmachinetemplate: Cpu,
+  awsmanagedcluster: Server,
+
   // Trivy Operator
   vulnerabilityreport: Shield,
   configauditreport: ShieldCheck,

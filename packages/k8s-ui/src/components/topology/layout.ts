@@ -766,6 +766,9 @@ const KIND_PRIORITY: Record<string, number> = {
   'Application': 1, 'Kustomization': 1, 'HelmRelease': 1, 'GitRepository': 2,
   'CAPICluster': 1, 'MachineDeployment': 2, 'MachineSet': 3, 'Machine': 4,
   'MachinePool': 2, 'KubeadmControlPlane': 1, 'ClusterClass': 1, 'MachineHealthCheck': 5,
+  // AWS CAPI infrastructure provider (leaf nodes at depth 5-6)
+  'AWSManagedControlPlane': 2, 'AWSManagedMachinePool': 3, 'AWSMachine': 5,
+  'AWSMachineTemplate': 5, 'AWSManagedCluster': 2, 'EKSConfig': 5,
 }
 
 // Compute grid dimensions from workload card count
