@@ -27,33 +27,27 @@ import type { GitOpsOperationResponse } from '../types/gitops'
 
 const API_BASE = '/api'
 
-// Module-level query client reference for invalidating auth state from apiFetch.
-// Set by setAuthQueryClient() from the app root.
-let _authQueryClient: import('@tanstack/react-query').QueryClient | null = null
-export function setAuthQueryClient(qc: import('@tanstack/react-query').QueryClient) {
-  _authQueryClient = qc
-}
-
 // Wrapper around fetch that always includes credentials (for session cookies)
 // and handles 401 responses globally.
 function apiFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
   return fetch(input, { credentials: 'same-origin', ...init }).then(async response => {
     if (response.status === 401 && !window.location.pathname.startsWith('/auth')) {
-      // Invalidate auth state so AuthBarrier activates
-      _authQueryClient?.setQueryData(['auth-me'], { authEnabled: true, authMode: 'unknown' })
+      // Save current location so user returns to where they were after re-auth.
+      // Editor draft is auto-saved by EditableYamlView via sessionStorage.
+      sessionStorage.setItem('radar_return_path', window.location.pathname + window.location.search)
 
-      // Check authMode from 401 body to handle proxy vs OIDC differently
+      let isProxy = false
       try {
         const body = await response.clone().json()
-        if (body.authMode) {
-          _authQueryClient?.setQueryData(['auth-me'], { authEnabled: true, authMode: body.authMode })
-        }
-        if (body.authMode !== 'proxy') {
-          window.location.href = '/auth/login'
-        }
+        if (body.authMode === 'proxy') isProxy = true
       } catch {
-        // Can't parse 401 body — don't redirect blindly (proxy mode has no /auth/login)
         console.warn('Authentication required (unable to determine auth mode)')
+      }
+
+      if (isProxy) {
+        window.location.reload()
+      } else {
+        window.location.href = '/auth/login'
       }
     }
     return response

@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect, useRef } from 'react'
 import {
   Copy,
   CopyPlus,
@@ -109,10 +109,31 @@ interface EditableYamlViewProps {
 }
 
 export function EditableYamlView({ resource, data, onCopy, copied, onSaved, onSave, isSaving, saveError, onDuplicate }: EditableYamlViewProps) {
-  const [isEditing, setIsEditing] = useState(false)
-  const [editedYaml, setEditedYaml] = useState('')
+  const draftKey = `radar_yaml_draft:${resource.kind}/${resource.namespace}/${resource.name}`
+
+  // Restore draft from sessionStorage (e.g., after session-expiry redirect)
+  const savedDraft = useRef(sessionStorage.getItem(draftKey))
+  const [isEditing, setIsEditing] = useState(savedDraft.current !== null)
+  const [editedYaml, setEditedYaml] = useState(savedDraft.current ?? '')
   const [yamlErrors, setYamlErrors] = useState<string[]>([])
   const [showErrorDetails, setShowErrorDetails] = useState(false)
+
+  // Clean up restored draft flag
+  useEffect(() => {
+    if (savedDraft.current) {
+      sessionStorage.removeItem(draftKey)
+      savedDraft.current = null
+    }
+  }, [draftKey])
+
+  // Autosave draft to sessionStorage while editing
+  useEffect(() => {
+    if (isEditing && editedYaml) {
+      sessionStorage.setItem(draftKey, editedYaml)
+    } else {
+      sessionStorage.removeItem(draftKey)
+    }
+  }, [isEditing, editedYaml, draftKey])
 
   // Convert resource to YAML for editing
   const convertToYaml = useCallback((d: any) => {

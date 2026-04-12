@@ -32,7 +32,7 @@ import { ShortcutHelpOverlay } from './components/ui/ShortcutHelpOverlay'
 import { CommandPalette } from './components/ui/CommandPalette'
 import { DiagnosticsOverlay } from './components/ui/DiagnosticsOverlay'
 import { useEventSource } from './hooks/useEventSource'
-import { useNamespaces, useSwitchContext, useAuthMe, setAuthQueryClient } from './api/client'
+import { useNamespaces, useSwitchContext, useAuthMe } from './api/client'
 import { KeyboardShortcutProvider, useRegisterShortcut, useRegisterShortcuts } from './hooks/useKeyboardShortcuts'
 import { useAnimatedUnmount } from './hooks/useAnimatedUnmount'
 import { Loader2 } from 'lucide-react'
@@ -156,8 +156,15 @@ function AppInner() {
 
   // Auth check — detect if auth is enabled but user is not authenticated
   const { data: authMe, isPending: authMePending } = useAuthMe()
-  const authQC = useQueryClient()
-  useEffect(() => { setAuthQueryClient(authQC) }, [authQC])
+
+  // Restore navigation path after session-expiry re-auth redirect
+  useEffect(() => {
+    const returnPath = sessionStorage.getItem('radar_return_path')
+    if (returnPath) {
+      sessionStorage.removeItem('radar_return_path')
+      navigate(returnPath, { replace: true })
+    }
+  }, [navigate])
 
   // Parse namespaces from URL (supports both 'namespaces' and legacy 'namespace')
   const parseNamespacesFromURL = (params: URLSearchParams): string[] => {
