@@ -38,7 +38,7 @@ type cookiePayload struct {
 func NewSessionID() string {
 	b := make([]byte, 16)
 	if _, err := rand.Read(b); err != nil {
-		log.Fatalf("[auth] Failed to generate session ID: %v", err)
+		panic(fmt.Sprintf("[auth] Failed to generate session ID: %v", err))
 	}
 	return hex.EncodeToString(b)
 }
@@ -48,7 +48,7 @@ func NewSessionID() string {
 // The sid must be non-empty — use NewSessionID() to generate one.
 func CreateSessionCookie(user *User, sid, idToken, secret string, ttl time.Duration, secure bool) *http.Cookie {
 	if sid == "" {
-		log.Fatalf("[auth] CreateSessionCookie called with empty sid for user %s", user.Username)
+		panic(fmt.Sprintf("[auth] CreateSessionCookie called with empty sid for user %s", user.Username))
 	}
 
 	payload := cookiePayload{

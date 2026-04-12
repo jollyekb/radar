@@ -34,20 +34,28 @@ function apiFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Respons
     if (response.status === 401 && !window.location.pathname.startsWith('/auth')) {
       // Save current location so user returns to where they were after re-auth.
       // Editor draft is auto-saved by EditableYamlView via sessionStorage.
-      sessionStorage.setItem('radar_return_path', window.location.pathname + window.location.search)
+      try { sessionStorage.setItem('radar_return_path', window.location.pathname + window.location.search) } catch { /* best-effort */ }
 
-      let isProxy = false
+      let authMode: string | undefined
       try {
         const body = await response.clone().json()
-        if (body.authMode === 'proxy') isProxy = true
+        authMode = body.authMode
       } catch {
         console.warn('Authentication required (unable to determine auth mode)')
       }
 
-      if (isProxy) {
-        window.location.reload()
-      } else {
+      if (authMode === 'oidc') {
         window.location.href = '/auth/login'
+      } else {
+        // Proxy mode or unknown — reload is safe for both (proxy re-injects headers,
+        // unknown avoids redirecting to /auth/login which doesn't exist in proxy mode).
+        // Guard against infinite reload if proxy is misconfigured and keeps returning 401.
+        const lastReload = sessionStorage.getItem('radar_proxy_reload')
+        const now = Date.now()
+        if (!lastReload || now - parseInt(lastReload) > 5000) {
+          try { sessionStorage.setItem('radar_proxy_reload', String(now)) } catch { /* best-effort */ }
+          window.location.reload()
+        }
       }
     }
     return response

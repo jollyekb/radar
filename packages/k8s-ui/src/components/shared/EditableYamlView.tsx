@@ -91,6 +91,18 @@ function formatSaveError(error: string): { summary: string; details?: string } {
   return { summary: error }
 }
 
+// Safe sessionStorage wrappers — storage can throw QuotaExceededError or be
+// blocked by browser security policies. Draft persistence is best-effort.
+function safeSessionGet(key: string): string | null {
+  try { return sessionStorage.getItem(key) } catch { return null }
+}
+function safeSessionSet(key: string, value: string): void {
+  try { sessionStorage.setItem(key, value) } catch { /* best-effort */ }
+}
+function safeSessionRemove(key: string): void {
+  try { sessionStorage.removeItem(key) } catch { /* best-effort */ }
+}
+
 interface EditableYamlViewProps {
   resource: SelectedResource
   data: any
@@ -111,8 +123,10 @@ interface EditableYamlViewProps {
 export function EditableYamlView({ resource, data, onCopy, copied, onSaved, onSave, isSaving, saveError, onDuplicate }: EditableYamlViewProps) {
   const draftKey = `radar_yaml_draft:${resource.kind}/${resource.namespace}/${resource.name}`
 
-  // Restore draft from sessionStorage (e.g., after session-expiry redirect)
-  const savedDraft = useRef(sessionStorage.getItem(draftKey))
+  // Restore draft from sessionStorage (e.g., after session-expiry redirect).
+  // All sessionStorage calls are wrapped in try-catch — storage can throw
+  // QuotaExceededError or be blocked by browser security policies.
+  const savedDraft = useRef(safeSessionGet(draftKey))
   const [isEditing, setIsEditing] = useState(savedDraft.current !== null)
   const [editedYaml, setEditedYaml] = useState(savedDraft.current ?? '')
   const [yamlErrors, setYamlErrors] = useState<string[]>([])
@@ -120,18 +134,18 @@ export function EditableYamlView({ resource, data, onCopy, copied, onSaved, onSa
 
   // Clean up restored draft flag
   useEffect(() => {
-    if (savedDraft.current) {
-      sessionStorage.removeItem(draftKey)
+    if (typeof savedDraft.current === 'string') {
+      safeSessionRemove(draftKey)
       savedDraft.current = null
     }
   }, [draftKey])
 
-  // Autosave draft to sessionStorage while editing
+  // Autosave draft to sessionStorage while editing (best-effort)
   useEffect(() => {
     if (isEditing && editedYaml) {
-      sessionStorage.setItem(draftKey, editedYaml)
+      safeSessionSet(draftKey, editedYaml)
     } else {
-      sessionStorage.removeItem(draftKey)
+      safeSessionRemove(draftKey)
     }
   }, [isEditing, editedYaml, draftKey])
 

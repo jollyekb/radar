@@ -15,7 +15,7 @@ import (
 type Config struct {
 	Mode      string        // "none" (default), "proxy", "oidc"
 	Secret    string        // HMAC signing key for session cookies
-	CookieTTL time.Duration // default 24h
+	CookieTTL time.Duration // default 4h, sliding
 
 	// Proxy mode
 	UserHeader   string // default "X-Forwarded-User"

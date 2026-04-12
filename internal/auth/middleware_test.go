@@ -468,6 +468,41 @@ func TestMiddleware_SlidingTTL_PreservesSID(t *testing.T) {
 	t.Error("expected Set-Cookie for sliding re-issue")
 }
 
+func TestMiddleware_SlidingTTL_PreservesIDToken(t *testing.T) {
+	cfg := proxyConfig()
+	mw := Authenticate(cfg)
+	handler := mw(http.HandlerFunc(echoUser))
+
+	// Cookie past half-life with an ID token (needed for RP-Initiated Logout)
+	sid := NewSessionID()
+	idToken := "eyJhbGciOiJSUzI1NiJ9.test-payload.test-sig"
+	ttl := time.Until(time.Now().Add(10 * time.Minute))
+	cookie := CreateSessionCookie(&User{Username: "alice"}, sid, idToken, cfg.Secret, ttl, false)
+
+	req := httptest.NewRequest("GET", "/api/topology", nil)
+	req.AddCookie(cookie)
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	// Parse the re-issued cookie to verify IDToken survived
+	for _, c := range rec.Result().Cookies() {
+		if c.Name == DefaultCookieName {
+			parseReq := httptest.NewRequest("GET", "/", nil)
+			parseReq.AddCookie(c)
+			session := ParseSessionCookie(parseReq, cfg.Secret)
+			if session == nil {
+				t.Fatal("failed to parse re-issued cookie")
+			}
+			if session.IDToken != idToken {
+				t.Errorf("re-issued IDToken = %q, want %q (must survive for RP-Initiated Logout)", session.IDToken, idToken)
+			}
+			return
+		}
+	}
+	t.Error("expected Set-Cookie for sliding re-issue")
+}
+
 func TestMiddleware_SlidingTTL_LegacyCookieMintsSID(t *testing.T) {
 	cfg := proxyConfig()
 	mw := Authenticate(cfg)
