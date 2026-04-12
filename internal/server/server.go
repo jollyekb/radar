@@ -2361,6 +2361,10 @@ func (s *Server) handleCAPIClusterKubeconfig(w http.ResponseWriter, r *http.Requ
 			s.writeError(w, http.StatusNotFound, fmt.Sprintf("kubeconfig secret %q not found in namespace %q", secretName, ns))
 			return
 		}
+		if apierrors.IsForbidden(err) {
+			s.writeError(w, http.StatusForbidden, fmt.Sprintf("insufficient permissions to read kubeconfig secret in namespace %q", ns))
+			return
+		}
 		log.Printf("[capi] Failed to get kubeconfig secret %s/%s: %v", ns, secretName, err)
 		s.writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -2375,8 +2379,10 @@ func (s *Server) handleCAPIClusterKubeconfig(w http.ResponseWriter, r *http.Requ
 
 	// Return as YAML download
 	w.Header().Set("Content-Type", "application/x-yaml")
-	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%s-kubeconfig.yaml", name))
-	w.Write(kubeconfigData)
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", name+"-kubeconfig.yaml"))
+	if _, err := w.Write(kubeconfigData); err != nil {
+		log.Printf("[capi] Failed to write kubeconfig response for %s/%s: %v", ns, name, err)
+	}
 }
 
 // Helper methods

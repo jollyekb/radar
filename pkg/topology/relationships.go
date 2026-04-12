@@ -380,7 +380,6 @@ func buildNodeID(kind, namespace, name string, dp DynamicProvider) string {
 		"verticalpodautoscalers":   "verticalpodautoscaler",
 		"vpas":                     "verticalpodautoscaler",
 		"nodes":                    "node",
-		"clusters":                 "capicluster",          // Cluster API
 		"clusterclasses":           "clusterclass",         // Cluster API
 		"machines":                 "machine",              // Cluster API
 		"machinesets":              "machineset",           // Cluster API

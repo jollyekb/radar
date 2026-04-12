@@ -3875,6 +3875,7 @@ function CellContent({ resource, kind, column, group, majorityNodeMinorVersion }
     case 'backupstoragelocations':
       return <BackupStorageLocationCell resource={resource} column={column} />
     // CloudNativePG
+    case 'cnpgclusters':
     case 'clusters':
       return <CNPGClusterCell resource={resource} column={column} />
     case 'scheduledbackups':
@@ -3957,7 +3958,7 @@ function CellContent({ resource, kind, column, group, majorityNodeMinorVersion }
     case 'httpproxies':
       return <HTTPProxyCell resource={resource} column={column} />
     // Cluster API (CAPI)
-    case 'clusters':
+    case 'capiclusters':
       return <CAPIClusterCell resource={resource} column={column} />
     case 'machines':
       return <CAPIMachineCell resource={resource} column={column} />

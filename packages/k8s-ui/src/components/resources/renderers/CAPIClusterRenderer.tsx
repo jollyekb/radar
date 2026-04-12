@@ -52,11 +52,14 @@ export function CAPIClusterRenderer({ data, onNavigate, apiBase = '' }: Props) {
       }
       const blob = await res.blob()
       const url = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = `${name}-kubeconfig.yaml`
-      a.click()
-      URL.revokeObjectURL(url)
+      try {
+        const a = document.createElement('a')
+        a.href = url
+        a.download = `${name}-kubeconfig.yaml`
+        a.click()
+      } finally {
+        URL.revokeObjectURL(url)
+      }
       setDownloadState('success')
       setTimeout(() => setDownloadState('idle'), 3000)
     } catch (err: any) {

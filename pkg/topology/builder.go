@@ -1018,10 +1018,9 @@ func (b *Builder) buildResourcesTopology(opts BuildOptions) (*Topology, error) {
 	var capiClusterGVR schema.GroupVersionResource
 	hasCAPIClusters := false
 	if resourceDiscovery != nil {
-		capiClusterGVR, hasCAPIClusters = resourceDiscovery.GetGVR("Cluster")
+		capiClusterGVR, hasCAPIClusters = resourceDiscovery.GetGVRWithGroup("Cluster", "cluster.x-k8s.io")
 	}
-	// Only proceed if the GVR is from cluster.x-k8s.io (not some other "Cluster" CRD)
-	if hasCAPIClusters && capiClusterGVR.Group == "cluster.x-k8s.io" && dynamicCache != nil {
+	if hasCAPIClusters && dynamicCache != nil {
 		clusters, clErr := dynamicCache.List(capiClusterGVR, opts.NamespaceFilter())
 		if clErr != nil {
 			log.Printf("WARNING [topology] Failed to list CAPI Clusters: %v", clErr)
@@ -1263,9 +1262,9 @@ func (b *Builder) buildResourcesTopology(opts BuildOptions) (*Topology, error) {
 	var capiMsGVR schema.GroupVersionResource
 	hasCAPIMachineSets := false
 	if resourceDiscovery != nil {
-		capiMsGVR, hasCAPIMachineSets = resourceDiscovery.GetGVR("MachineSet")
+		capiMsGVR, hasCAPIMachineSets = resourceDiscovery.GetGVRWithGroup("MachineSet", "cluster.x-k8s.io")
 	}
-	if hasCAPIMachineSets && capiMsGVR.Group == "cluster.x-k8s.io" && dynamicCache != nil {
+	if hasCAPIMachineSets && dynamicCache != nil {
 		machineSets, msErr := dynamicCache.List(capiMsGVR, opts.NamespaceFilter())
 		if msErr != nil {
 			log.Printf("WARNING [topology] Failed to list CAPI MachineSets: %v", msErr)
@@ -1311,9 +1310,9 @@ func (b *Builder) buildResourcesTopology(opts BuildOptions) (*Topology, error) {
 	var capiMachineGVR schema.GroupVersionResource
 	hasCAPIMachines := false
 	if resourceDiscovery != nil {
-		capiMachineGVR, hasCAPIMachines = resourceDiscovery.GetGVR("Machine")
+		capiMachineGVR, hasCAPIMachines = resourceDiscovery.GetGVRWithGroup("Machine", "cluster.x-k8s.io")
 	}
-	if hasCAPIMachines && capiMachineGVR.Group == "cluster.x-k8s.io" && dynamicCache != nil {
+	if hasCAPIMachines && dynamicCache != nil {
 		machines, mErr := dynamicCache.List(capiMachineGVR, opts.NamespaceFilter())
 		if mErr != nil {
 			log.Printf("WARNING [topology] Failed to list CAPI Machines: %v", mErr)
@@ -1377,8 +1376,8 @@ func (b *Builder) buildResourcesTopology(opts BuildOptions) (*Topology, error) {
 					continue
 				}
 				nodeID := fmt.Sprintf("node//%s", node.Name)
-				// Only add node if not already present (Karpenter may have added it)
-				if !nodeIDExists(nodes, nodeID) {
+				// Only add node if not already present (Karpenter may have added it via NodeClaim)
+				if _, karpenterManaged := nodeClaimNodeNames[node.Name]; !karpenterManaged {
 					nodes = append(nodes, Node{
 						ID:     nodeID,
 						Kind:   KindNode,
@@ -7429,16 +7428,6 @@ func extractCAPIReadyConditionStatus(obj unstructured.Unstructured) HealthStatus
 	return StatusUnknown
 }
 
-// nodeIDExists checks if a node with the given ID already exists in the slice.
-func nodeIDExists(nodes []Node, id string) bool {
-	for _, n := range nodes {
-		if n.ID == id {
-			return true
-		}
-	}
-	return false
-}
-
 // addGenericCRDNodes adds CRD nodes connected to the topology via owner references.
 // It uses two-phase resolution: first collecting all candidate CRD resources, then
 // iteratively adding nodes whose owners are already in the topology. This handles
@@ -7480,7 +7469,7 @@ func (b *Builder) addGenericCRDNodes(nodes []Node, edges []Edge, opts BuildOptio
 		"serverstransport": true, "serverstransporttcp": true,                           // Traefik transport
 		"tlsoption": true, "tlsstore": true,                                             // Traefik TLS
 		"httpproxy": true,                                                               // Contour
-		"cluster": true, "clusterclass": true,                                           // Cluster API
+		"clusterclass": true,                                                            // Cluster API
 		"machine": true, "machineset": true, "machinedeployment": true,                  // Cluster API
 		"machinepool": true, "kubeadmcontrolplane": true, "machinehealthcheck": true,    // Cluster API
 		"machinedrainrule": true,                                                        // Cluster API
