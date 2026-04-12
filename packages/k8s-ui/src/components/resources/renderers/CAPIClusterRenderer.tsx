@@ -40,6 +40,28 @@ export function CAPIClusterRenderer({ data, onNavigate, apiBase = '' }: Props) {
 
   const [downloadState, setDownloadState] = useState<'idle' | 'loading' | 'success' | 'error'>('idle')
   const [downloadError, setDownloadError] = useState('')
+  const [connectState, setConnectState] = useState<'idle' | 'loading' | 'success' | 'error'>('idle')
+  const [connectError, setConnectError] = useState('')
+
+  const handleConnectToCluster = async () => {
+    setConnectState('loading')
+    setConnectError('')
+    try {
+      const res = await fetch(`${apiBase}/api/capi/clusters/${encodeURIComponent(ns)}/${encodeURIComponent(name)}/connect`, { method: 'POST' })
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({ error: res.statusText }))
+        throw new Error(body.error || `HTTP ${res.status}`)
+      }
+      await res.json()
+      setConnectState('success')
+      // The page will reload as the context switch triggers a reconnect
+      setTimeout(() => window.location.reload(), 1500)
+    } catch (err: any) {
+      setConnectError(err.message || 'Failed to connect to workload cluster')
+      setConnectState('error')
+      setTimeout(() => setConnectState('idle'), 5000)
+    }
+  }
 
   const handleDownloadKubeconfig = async () => {
     setDownloadState('loading')
@@ -90,23 +112,34 @@ export function CAPIClusterRenderer({ data, onNavigate, apiBase = '' }: Props) {
         </PropertyList>
       </Section>
 
-      {/* Kubeconfig Download */}
-      <div className="px-3 py-2">
+      {/* Kubeconfig Actions */}
+      <div className="px-3 py-2 flex items-center gap-2">
+        <button
+          onClick={handleConnectToCluster}
+          disabled={connectState === 'loading'}
+          className="btn-brand flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-md"
+        >
+          {connectState === 'loading' && <Globe className="w-3.5 h-3.5 animate-pulse" />}
+          {connectState === 'success' && <CheckCircle className="w-3.5 h-3.5" />}
+          {connectState === 'error' && <AlertCircle className="w-3.5 h-3.5" />}
+          {connectState === 'idle' && <Globe className="w-3.5 h-3.5" />}
+          {connectState === 'loading' ? 'Connecting...' : connectState === 'success' ? 'Connected — reloading...' : 'Connect to Cluster'}
+        </button>
         <button
           onClick={handleDownloadKubeconfig}
           disabled={downloadState === 'loading'}
           className="btn-brand-muted flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-md"
         >
-          {downloadState === 'loading' && <Download className="w-3.5 h-3.5 animate-pulse" />}
-          {downloadState === 'success' && <CheckCircle className="w-3.5 h-3.5 text-emerald-500" />}
-          {downloadState === 'error' && <AlertCircle className="w-3.5 h-3.5 text-red-500" />}
-          {downloadState === 'idle' && <Download className="w-3.5 h-3.5" />}
-          {downloadState === 'loading' ? 'Downloading...' : downloadState === 'success' ? 'Downloaded' : 'Download Kubeconfig'}
+          {downloadState === 'loading' ? <Download className="w-3.5 h-3.5 animate-pulse" /> : <Download className="w-3.5 h-3.5" />}
+          {downloadState === 'loading' ? 'Downloading...' : downloadState === 'success' ? 'Downloaded' : 'Download'}
         </button>
-        {downloadState === 'error' && downloadError && (
-          <p className="text-xs text-red-500 mt-1">{downloadError}</p>
-        )}
       </div>
+      {connectState === 'error' && connectError && (
+        <p className="text-xs text-red-500 px-3 pb-2">{connectError}</p>
+      )}
+      {downloadState === 'error' && downloadError && (
+        <p className="text-xs text-red-500 px-3 pb-2">{downloadError}</p>
+      )}
 
       {/* Replicas */}
       {(cpDesired != null || wDesired != null) && (

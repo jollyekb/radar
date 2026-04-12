@@ -755,3 +755,40 @@ func SwitchContext(name string) error {
 
 	return nil
 }
+
+// MergeAndSwitchContext writes the provided kubeconfig data to a temporary file
+// and adds it to Radar's kubeconfig search path so that the context becomes
+// available for switching. Returns the temp file path.
+func MergeAndSwitchContext(kubeconfigData []byte, contextName string) (string, error) {
+	// Parse the incoming kubeconfig
+	newConfig, err := clientcmd.Load(kubeconfigData)
+	if err != nil {
+		return "", fmt.Errorf("failed to parse kubeconfig: %w", err)
+	}
+
+	// Verify the context exists
+	if _, ok := newConfig.Contexts[contextName]; !ok {
+		return "", fmt.Errorf("context %q not found in provided kubeconfig", contextName)
+	}
+
+	// Write to a temp file that persists for the session
+	tmpFile, err := os.CreateTemp("", "radar-capi-kubeconfig-*.yaml")
+	if err != nil {
+		return "", fmt.Errorf("failed to create temp kubeconfig: %w", err)
+	}
+	tmpPath := tmpFile.Name()
+	tmpFile.Close()
+
+	if err := clientcmd.WriteToFile(*newConfig, tmpPath); err != nil {
+		os.Remove(tmpPath)
+		return "", fmt.Errorf("failed to write kubeconfig: %w", err)
+	}
+
+	// Add the temp file to Radar's kubeconfig search path
+	clientMu.Lock()
+	kubeconfigPaths = append(kubeconfigPaths, tmpPath)
+	clientMu.Unlock()
+
+	log.Printf("[capi] Added workload cluster kubeconfig: %s (context: %s)", tmpPath, contextName)
+	return tmpPath, nil
+}

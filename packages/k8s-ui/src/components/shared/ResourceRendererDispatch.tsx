@@ -417,6 +417,14 @@ export function ResourceRendererDispatch({
         {kind === 'scheduledbackups' && <CNPGScheduledBackupRenderer data={data} onNavigate={onNavigate} />}
         {kind === 'poolers' && <CNPGPoolerRenderer data={data} onNavigate={onNavigate} />}
         {/* Cluster API (CAPI) */}
+        {data?.metadata?.labels?.['topology.cluster.x-k8s.io/owned'] && (
+          <div className="px-3 py-2">
+            <div className="flex items-start gap-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-700/40 dark:bg-amber-950/30 dark:text-amber-400">
+              <svg className="mt-0.5 h-3.5 w-3.5 shrink-0" viewBox="0 0 16 16" fill="currentColor"><path d="M8 1a7 7 0 100 14A7 7 0 008 1zm0 2.5a1 1 0 110 2 1 1 0 010-2zM6.75 7h1.5v4.5h-1.5V7z"/></svg>
+              <span>Topology-controlled — this resource is managed by ClusterClass. Manual changes will be reconciled back.</span>
+            </div>
+          </div>
+        )}
         {kind === 'machines' && data?.apiVersion?.includes('cluster.x-k8s.io') && <CAPIMachineRenderer data={data} onNavigate={onNavigate} />}
         {kind === 'machinedeployments' && <CAPIMachineDeploymentRenderer data={data} />}
         {kind === 'machinesets' && data?.apiVersion?.includes('cluster.x-k8s.io') && <CAPIMachineSetRenderer data={data} />}

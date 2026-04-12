@@ -99,6 +99,11 @@ export function CAPIKubeadmControlPlaneRenderer({ data }: Props) {
         </Section>
       )}
 
+      {/* Owned Machines hint */}
+      <div className="px-3 py-1.5 text-xs text-theme-text-tertiary">
+        Machines with label <code className="bg-theme-surface px-1 py-0.5 rounded text-[10px] font-mono select-all">cluster.x-k8s.io/control-plane-name={data.metadata?.name}</code>
+      </div>
+
       <ConditionsSection conditions={conditions} />
     </>
   )
