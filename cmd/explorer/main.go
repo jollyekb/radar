@@ -55,7 +55,7 @@ func main() {
 	// Auth flags
 	authMode := flag.String("auth-mode", "none", "Authentication mode: none, proxy, or oidc")
 	authSecret := flag.String("auth-secret", "", "HMAC secret key for session cookies (auto-generated if empty)")
-	authCookieTTL := flag.Duration("auth-cookie-ttl", 24*time.Hour, "Session cookie TTL")
+	authCookieTTL := flag.Duration("auth-cookie-ttl", 4*time.Hour, "Session cookie TTL (sliding — extends on activity)")
 	authUserHeader := flag.String("auth-user-header", "X-Forwarded-User", "Header for username (proxy mode)")
 	authGroupsHeader := flag.String("auth-groups-header", "X-Forwarded-Groups", "Header for groups (proxy mode)")
 	authOIDCIssuer := flag.String("auth-oidc-issuer", "", "OIDC issuer URL")

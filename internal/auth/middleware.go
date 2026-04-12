@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 	"strings"
+	"time"
 )
 
 // Authenticate returns a chi middleware that extracts user identity from
@@ -27,8 +28,25 @@ func Authenticate(cfg Config) func(http.Handler) http.Handler {
 			// (set by the upstream reverse proxy) or a direct TLS connection.
 			secure := cfg.Mode == "oidc" || r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https"
 
-			// Try to get user from session cookie first
+			// Try to get user from session cookie first.
+			// Cookie-valid path slides the TTL; header-auth path below is a full re-auth.
 			if session := ParseSessionCookie(r, cfg.Secret); session != nil {
+				// Sliding TTL: re-issue cookie if past half-life or if remaining exceeds
+				// the configured TTL (handles TTL downgrade, e.g. 24h → 4h).
+				// SetCookie runs before next.ServeHTTP so the handler can't commit headers first.
+				remaining := time.Until(session.ExpiresAt)
+				if remaining < cfg.CookieTTL/2 || remaining > cfg.CookieTTL {
+					sid := session.SID
+					if sid == "" {
+						// Pre-upgrade cookie without sid — mint one on first sliding re-issue
+						sid = NewSessionID()
+					}
+					http.SetCookie(w, CreateSessionCookie(session.User, sid, session.IDToken, cfg.Secret, cfg.CookieTTL, secure))
+					if remaining > cfg.CookieTTL {
+						log.Printf("[auth] TTL downgrade detected for user %q: cookie remaining %s exceeds configured TTL %s, snapping",
+							session.User.Username, remaining.Round(time.Second), cfg.CookieTTL)
+					}
+				}
 				ctx := ContextWithUser(r.Context(), session.User)
 				next.ServeHTTP(w, r.WithContext(ctx))
 				return

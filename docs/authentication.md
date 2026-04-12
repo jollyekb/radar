@@ -318,7 +318,8 @@ The ServiceAccount's existing read permissions (list pods, watch deployments, et
 
 Radar uses stateless HMAC-SHA256 signed cookies for sessions. The cookie contains the username and groups — no server-side session storage.
 
-- **Cookie TTL**: 24 hours by default, configurable with `--auth-cookie-ttl` or `auth.cookieTTL` in Helm values
+- **Cookie TTL**: 4 hours by default (sliding), configurable with `--auth-cookie-ttl` or `auth.cookieTTL` in Helm values. Sessions auto-extend while you're active; idle sessions expire after the configured TTL. Active users won't notice — Radar's frontend polling keeps the session alive automatically.
+- **Proxy mode**: When the cookie expires, the middleware transparently re-creates the session from proxy headers on the next request, so the shorter default TTL has no UX impact.
 - **Session secret**: Set `auth.secret` or `RADAR_AUTH_SECRET` env var. If empty, a random key is generated at startup (sessions won't survive pod restarts)
 - **For production**: Use `auth.existingSecret` to reference a K8s Secret, so sessions survive restarts
 
@@ -328,7 +329,7 @@ Radar uses stateless HMAC-SHA256 signed cookies for sessions. The cookie contain
 |-----------|----------|------------|---------|
 | Auth mode | `--auth-mode` | `auth.mode` | `none` |
 | Session secret | `--auth-secret` | `auth.secret` | auto-generated |
-| Cookie TTL | `--auth-cookie-ttl` | `auth.cookieTTL` | `24h` |
+| Cookie TTL | `--auth-cookie-ttl` | `auth.cookieTTL` | `4h` (sliding) |
 | User header (proxy) | `--auth-user-header` | `auth.proxy.userHeader` | `X-Forwarded-User` |
 | Groups header (proxy) | `--auth-groups-header` | `auth.proxy.groupsHeader` | `X-Forwarded-Groups` |
 | OIDC issuer | `--auth-oidc-issuer` | `auth.oidc.issuerURL` | — |

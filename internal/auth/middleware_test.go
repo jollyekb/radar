@@ -2,7 +2,11 @@ package auth
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -319,5 +323,229 @@ func TestIsSoftAuthPath(t *testing.T) {
 				t.Errorf("isSoftAuthPath(%q) = %v, want %v", tt.path, got, tt.want)
 			}
 		})
+	}
+}
+
+// --- Sliding TTL tests ---
+
+// makeCookieWithExpiry creates a signed session cookie with a specific ExpiresAt.
+func makeCookieWithExpiry(user *User, sid, secret string, expiresAt time.Time) *http.Cookie {
+	// Use the public constructor, but we need to craft a specific expiry.
+	// We compute the TTL that would produce the desired ExpiresAt from now.
+	ttl := time.Until(expiresAt)
+	return CreateSessionCookie(user, sid, "", secret, ttl, false)
+}
+
+func TestMiddleware_SlidingTTL_ReissuesPastHalfLife(t *testing.T) {
+	cfg := proxyConfig() // CookieTTL = 1h
+	mw := Authenticate(cfg)
+	handler := mw(http.HandlerFunc(echoUser))
+
+	// Cookie that expires in 15 minutes (past half-life of 1h)
+	sid := NewSessionID()
+	cookie := makeCookieWithExpiry(&User{Username: "alice"}, sid, cfg.Secret, time.Now().Add(15*time.Minute))
+
+	req := httptest.NewRequest("GET", "/api/topology", nil)
+	req.AddCookie(cookie)
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+
+	// Should have re-issued a session cookie
+	found := false
+	for _, c := range rec.Result().Cookies() {
+		if c.Name == DefaultCookieName {
+			found = true
+			// New cookie should have ~1h MaxAge (the configured TTL)
+			if c.MaxAge < 3500 || c.MaxAge > 3700 {
+				t.Errorf("re-issued cookie MaxAge = %d, want ~3600", c.MaxAge)
+			}
+		}
+	}
+	if !found {
+		t.Error("expected Set-Cookie for sliding TTL re-issue past half-life")
+	}
+}
+
+func TestMiddleware_SlidingTTL_NoReissueWhenFresh(t *testing.T) {
+	cfg := proxyConfig() // CookieTTL = 1h
+	mw := Authenticate(cfg)
+	handler := mw(http.HandlerFunc(echoUser))
+
+	// Cookie that expires in 50 minutes (within first half of 1h TTL — fresh)
+	sid := NewSessionID()
+	cookie := makeCookieWithExpiry(&User{Username: "alice"}, sid, cfg.Secret, time.Now().Add(50*time.Minute))
+
+	req := httptest.NewRequest("GET", "/api/topology", nil)
+	req.AddCookie(cookie)
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+
+	// Should NOT have set a cookie (still fresh)
+	for _, c := range rec.Result().Cookies() {
+		if c.Name == DefaultCookieName {
+			t.Error("should not re-issue cookie when still in fresh half of TTL")
+		}
+	}
+}
+
+func TestMiddleware_SlidingTTL_ReissuesOnTTLDowngrade(t *testing.T) {
+	cfg := proxyConfig()
+	cfg.CookieTTL = 4 * time.Hour // simulate downgrade to 4h
+	mw := Authenticate(cfg)
+	handler := mw(http.HandlerFunc(echoUser))
+
+	// Old cookie with 20h remaining (issued under 24h TTL)
+	sid := NewSessionID()
+	cookie := makeCookieWithExpiry(&User{Username: "alice"}, sid, cfg.Secret, time.Now().Add(20*time.Hour))
+
+	req := httptest.NewRequest("GET", "/api/topology", nil)
+	req.AddCookie(cookie)
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+
+	// Should snap to new TTL
+	found := false
+	for _, c := range rec.Result().Cookies() {
+		if c.Name == DefaultCookieName {
+			found = true
+			// New cookie should have ~4h MaxAge
+			expected := int(4 * time.Hour / time.Second)
+			if c.MaxAge < expected-100 || c.MaxAge > expected+100 {
+				t.Errorf("re-issued cookie MaxAge = %d, want ~%d", c.MaxAge, expected)
+			}
+		}
+	}
+	if !found {
+		t.Error("expected Set-Cookie for TTL downgrade snap")
+	}
+}
+
+func TestMiddleware_SlidingTTL_PreservesSID(t *testing.T) {
+	cfg := proxyConfig()
+	mw := Authenticate(cfg)
+	handler := mw(http.HandlerFunc(echoUser))
+
+	// Cookie past half-life so it gets re-issued
+	sid := "deadbeef01234567deadbeef01234567"
+	cookie := makeCookieWithExpiry(&User{Username: "alice"}, sid, cfg.Secret, time.Now().Add(10*time.Minute))
+
+	req := httptest.NewRequest("GET", "/api/topology", nil)
+	req.AddCookie(cookie)
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	// Parse the re-issued cookie to verify sid
+	for _, c := range rec.Result().Cookies() {
+		if c.Name == DefaultCookieName {
+			parseReq := httptest.NewRequest("GET", "/", nil)
+			parseReq.AddCookie(c)
+			session := ParseSessionCookie(parseReq, cfg.Secret)
+			if session == nil {
+				t.Fatal("failed to parse re-issued cookie")
+			}
+			if session.SID != sid {
+				t.Errorf("re-issued SID = %q, want %q (should be preserved)", session.SID, sid)
+			}
+			return
+		}
+	}
+	t.Error("expected Set-Cookie for sliding re-issue")
+}
+
+func TestMiddleware_SlidingTTL_LegacyCookieMintsSID(t *testing.T) {
+	cfg := proxyConfig()
+	mw := Authenticate(cfg)
+	handler := mw(http.HandlerFunc(echoUser))
+
+	// Simulate a legacy cookie without SID by crafting a cookie whose parsed SID is ""
+	// We do this by using the old schema format (no "s" field)
+	legacyCookie := makeLegacyCookie("alice", cfg.Secret, time.Now().Add(10*time.Minute))
+
+	req := httptest.NewRequest("GET", "/api/topology", nil)
+	req.AddCookie(legacyCookie)
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	// Re-issued cookie should have a minted SID
+	for _, c := range rec.Result().Cookies() {
+		if c.Name == DefaultCookieName {
+			parseReq := httptest.NewRequest("GET", "/", nil)
+			parseReq.AddCookie(c)
+			session := ParseSessionCookie(parseReq, cfg.Secret)
+			if session == nil {
+				t.Fatal("failed to parse re-issued cookie")
+			}
+			if session.SID == "" {
+				t.Error("re-issued cookie should have a minted SID for legacy cookie")
+			}
+			if len(session.SID) != 32 {
+				t.Errorf("minted SID length = %d, want 32", len(session.SID))
+			}
+			return
+		}
+	}
+	t.Error("expected Set-Cookie for legacy cookie re-issue")
+}
+
+// makeLegacyCookie creates a signed cookie using the old schema (no SID field).
+func makeLegacyCookie(username, secret string, expiresAt time.Time) *http.Cookie {
+	type legacyPayload struct {
+		Username  string   `json:"u"`
+		Groups    []string `json:"g,omitempty"`
+		ExpiresAt int64    `json:"e"`
+	}
+
+	payload := legacyPayload{
+		Username:  username,
+		ExpiresAt: expiresAt.Unix(),
+	}
+
+	data, _ := json.Marshal(payload)
+	encoded := base64.RawURLEncoding.EncodeToString(data)
+
+	mac := hmac.New(sha256.New, []byte(secret))
+	fmt.Fprint(mac, encoded)
+	sig := base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
+
+	return &http.Cookie{
+		Name:  DefaultCookieName,
+		Value: encoded + "." + sig,
+	}
+}
+
+func TestMiddleware_NoReissueOnExpiredCookie(t *testing.T) {
+	cfg := proxyConfig()
+	mw := Authenticate(cfg)
+	handler := mw(http.HandlerFunc(echoUser))
+
+	// Expired cookie
+	cookie := makeCookieWithExpiry(&User{Username: "alice"}, NewSessionID(), cfg.Secret, time.Now().Add(-1*time.Minute))
+
+	req := httptest.NewRequest("GET", "/api/topology", nil)
+	req.AddCookie(cookie)
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	// Should get 401, not 200 with re-issue
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("status = %d, want 401 for expired cookie", rec.Code)
 	}
 }

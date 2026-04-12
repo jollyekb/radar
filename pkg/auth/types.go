@@ -41,7 +41,7 @@ type User struct {
 // Defaults applies default values to config fields that are empty
 func (c *Config) Defaults() {
 	if c.CookieTTL == 0 {
-		c.CookieTTL = 24 * time.Hour
+		c.CookieTTL = 4 * time.Hour // default 4h, sliding — extends on activity
 	}
 	if c.UserHeader == "" {
 		c.UserHeader = "X-Forwarded-User"
