@@ -67,14 +67,20 @@ const DEFAULT_VISIBLE_KINDS = ALL_NODE_KINDS.filter(k => k !== 'ReplicaSet')
 const CRD_HIDDEN_BY_DEFAULT = new Set(['GatewayClass', 'IngressClass', 'NodePool', 'NodeClaim', 'NodeClass'])
 
 // CAPI kinds shown in Fleet topology mode (+ Node for Machine→Node edges)
-// Includes core CAPI kinds and AWS infrastructure provider kinds
+// Includes core CAPI kinds and all infrastructure provider kinds
 const FLEET_MODE_KINDS = new Set<NodeKind>([
   'CAPICluster', 'MachineDeployment', 'MachineSet', 'Machine', 'MachinePool',
   'KubeadmControlPlane', 'ClusterClass', 'MachineHealthCheck', 'Node',
-  // AWS provider infrastructure resources (kind names from dynamic CRD discovery)
+  // AWS provider
   'AWSManagedControlPlane', 'AWSManagedMachinePool', 'AWSMachine',
   'AWSMachineTemplate', 'AWSManagedCluster', 'AWSClusterControllerIdentity',
   'EKSConfig', 'EKSConfigTemplate',
+  // GCP provider
+  'GCPManagedControlPlane', 'GCPManagedMachinePool', 'GCPMachine',
+  'GCPMachineTemplate', 'GCPManagedCluster',
+  // Azure provider
+  'AzureManagedControlPlane', 'AzureManagedMachinePool', 'AzureMachine',
+  'AzureMachineTemplate', 'AzureManagedCluster',
 ])
 
 // Convert API resource name back to topology node ID prefix

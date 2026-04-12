@@ -114,6 +114,19 @@
 .topology-icon-eksconfig { background: #f59e0b; }
 .topology-icon-eksconfigtemplate { background: #f59e0b; }
 
+/* GCP CAPI infrastructure provider */
+.topology-icon-gcpmanagedcontrolplane { background: #0d9488; }
+.topology-icon-gcpmanagedmachinepool { background: #0d9488; }
+.topology-icon-gcpmachine { background: #14b8a6; }
+.topology-icon-gcpmachinetemplate { background: #14b8a6; }
+.topology-icon-gcpmanagedcluster { background: #0d9488; }
+/* Azure CAPI infrastructure provider */
+.topology-icon-azuremanagedcontrolplane { background: #2563eb; }
+.topology-icon-azuremanagedmachinepool { background: #2563eb; }
+.topology-icon-azuremachine { background: #3b82f6; }
+.topology-icon-azuremachinetemplate { background: #3b82f6; }
+.topology-icon-azuremanagedcluster { background: #2563eb; }
+
 /* Background dots - uses CSS variable for theme awareness */
 .react-flow__background pattern circle {
   fill: var(--topology-bg-dots) !important;

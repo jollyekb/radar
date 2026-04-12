@@ -211,6 +211,20 @@ const KIND_ICON_MAP: Record<string, LucideIcon> = {
   awsmachinetemplate: Cpu,
   awsmanagedcluster: Server,
 
+  // GCP CAPI Infrastructure Provider
+  gcpmanagedcontrolplane: Shield,
+  gcpmanagedmachinepool: Layers,
+  gcpmachine: Cpu,
+  gcpmachinetemplate: Cpu,
+  gcpmanagedcluster: Server,
+
+  // Azure CAPI Infrastructure Provider
+  azuremanagedcontrolplane: Shield,
+  azuremanagedmachinepool: Layers,
+  azuremachine: Cpu,
+  azuremachinetemplate: Cpu,
+  azuremanagedcluster: Server,
+
   // Trivy Operator
   vulnerabilityreport: Shield,
   configauditreport: ShieldCheck,
