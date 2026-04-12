@@ -80,6 +80,16 @@ const RESOURCE_KINDS: {
 
   // Contour
   { kind: 'HTTPProxy', label: 'HTTPProxy', icon: getTopologyIcon('HTTPProxy'), color: 'text-violet-400', category: 'networking' },
+
+  // Cluster API
+  { kind: 'CAPICluster', label: 'CAPI Cluster', icon: getTopologyIcon('CAPICluster'), color: 'text-indigo-400', category: 'custom' },
+  { kind: 'MachineDeployment', label: 'Machine Deploy', icon: getTopologyIcon('MachineDeployment'), color: 'text-indigo-400', category: 'custom' },
+  { kind: 'MachineSet', label: 'MachineSet', icon: getTopologyIcon('MachineSet'), color: 'text-indigo-400', category: 'custom' },
+  { kind: 'Machine', label: 'Machine', icon: getTopologyIcon('Machine'), color: 'text-indigo-400', category: 'custom' },
+  { kind: 'MachinePool', label: 'MachinePool', icon: getTopologyIcon('MachinePool'), color: 'text-indigo-400', category: 'custom' },
+  { kind: 'KubeadmControlPlane', label: 'Control Plane', icon: getTopologyIcon('KubeadmControlPlane'), color: 'text-indigo-400', category: 'custom' },
+  { kind: 'ClusterClass', label: 'ClusterClass', icon: getTopologyIcon('ClusterClass'), color: 'text-indigo-400', category: 'custom' },
+  { kind: 'MachineHealthCheck', label: 'Health Check', icon: getTopologyIcon('MachineHealthCheck'), color: 'text-indigo-400', category: 'custom' },
 ]
 
 const CATEGORIES = [

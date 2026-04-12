@@ -97,6 +97,14 @@
 .topology-icon-nodeclaim { background: #6366f1; }
 .topology-icon-nodeclass { background: #6366f1; }
 .topology-icon-httpproxy { background: #7c3aed; }
+.topology-icon-capicluster { background: #6366f1; }
+.topology-icon-machinedeployment { background: #6366f1; }
+.topology-icon-machineset { background: #6366f1; }
+.topology-icon-machine { background: #818cf8; }
+.topology-icon-machinepool { background: #6366f1; }
+.topology-icon-kubeadmcontrolplane { background: #4f46e5; }
+.topology-icon-clusterclass { background: #4f46e5; }
+.topology-icon-machinehealthcheck { background: #818cf8; }
 
 /* Background dots - uses CSS variable for theme awareness */
 .react-flow__background pattern circle {

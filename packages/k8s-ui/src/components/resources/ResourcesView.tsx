@@ -139,6 +139,7 @@ import { VirtualServiceCell, DestinationRuleCell, IstioGatewayCell, ServiceEntry
 import { KnativeServiceCell, ConfigurationCell as KnativeConfigurationCell, RevisionCell as KnativeRevisionCell, RouteCell as KnativeRouteCell, BrokerCell, TriggerCell, EventTypeCell, PingSourceCell, ApiServerSourceCell, ContainerSourceCell, SinkBindingCell, ChannelCell, InMemoryChannelCell, SubscriptionCell, SequenceCell, ParallelCell, DomainMappingCell, ServerlessServiceCell, KnativeIngressCell, KnativeCertificateCell } from './renderers/knative-cells'
 import { IngressRouteCell, MiddlewareCell, TraefikServiceCell, ServersTransportCell, TLSOptionCell } from './renderers/traefik-cells'
 import { HTTPProxyCell } from './renderers/contour-cells'
+import { CAPIClusterCell, CAPIMachineCell, CAPIMachineDeploymentCell, CAPIMachineSetCell, CAPIMachinePoolCell, CAPIKubeadmControlPlaneCell, CAPIClusterClassCell, CAPIMachineHealthCheckCell } from './renderers/capi-cells'
 import { useRegisterShortcut, useRegisterShortcuts } from '../../hooks/useKeyboardShortcuts'
 import { ResourcesSidebar } from './ResourcesSidebar'
 import type { SelectedKindInfo } from './ResourcesSidebar'
@@ -969,7 +970,7 @@ const KNOWN_COLUMNS: Record<string, Column[]> = {
   // ============================================================================
   // CLOUDNATIVEPG (CNPG) POSTGRESQL
   // ============================================================================
-  clusters: [
+  cnpgclusters: [
     { key: 'name', label: 'Name' },
     { key: 'namespace', label: 'Namespace', width: 'w-36' },
     { key: 'status', label: 'Status', width: 'w-28' },
@@ -1280,6 +1281,75 @@ const KNOWN_COLUMNS: Record<string, Column[]> = {
     { key: 'namespace', label: 'Namespace', width: 'w-36 shrink-0' },
     { key: 'age', label: 'Age', width: 'w-16 shrink-0' },
   ],
+  // Cluster API (CAPI)
+  capiclusters: [
+    { key: 'name', label: 'Name', width: 'min-w-40' },
+    { key: 'namespace', label: 'Namespace', width: 'w-36 shrink-0' },
+    { key: 'class', label: 'Class', width: 'w-32 shrink-0' },
+    { key: 'cpReplicas', label: 'CP Ready', width: 'w-24 shrink-0', tooltip: 'Control plane replicas (ready/desired)' },
+    { key: 'workerReplicas', label: 'Workers Ready', width: 'w-28 shrink-0', tooltip: 'Worker replicas (ready/desired)' },
+    { key: 'phase', label: 'Phase', width: 'w-28 shrink-0' },
+    { key: 'version', label: 'Version', width: 'w-24 shrink-0' },
+    { key: 'age', label: 'Age', width: 'w-16 shrink-0' },
+  ],
+  machinedeployments: [
+    { key: 'name', label: 'Name', width: 'min-w-40' },
+    { key: 'namespace', label: 'Namespace', width: 'w-36 shrink-0' },
+    { key: 'cluster', label: 'Cluster', width: 'w-32 shrink-0' },
+    { key: 'ready', label: 'Ready', width: 'w-20 shrink-0', tooltip: 'Ready replicas / desired' },
+    { key: 'phase', label: 'Phase', width: 'w-28 shrink-0' },
+    { key: 'version', label: 'Version', width: 'w-24 shrink-0' },
+    { key: 'age', label: 'Age', width: 'w-16 shrink-0' },
+  ],
+  machines: [
+    { key: 'name', label: 'Name', width: 'min-w-40' },
+    { key: 'namespace', label: 'Namespace', width: 'w-36 shrink-0' },
+    { key: 'cluster', label: 'Cluster', width: 'w-32 shrink-0' },
+    { key: 'role', label: 'Role', width: 'w-28 shrink-0' },
+    { key: 'phase', label: 'Phase', width: 'w-28 shrink-0' },
+    { key: 'node', label: 'Node', width: 'w-32 shrink-0' },
+    { key: 'version', label: 'Version', width: 'w-24 shrink-0' },
+    { key: 'age', label: 'Age', width: 'w-16 shrink-0' },
+  ],
+  machinesets: [
+    { key: 'name', label: 'Name', width: 'min-w-40' },
+    { key: 'namespace', label: 'Namespace', width: 'w-36 shrink-0' },
+    { key: 'cluster', label: 'Cluster', width: 'w-32 shrink-0' },
+    { key: 'ready', label: 'Ready', width: 'w-20 shrink-0' },
+    { key: 'phase', label: 'Phase', width: 'w-28 shrink-0' },
+    { key: 'age', label: 'Age', width: 'w-16 shrink-0' },
+  ],
+  machinepools: [
+    { key: 'name', label: 'Name', width: 'min-w-40' },
+    { key: 'namespace', label: 'Namespace', width: 'w-36 shrink-0' },
+    { key: 'cluster', label: 'Cluster', width: 'w-32 shrink-0' },
+    { key: 'ready', label: 'Ready', width: 'w-20 shrink-0' },
+    { key: 'phase', label: 'Phase', width: 'w-28 shrink-0' },
+    { key: 'age', label: 'Age', width: 'w-16 shrink-0' },
+  ],
+  kubeadmcontrolplanes: [
+    { key: 'name', label: 'Name', width: 'min-w-40' },
+    { key: 'namespace', label: 'Namespace', width: 'w-36 shrink-0' },
+    { key: 'cluster', label: 'Cluster', width: 'w-32 shrink-0' },
+    { key: 'ready', label: 'Ready', width: 'w-20 shrink-0' },
+    { key: 'initialized', label: 'Initialized', width: 'w-24 shrink-0' },
+    { key: 'version', label: 'Version', width: 'w-24 shrink-0' },
+    { key: 'age', label: 'Age', width: 'w-16 shrink-0' },
+  ],
+  clusterclasses: [
+    { key: 'name', label: 'Name', width: 'min-w-40' },
+    { key: 'namespace', label: 'Namespace', width: 'w-36 shrink-0' },
+    { key: 'status', label: 'Status', width: 'w-24 shrink-0' },
+    { key: 'age', label: 'Age', width: 'w-16 shrink-0' },
+  ],
+  machinehealthchecks: [
+    { key: 'name', label: 'Name', width: 'min-w-40' },
+    { key: 'namespace', label: 'Namespace', width: 'w-36 shrink-0' },
+    { key: 'cluster', label: 'Cluster', width: 'w-32 shrink-0' },
+    { key: 'healthy', label: 'Healthy', width: 'w-20 shrink-0', tooltip: 'Healthy machines / expected' },
+    { key: 'status', label: 'Status', width: 'w-24 shrink-0' },
+    { key: 'age', label: 'Age', width: 'w-16 shrink-0' },
+  ],
   // Contour
   httpproxies: [
     { key: 'name', label: 'Name', width: 'min-w-40' },
@@ -1295,6 +1365,7 @@ const KNOWN_COLUMNS: Record<string, Column[]> = {
 
 // Map (plural, group) → KNOWN_COLUMNS key for kinds that collide with core K8s
 const GROUP_QUALIFIED_COLUMN_KEYS: Record<string, Record<string, string>> = {
+  clusters: { 'postgresql.cnpg.io': 'cnpgclusters', 'cluster.x-k8s.io': 'capiclusters' },
   services: { 'serving.knative.dev': 'knativeservices' },
   configurations: { 'serving.knative.dev': 'knativeconfigurations' },
   revisions: { 'serving.knative.dev': 'knativerevisions' },
@@ -3885,6 +3956,29 @@ function CellContent({ resource, kind, column, group, majorityNodeMinorVersion }
     // Contour
     case 'httpproxies':
       return <HTTPProxyCell resource={resource} column={column} />
+    // Cluster API (CAPI)
+    case 'clusters':
+      return <CAPIClusterCell resource={resource} column={column} />
+    case 'machines':
+      return <CAPIMachineCell resource={resource} column={column} />
+    case 'machinedeployments':
+      return <CAPIMachineDeploymentCell resource={resource} column={column} />
+    case 'machinesets':
+      return <CAPIMachineSetCell resource={resource} column={column} />
+    case 'machinepools':
+      return <CAPIMachinePoolCell resource={resource} column={column} />
+    case 'kubeadmcontrolplanes':
+      return <CAPIKubeadmControlPlaneCell resource={resource} column={column} />
+    case 'clusterclasses':
+      return <CAPIClusterClassCell resource={resource} column={column} />
+    case 'machinehealthchecks':
+      return <CAPIMachineHealthCheckCell resource={resource} column={column} />
+    case 'machinedrainrules':
+    case 'kubeadmconfigs':
+    case 'kubeadmconfigtemplates':
+    case 'kubeadmcontrolplanetemplates':
+      // These use default columns — no custom cell renderer needed
+      return <GenericCell resource={resource} column={column} />
     default:
       // Generic cell for CRDs and unknown resources
       return <GenericCell resource={resource} column={column} />

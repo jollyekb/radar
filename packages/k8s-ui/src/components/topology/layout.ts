@@ -764,6 +764,8 @@ const KIND_PRIORITY: Record<string, number> = {
   'Middleware': 3, 'MiddlewareTCP': 3, 'ServersTransport': 4, 'ServersTransportTCP': 4,
   'TLSOption': 4, 'TLSStore': 4, 'HTTPProxy': 1,
   'Application': 1, 'Kustomization': 1, 'HelmRelease': 1, 'GitRepository': 2,
+  'CAPICluster': 1, 'MachineDeployment': 2, 'MachineSet': 3, 'Machine': 4,
+  'MachinePool': 2, 'KubeadmControlPlane': 1, 'ClusterClass': 1, 'MachineHealthCheck': 5,
 }
 
 // Compute grid dimensions from workload card count

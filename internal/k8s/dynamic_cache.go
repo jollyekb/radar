@@ -211,6 +211,14 @@ func WarmupCommonCRDs() {
 		"TLSOption",                    // Traefik
 		"TLSStore",                     // Traefik
 		"HTTPProxy",                    // Contour
+		"Cluster",                      // Cluster API (CAPI)
+		"ClusterClass",                 // Cluster API (CAPI)
+		"Machine",                      // Cluster API (CAPI)
+		"MachineSet",                   // Cluster API (CAPI)
+		"MachineDeployment",            // Cluster API (CAPI)
+		"MachinePool",                  // Cluster API (CAPI)
+		"MachineHealthCheck",           // Cluster API (CAPI)
+		"MachineDrainRule",             // Cluster API (CAPI)
 	}
 
 	var gvrs []schema.GroupVersionResource

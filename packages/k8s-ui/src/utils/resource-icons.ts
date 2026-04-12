@@ -61,6 +61,10 @@ import {
   Lock,
   ArrowRightLeft,
 
+  // Cluster API
+  HeartPulse,
+  BookOpen,
+
   // Fallback
   Puzzle,
 } from 'lucide-react'
@@ -189,6 +193,16 @@ const KIND_ICON_MAP: Record<string, LucideIcon> = {
 
   // Contour
   httpproxy: Globe,
+
+  // Cluster API
+  capicluster: Server,
+  machinedeployment: Layers,
+  machineset: Layers,
+  machine: Cpu,
+  machinepool: Layers,
+  kubeadmcontrolplane: Shield,
+  clusterclass: BookOpen,
+  machinehealthcheck: HeartPulse,
 
   // Trivy Operator
   vulnerabilityreport: Shield,

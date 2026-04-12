@@ -66,6 +66,7 @@ import {
   getRevisionStatus,
 } from '../resources/resource-utils-knative'
 import { getHTTPProxyStatus } from '../resources/resource-utils-contour'
+import { getClusterStatus as getCAPIClusterStatus, getMachineStatus, getMachineDeploymentStatus, getMachineSetStatus, getMachinePoolStatus, getKCPStatus, getClusterClassStatus, getMachineHealthCheckStatus } from '../resources/resource-utils-capi'
 import {
   PodRenderer,
   WorkloadRenderer,
@@ -174,6 +175,16 @@ import {
   LeaseRenderer,
   TraefikIngressRouteRenderer,
   ContourHTTPProxyRenderer,
+  CAPIClusterRenderer,
+  CAPIMachineRenderer,
+  CAPIMachineDeploymentRenderer,
+  CAPIKubeadmControlPlaneRenderer,
+  CAPIMachineSetRenderer,
+  CAPIMachinePoolRenderer,
+  CAPIClusterClassRenderer,
+  CAPIMachineHealthCheckRenderer,
+  CAPIMachineDrainRuleRenderer,
+  CAPIKubeadmConfigRenderer,
 } from '../resources/renderers'
 import type { SelectedResource, Relationships, ResourceRef, SecretCertificateInfo, ResolvedEnvFrom } from '../../types'
 import type { CopyHandler } from '../ui/drawer-components'
@@ -243,6 +254,10 @@ const KNOWN_KINDS = new Set([
   'knativeingresses', 'knativecertificates', 'serverlessservices', 'domainmappings',
   'ingressroutes', 'ingressroutetcps', 'ingressrouteudps',
   'httpproxies',
+  'machinedeployments', 'machines', 'machinesets', 'machinepools',
+  'kubeadmcontrolplanes', 'clusterclasses', 'machinehealthchecks',
+  'machinedrainrules', 'kubeadmconfigs', 'kubeadmconfigtemplates',
+  'kubeadmcontrolplanetemplates',
 ])
 
 // ============================================================================
@@ -397,9 +412,20 @@ export function ResourceRendererDispatch({
         {kind === 'externalsecrets' && <ExternalSecretRenderer data={data} onNavigate={onNavigate} />}
         {kind === 'clusterexternalsecrets' && <ClusterExternalSecretRenderer data={data} onNavigate={onNavigate} />}
         {(kind === 'secretstores' || kind === 'clustersecretstores') && <SecretStoreRenderer data={data} />}
-        {kind === 'clusters' && <CNPGClusterRenderer data={data} onNavigate={onNavigate} />}
+        {kind === 'clusters' && !data?.apiVersion?.includes('cluster.x-k8s.io') && <CNPGClusterRenderer data={data} onNavigate={onNavigate} />}
+        {kind === 'clusters' && data?.apiVersion?.includes('cluster.x-k8s.io') && <CAPIClusterRenderer data={data} onNavigate={onNavigate} />}
         {kind === 'scheduledbackups' && <CNPGScheduledBackupRenderer data={data} onNavigate={onNavigate} />}
         {kind === 'poolers' && <CNPGPoolerRenderer data={data} onNavigate={onNavigate} />}
+        {/* Cluster API (CAPI) */}
+        {kind === 'machines' && data?.apiVersion?.includes('cluster.x-k8s.io') && <CAPIMachineRenderer data={data} onNavigate={onNavigate} />}
+        {kind === 'machinedeployments' && <CAPIMachineDeploymentRenderer data={data} />}
+        {kind === 'machinesets' && data?.apiVersion?.includes('cluster.x-k8s.io') && <CAPIMachineSetRenderer data={data} />}
+        {kind === 'machinepools' && <CAPIMachinePoolRenderer data={data} />}
+        {kind === 'kubeadmcontrolplanes' && <CAPIKubeadmControlPlaneRenderer data={data} />}
+        {kind === 'clusterclasses' && <CAPIClusterClassRenderer data={data} />}
+        {kind === 'machinehealthchecks' && <CAPIMachineHealthCheckRenderer data={data} />}
+        {kind === 'machinedrainrules' && <CAPIMachineDrainRuleRenderer data={data} />}
+        {(kind === 'kubeadmconfigs' || kind === 'kubeadmconfigtemplates') && <CAPIKubeadmConfigRenderer data={data} />}
         {kind === 'virtualservices' && <IstioVirtualServiceRenderer data={data} onNavigate={onNavigate} />}
         {kind === 'destinationrules' && <IstioDestinationRuleRenderer data={data} onNavigate={onNavigate} />}
         {kind === 'serviceentries' && <IstioServiceEntryRenderer data={data} />}
@@ -546,7 +572,17 @@ export function getResourceStatus(kind: string, data: any): { text: string; colo
   if (k === 'clusterexternalsecrets') return getClusterExternalSecretStatus(data)
   if (k === 'secretstores') return getSecretStoreStatus(data)
   if (k === 'clustersecretstores') return getClusterSecretStoreStatus(data)
-  if (k === 'clusters') return getCNPGClusterStatus(data)
+  if (k === 'clusters') {
+    if (data.apiVersion?.includes('cluster.x-k8s.io')) return getCAPIClusterStatus(data)
+    return getCNPGClusterStatus(data)
+  }
+  if (k === 'machines' && data.apiVersion?.includes('cluster.x-k8s.io')) return getMachineStatus(data)
+  if (k === 'machinedeployments') return getMachineDeploymentStatus(data)
+  if (k === 'machinesets') return getMachineSetStatus(data)
+  if (k === 'machinepools') return getMachinePoolStatus(data)
+  if (k === 'kubeadmcontrolplanes') return getKCPStatus(data)
+  if (k === 'clusterclasses') return getClusterClassStatus(data)
+  if (k === 'machinehealthchecks') return getMachineHealthCheckStatus(data)
   if (k === 'scheduledbackups') return getCNPGScheduledBackupStatus(data)
   if (k === 'poolers') return getCNPGPoolerStatus(data)
   if (k === 'virtualservices') return getVirtualServiceStatus(data)

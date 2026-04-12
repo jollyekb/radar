@@ -55,6 +55,8 @@ const ALL_NODE_KINDS: NodeKind[] = [
   'IngressRoute', 'IngressRouteTCP', 'IngressRouteUDP', 'Middleware', 'MiddlewareTCP',
   'TraefikService', 'ServersTransport', 'ServersTransportTCP', 'TLSOption', 'TLSStore',
   'HTTPProxy', // Contour
+  'CAPICluster', 'MachineDeployment', 'MachineSet', 'Machine', 'MachinePool', // Cluster API
+  'KubeadmControlPlane', 'ClusterClass', 'MachineHealthCheck',
 ]
 
 // Default visible kinds (ReplicaSet hidden by default - noisy intermediate object)

@@ -1011,6 +1011,442 @@ func (b *Builder) buildResourcesTopology(opts BuildOptions) (*Topology, error) {
 		}
 	}
 
+	// 1i-b. Add Cluster API (CAPI) nodes and edges
+	capiClusterIDs := make(map[string]string) // ns/name -> clusterID
+	var cachedCAPIClusters []*unstructured.Unstructured
+
+	var capiClusterGVR schema.GroupVersionResource
+	hasCAPIClusters := false
+	if resourceDiscovery != nil {
+		capiClusterGVR, hasCAPIClusters = resourceDiscovery.GetGVR("Cluster")
+	}
+	// Only proceed if the GVR is from cluster.x-k8s.io (not some other "Cluster" CRD)
+	if hasCAPIClusters && capiClusterGVR.Group == "cluster.x-k8s.io" && dynamicCache != nil {
+		clusters, clErr := dynamicCache.List(capiClusterGVR, opts.NamespaceFilter())
+		if clErr != nil {
+			log.Printf("WARNING [topology] Failed to list CAPI Clusters: %v", clErr)
+			warnings = append(warnings, fmt.Sprintf("Failed to list CAPI Clusters: %v", clErr))
+		}
+		cachedCAPIClusters = clusters
+		for _, cl := range clusters {
+			ns := cl.GetNamespace()
+			if !opts.MatchesNamespaceFilter(ns) {
+				continue
+			}
+			name := cl.GetName()
+			clID := fmt.Sprintf("capicluster/%s/%s", ns, name)
+			capiClusterIDs[ns+"/"+name] = clID
+			nodes = append(nodes, Node{
+				ID:     clID,
+				Kind:   KindCAPICluster,
+				Name:   name,
+				Status: extractCAPIPhaseStatus(*cl),
+				Data: map[string]any{
+					"namespace": ns,
+					"labels":    cl.GetLabels(),
+				},
+			})
+		}
+	}
+
+	// CAPI ClusterClass nodes + ClusterClass → Cluster edges
+	clusterClassIDs := make(map[string]string) // name -> classID (cluster-scoped)
+	var capiClusterClassGVR schema.GroupVersionResource
+	hasCAPIClusterClasses := false
+	if resourceDiscovery != nil {
+		capiClusterClassGVR, hasCAPIClusterClasses = resourceDiscovery.GetGVR("ClusterClass")
+	}
+	if hasCAPIClusterClasses && dynamicCache != nil {
+		clusterClasses, ccErr := dynamicCache.List(capiClusterClassGVR, opts.NamespaceFilter())
+		if ccErr != nil {
+			log.Printf("WARNING [topology] Failed to list CAPI ClusterClasses: %v", ccErr)
+			warnings = append(warnings, fmt.Sprintf("Failed to list CAPI ClusterClasses: %v", ccErr))
+		}
+		for _, cc := range clusterClasses {
+			ns := cc.GetNamespace()
+			if ns != "" && !opts.MatchesNamespaceFilter(ns) {
+				continue
+			}
+			name := cc.GetName()
+			ccID := fmt.Sprintf("clusterclass/%s/%s", ns, name)
+			clusterClassIDs[ns+"/"+name] = ccID
+			nodes = append(nodes, Node{
+				ID:     ccID,
+				Kind:   KindClusterClass,
+				Name:   name,
+				Status: extractCAPIReadyConditionStatus(*cc),
+				Data: map[string]any{
+					"namespace": ns,
+					"labels":    cc.GetLabels(),
+				},
+			})
+		}
+
+		// ClusterClass → Cluster edges (via spec.topology.class)
+		if len(clusterClassIDs) > 0 {
+			for _, cl := range cachedCAPIClusters {
+				ns := cl.GetNamespace()
+				if !opts.MatchesNamespaceFilter(ns) {
+					continue
+				}
+				clID, ok := capiClusterIDs[ns+"/"+cl.GetName()]
+				if !ok {
+					continue
+				}
+				className, _, _ := unstructured.NestedString(cl.Object, "spec", "topology", "class")
+				if className == "" {
+					continue
+				}
+				// ClusterClass can be in same namespace or cluster-scoped
+				ccID, ok := clusterClassIDs[ns+"/"+className]
+				if !ok {
+					ccID, ok = clusterClassIDs["/"+className]
+				}
+				if ok {
+					edges = append(edges, Edge{
+						ID:     fmt.Sprintf("%s-to-%s", ccID, clID),
+						Source: ccID,
+						Target: clID,
+						Type:   EdgeConfigures,
+					})
+				}
+			}
+		}
+	}
+
+	// CAPI KubeadmControlPlane nodes + Cluster → KCP edges
+	kcpIDs := make(map[string]string) // ns/name -> kcpID
+	var kcpGVR schema.GroupVersionResource
+	hasKCPs := false
+	if resourceDiscovery != nil {
+		kcpGVR, hasKCPs = resourceDiscovery.GetGVR("KubeadmControlPlane")
+	}
+	if hasKCPs && dynamicCache != nil {
+		kcps, kcpErr := dynamicCache.List(kcpGVR, opts.NamespaceFilter())
+		if kcpErr != nil {
+			log.Printf("WARNING [topology] Failed to list CAPI KubeadmControlPlanes: %v", kcpErr)
+			warnings = append(warnings, fmt.Sprintf("Failed to list CAPI KubeadmControlPlanes: %v", kcpErr))
+		}
+		for _, kcp := range kcps {
+			ns := kcp.GetNamespace()
+			if !opts.MatchesNamespaceFilter(ns) {
+				continue
+			}
+			name := kcp.GetName()
+			kcpID := fmt.Sprintf("kubeadmcontrolplane/%s/%s", ns, name)
+			kcpIDs[ns+"/"+name] = kcpID
+			nodes = append(nodes, Node{
+				ID:     kcpID,
+				Kind:   KindKubeadmControlPlane,
+				Name:   name,
+				Status: extractCAPIReadyConditionStatus(*kcp),
+				Data: map[string]any{
+					"namespace": ns,
+					"labels":    kcp.GetLabels(),
+				},
+			})
+
+			// Cluster → KCP edge via ownerRef
+			for _, ownerRef := range kcp.GetOwnerReferences() {
+				if ownerRef.Kind == "Cluster" {
+					if clID, ok := capiClusterIDs[ns+"/"+ownerRef.Name]; ok {
+						edges = append(edges, Edge{
+							ID:     fmt.Sprintf("%s-to-%s", clID, kcpID),
+							Source: clID,
+							Target: kcpID,
+							Type:   EdgeManages,
+						})
+					}
+				}
+			}
+		}
+	}
+
+	// CAPI MachineDeployment nodes + Cluster → MD edges
+	machineDeploymentIDs := make(map[string]string) // ns/name -> mdID
+	var mdGVR schema.GroupVersionResource
+	hasMDs := false
+	if resourceDiscovery != nil {
+		mdGVR, hasMDs = resourceDiscovery.GetGVR("MachineDeployment")
+	}
+	if hasMDs && dynamicCache != nil {
+		mds, mdErr := dynamicCache.List(mdGVR, opts.NamespaceFilter())
+		if mdErr != nil {
+			log.Printf("WARNING [topology] Failed to list CAPI MachineDeployments: %v", mdErr)
+			warnings = append(warnings, fmt.Sprintf("Failed to list CAPI MachineDeployments: %v", mdErr))
+		}
+		for _, md := range mds {
+			ns := md.GetNamespace()
+			if !opts.MatchesNamespaceFilter(ns) {
+				continue
+			}
+			name := md.GetName()
+			mdID := fmt.Sprintf("machinedeployment/%s/%s", ns, name)
+			machineDeploymentIDs[ns+"/"+name] = mdID
+			nodes = append(nodes, Node{
+				ID:     mdID,
+				Kind:   KindMachineDeployment,
+				Name:   name,
+				Status: extractCAPIPhaseStatus(*md),
+				Data: map[string]any{
+					"namespace": ns,
+					"labels":    md.GetLabels(),
+				},
+			})
+
+			// Cluster → MachineDeployment edge via ownerRef
+			for _, ownerRef := range md.GetOwnerReferences() {
+				if ownerRef.Kind == "Cluster" {
+					if clID, ok := capiClusterIDs[ns+"/"+ownerRef.Name]; ok {
+						edges = append(edges, Edge{
+							ID:     fmt.Sprintf("%s-to-%s", clID, mdID),
+							Source: clID,
+							Target: mdID,
+							Type:   EdgeManages,
+						})
+					}
+				}
+			}
+		}
+	}
+
+	// CAPI MachinePool nodes + Cluster → MP edges
+	machinePoolIDs := make(map[string]string) // ns/name -> mpID
+	var mpGVR schema.GroupVersionResource
+	hasMPs := false
+	if resourceDiscovery != nil {
+		mpGVR, hasMPs = resourceDiscovery.GetGVR("MachinePool")
+	}
+	if hasMPs && dynamicCache != nil {
+		mps, mpErr := dynamicCache.List(mpGVR, opts.NamespaceFilter())
+		if mpErr != nil {
+			log.Printf("WARNING [topology] Failed to list CAPI MachinePools: %v", mpErr)
+			warnings = append(warnings, fmt.Sprintf("Failed to list CAPI MachinePools: %v", mpErr))
+		}
+		for _, mp := range mps {
+			ns := mp.GetNamespace()
+			if !opts.MatchesNamespaceFilter(ns) {
+				continue
+			}
+			name := mp.GetName()
+			mpID := fmt.Sprintf("machinepool/%s/%s", ns, name)
+			machinePoolIDs[ns+"/"+name] = mpID
+			nodes = append(nodes, Node{
+				ID:     mpID,
+				Kind:   KindMachinePool,
+				Name:   name,
+				Status: extractCAPIPhaseStatus(*mp),
+				Data: map[string]any{
+					"namespace": ns,
+					"labels":    mp.GetLabels(),
+				},
+			})
+
+			// Cluster → MachinePool edge via ownerRef
+			for _, ownerRef := range mp.GetOwnerReferences() {
+				if ownerRef.Kind == "Cluster" {
+					if clID, ok := capiClusterIDs[ns+"/"+ownerRef.Name]; ok {
+						edges = append(edges, Edge{
+							ID:     fmt.Sprintf("%s-to-%s", clID, mpID),
+							Source: clID,
+							Target: mpID,
+							Type:   EdgeManages,
+						})
+					}
+				}
+			}
+		}
+	}
+
+	// CAPI MachineSet nodes + MachineDeployment → MS edges
+	capiMachineSetIDs := make(map[string]string) // ns/name -> msID
+	var capiMsGVR schema.GroupVersionResource
+	hasCAPIMachineSets := false
+	if resourceDiscovery != nil {
+		capiMsGVR, hasCAPIMachineSets = resourceDiscovery.GetGVR("MachineSet")
+	}
+	if hasCAPIMachineSets && capiMsGVR.Group == "cluster.x-k8s.io" && dynamicCache != nil {
+		machineSets, msErr := dynamicCache.List(capiMsGVR, opts.NamespaceFilter())
+		if msErr != nil {
+			log.Printf("WARNING [topology] Failed to list CAPI MachineSets: %v", msErr)
+			warnings = append(warnings, fmt.Sprintf("Failed to list CAPI MachineSets: %v", msErr))
+		}
+		for _, ms := range machineSets {
+			ns := ms.GetNamespace()
+			if !opts.MatchesNamespaceFilter(ns) {
+				continue
+			}
+			name := ms.GetName()
+			msID := fmt.Sprintf("machineset/%s/%s", ns, name)
+			capiMachineSetIDs[ns+"/"+name] = msID
+			nodes = append(nodes, Node{
+				ID:     msID,
+				Kind:   KindMachineSet,
+				Name:   name,
+				Status: extractCAPIPhaseStatus(*ms),
+				Data: map[string]any{
+					"namespace": ns,
+					"labels":    ms.GetLabels(),
+				},
+			})
+
+			// MachineDeployment → MachineSet edge via ownerRef
+			for _, ownerRef := range ms.GetOwnerReferences() {
+				if ownerRef.Kind == "MachineDeployment" {
+					if mdID, ok := machineDeploymentIDs[ns+"/"+ownerRef.Name]; ok {
+						edges = append(edges, Edge{
+							ID:     fmt.Sprintf("%s-to-%s", mdID, msID),
+							Source: mdID,
+							Target: msID,
+							Type:   EdgeManages,
+						})
+					}
+				}
+			}
+		}
+	}
+
+	// CAPI Machine nodes + owner edges (MachineSet/KCP/MachinePool → Machine) + Machine → Node edge
+	capiMachineNodeNames := make(map[string]string) // nodeName -> machineID (for Machine → Node edges)
+	var capiMachineGVR schema.GroupVersionResource
+	hasCAPIMachines := false
+	if resourceDiscovery != nil {
+		capiMachineGVR, hasCAPIMachines = resourceDiscovery.GetGVR("Machine")
+	}
+	if hasCAPIMachines && capiMachineGVR.Group == "cluster.x-k8s.io" && dynamicCache != nil {
+		machines, mErr := dynamicCache.List(capiMachineGVR, opts.NamespaceFilter())
+		if mErr != nil {
+			log.Printf("WARNING [topology] Failed to list CAPI Machines: %v", mErr)
+			warnings = append(warnings, fmt.Sprintf("Failed to list CAPI Machines: %v", mErr))
+		}
+		for _, m := range machines {
+			ns := m.GetNamespace()
+			if !opts.MatchesNamespaceFilter(ns) {
+				continue
+			}
+			name := m.GetName()
+			mID := fmt.Sprintf("machine/%s/%s", ns, name)
+			nodes = append(nodes, Node{
+				ID:     mID,
+				Kind:   KindMachine,
+				Name:   name,
+				Status: extractCAPIPhaseStatus(*m),
+				Data: map[string]any{
+					"namespace": ns,
+					"labels":    m.GetLabels(),
+				},
+			})
+
+			// Owner edges: MachineSet, KCP, or MachinePool → Machine
+			for _, ownerRef := range m.GetOwnerReferences() {
+				var ownerID string
+				switch ownerRef.Kind {
+				case "MachineSet":
+					ownerID = capiMachineSetIDs[ns+"/"+ownerRef.Name]
+				case "KubeadmControlPlane":
+					ownerID = kcpIDs[ns+"/"+ownerRef.Name]
+				case "MachinePool":
+					ownerID = machinePoolIDs[ns+"/"+ownerRef.Name]
+				}
+				if ownerID != "" {
+					edges = append(edges, Edge{
+						ID:     fmt.Sprintf("%s-to-%s", ownerID, mID),
+						Source: ownerID,
+						Target: mID,
+						Type:   EdgeManages,
+					})
+				}
+			}
+
+			// Collect status.nodeRef.name for Machine → Node edges
+			if nodeName, _, _ := unstructured.NestedString(m.Object, "status", "nodeRef", "name"); nodeName != "" {
+				capiMachineNodeNames[nodeName] = mID
+			}
+		}
+	}
+
+	// CAPI Machine → Node edges (via status.nodeRef)
+	if len(capiMachineNodeNames) > 0 {
+		allNodes, nodeErr := b.provider.Nodes()
+		if nodeErr != nil {
+			log.Printf("WARNING [topology] Failed to list Nodes for CAPI Machine edges: %v", nodeErr)
+		} else {
+			for _, node := range allNodes {
+				machineID, ok := capiMachineNodeNames[node.Name]
+				if !ok {
+					continue
+				}
+				nodeID := fmt.Sprintf("node//%s", node.Name)
+				// Only add node if not already present (Karpenter may have added it)
+				if !nodeIDExists(nodes, nodeID) {
+					nodes = append(nodes, Node{
+						ID:     nodeID,
+						Kind:   KindNode,
+						Name:   node.Name,
+						Status: extractNodeStatus(*node),
+						Data: map[string]any{
+							"namespace":    "",
+							"labels":       node.Labels,
+							"instanceType": node.Labels["node.kubernetes.io/instance-type"],
+						},
+					})
+				}
+				edges = append(edges, Edge{
+					ID:     fmt.Sprintf("%s-to-%s", machineID, nodeID),
+					Source: machineID,
+					Target: nodeID,
+					Type:   EdgeManages,
+				})
+			}
+		}
+	}
+
+	// CAPI MachineHealthCheck nodes + MHC → target edges
+	var mhcGVR schema.GroupVersionResource
+	hasMHCs := false
+	if resourceDiscovery != nil {
+		mhcGVR, hasMHCs = resourceDiscovery.GetGVR("MachineHealthCheck")
+	}
+	if hasMHCs && dynamicCache != nil {
+		mhcs, mhcErr := dynamicCache.List(mhcGVR, opts.NamespaceFilter())
+		if mhcErr != nil {
+			log.Printf("WARNING [topology] Failed to list CAPI MachineHealthChecks: %v", mhcErr)
+			warnings = append(warnings, fmt.Sprintf("Failed to list CAPI MachineHealthChecks: %v", mhcErr))
+		}
+		for _, mhc := range mhcs {
+			ns := mhc.GetNamespace()
+			if !opts.MatchesNamespaceFilter(ns) {
+				continue
+			}
+			name := mhc.GetName()
+			mhcID := fmt.Sprintf("machinehealthcheck/%s/%s", ns, name)
+			nodes = append(nodes, Node{
+				ID:     mhcID,
+				Kind:   KindMachineHealthCheck,
+				Name:   name,
+				Status: extractCAPIReadyConditionStatus(*mhc),
+				Data: map[string]any{
+					"namespace": ns,
+					"labels":    mhc.GetLabels(),
+				},
+			})
+
+			// MHC → Cluster edge via ownerRef
+			for _, ownerRef := range mhc.GetOwnerReferences() {
+				if ownerRef.Kind == "Cluster" {
+					if clID, ok := capiClusterIDs[ns+"/"+ownerRef.Name]; ok {
+						edges = append(edges, Edge{
+							ID:     fmt.Sprintf("%s-to-%s", clID, mhcID),
+							Source: clID,
+							Target: mhcID,
+							Type:   EdgeProtects,
+						})
+					}
+				}
+			}
+		}
+	}
+
 	// 1j. Add Gateway API GatewayClass nodes (CRD - fetched via dynamic cache)
 	gatewayClassIDs := make(map[string]string) // name -> gatewayClassID (cluster-scoped)
 
@@ -6945,6 +7381,64 @@ func extractGatewayClassStatus(gc unstructured.Unstructured) HealthStatus {
 	return StatusUnknown
 }
 
+// extractCAPIPhaseStatus reads status.phase from a CAPI resource and maps it to HealthStatus.
+// Used for Cluster, Machine, MachineDeployment, MachineSet, MachinePool.
+func extractCAPIPhaseStatus(obj unstructured.Unstructured) HealthStatus {
+	phase, _, _ := unstructured.NestedString(obj.Object, "status", "phase")
+	switch strings.ToLower(phase) {
+	case "provisioned", "running", "ready", "scaled":
+		return StatusHealthy
+	case "provisioning", "pending", "scaling", "upgrading", "deleting":
+		return StatusDegraded
+	case "failed", "unknown":
+		return StatusUnhealthy
+	case "":
+		// Fall back to Ready condition
+		return extractCAPIReadyConditionStatus(obj)
+	}
+	return StatusUnknown
+}
+
+// extractCAPIReadyConditionStatus reads the Ready condition from a CAPI resource.
+// Handles both v1beta1 (status.conditions) and v1beta2 (status.v1beta2.conditions) layouts.
+func extractCAPIReadyConditionStatus(obj unstructured.Unstructured) HealthStatus {
+	// Try v1beta2 conditions first
+	conditions, found, _ := unstructured.NestedSlice(obj.Object, "status", "v1beta2", "conditions")
+	if !found {
+		conditions, found, _ = unstructured.NestedSlice(obj.Object, "status", "conditions")
+	}
+	if !found {
+		return StatusUnknown
+	}
+	for _, c := range conditions {
+		cond, ok := c.(map[string]any)
+		if !ok {
+			continue
+		}
+		condType, _ := cond["type"].(string)
+		if condType == "Ready" || condType == "Available" {
+			switch cond["status"] {
+			case "True":
+				return StatusHealthy
+			case "False":
+				return StatusUnhealthy
+			}
+			return StatusUnknown
+		}
+	}
+	return StatusUnknown
+}
+
+// nodeIDExists checks if a node with the given ID already exists in the slice.
+func nodeIDExists(nodes []Node, id string) bool {
+	for _, n := range nodes {
+		if n.ID == id {
+			return true
+		}
+	}
+	return false
+}
+
 // addGenericCRDNodes adds CRD nodes connected to the topology via owner references.
 // It uses two-phase resolution: first collecting all candidate CRD resources, then
 // iteratively adding nodes whose owners are already in the topology. This handles
@@ -6986,6 +7480,10 @@ func (b *Builder) addGenericCRDNodes(nodes []Node, edges []Edge, opts BuildOptio
 		"serverstransport": true, "serverstransporttcp": true,                           // Traefik transport
 		"tlsoption": true, "tlsstore": true,                                             // Traefik TLS
 		"httpproxy": true,                                                               // Contour
+		"cluster": true, "clusterclass": true,                                           // Cluster API
+		"machine": true, "machineset": true, "machinedeployment": true,                  // Cluster API
+		"machinepool": true, "kubeadmcontrolplane": true, "machinehealthcheck": true,    // Cluster API
+		"machinedrainrule": true,                                                        // Cluster API
 		// Trivy Operator reports - high cardinality, excluded from topology
 		"vulnerabilityreport": true, "configauditreport": true,
 		"exposedsecretreport": true, "sbomreport": true,

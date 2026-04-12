@@ -22,6 +22,7 @@ import (
 	"github.com/go-chi/cors"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
@@ -324,6 +325,9 @@ func (s *Server) setupRoutes() {
 			// Context routes
 			r.Get("/contexts", s.handleListContexts)
 			r.Post("/contexts/{name}", s.handleSwitchContext)
+
+			// CAPI routes
+			r.Get("/capi/clusters/{ns}/{name}/kubeconfig", s.handleCAPIClusterKubeconfig)
 
 			// Connection status routes (for graceful startup)
 			r.Get("/connection", s.handleConnectionStatus)
@@ -2327,6 +2331,52 @@ func (s *Server) handleConnectionRetry(w http.ResponseWriter, r *http.Request) {
 	})
 
 	s.writeJSON(w, k8s.GetConnectionStatus())
+}
+
+// CAPI handlers
+
+func (s *Server) handleCAPIClusterKubeconfig(w http.ResponseWriter, r *http.Request) {
+	if !s.requireConnected(w) {
+		return
+	}
+
+	ns := chi.URLParam(r, "ns")
+	name := chi.URLParam(r, "name")
+	if ns == "" || name == "" {
+		s.writeError(w, http.StatusBadRequest, "namespace and name are required")
+		return
+	}
+
+	client := k8s.GetClient()
+	if client == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "kubernetes client not initialized")
+		return
+	}
+
+	// CAPI stores workload cluster kubeconfig in a Secret named "{cluster-name}-kubeconfig"
+	secretName := name + "-kubeconfig"
+	secret, err := client.CoreV1().Secrets(ns).Get(r.Context(), secretName, metav1.GetOptions{})
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			s.writeError(w, http.StatusNotFound, fmt.Sprintf("kubeconfig secret %q not found in namespace %q", secretName, ns))
+			return
+		}
+		log.Printf("[capi] Failed to get kubeconfig secret %s/%s: %v", ns, secretName, err)
+		s.writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	// The kubeconfig is stored in the "value" key
+	kubeconfigData, ok := secret.Data["value"]
+	if !ok {
+		s.writeError(w, http.StatusNotFound, "kubeconfig secret does not contain 'value' key")
+		return
+	}
+
+	// Return as YAML download
+	w.Header().Set("Content-Type", "application/x-yaml")
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%s-kubeconfig.yaml", name))
+	w.Write(kubeconfigData)
 }
 
 // Helper methods

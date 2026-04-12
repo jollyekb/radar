@@ -380,6 +380,14 @@ func buildNodeID(kind, namespace, name string, dp DynamicProvider) string {
 		"verticalpodautoscalers":   "verticalpodautoscaler",
 		"vpas":                     "verticalpodautoscaler",
 		"nodes":                    "node",
+		"clusters":                 "capicluster",          // Cluster API
+		"clusterclasses":           "clusterclass",         // Cluster API
+		"machines":                 "machine",              // Cluster API
+		"machinesets":              "machineset",           // Cluster API
+		"machinedeployments":       "machinedeployment",    // Cluster API
+		"machinepools":             "machinepool",          // Cluster API
+		"kubeadmcontrolplanes":     "kubeadmcontrolplane",  // Cluster API
+		"machinehealthchecks":      "machinehealthcheck",   // Cluster API
 	}
 
 	if singular, ok := kindMap[k]; ok {
@@ -506,6 +514,14 @@ func normalizeKind(kind string, dp DynamicProvider) string {
 		"ciliumclusterwidenetworkpolicy":     "CiliumClusterwideNetworkPolicy",
 		"clusternetworkpolicy":               "ClusterNetworkPolicy",
 		"verticalpodautoscaler":              "VerticalPodAutoscaler",
+		"capicluster":                        "Cluster",              // Cluster API
+		"clusterclass":                       "ClusterClass",         // Cluster API
+		"machine":                            "Machine",              // Cluster API
+		"machineset":                         "MachineSet",           // Cluster API
+		"machinedeployment":                  "MachineDeployment",    // Cluster API
+		"machinepool":                        "MachinePool",          // Cluster API
+		"kubeadmcontrolplane":                "KubeadmControlPlane",  // Cluster API
+		"machinehealthcheck":                 "MachineHealthCheck",   // Cluster API
 	}
 
 	if normalized, ok := kindMap[strings.ToLower(kind)]; ok {
