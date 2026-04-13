@@ -808,17 +808,17 @@ func MergeAndSwitchContext(kubeconfigData []byte, contextName string) (string, e
 	if len(kubeconfigPaths) == 0 && kubeconfigPath != "" {
 		kubeconfigPaths = []string{kubeconfigPath}
 	}
-	// Check if we already have a temp file for this context (reuse instead of accumulating)
-	alreadyAdded := false
-	for _, p := range kubeconfigPaths {
-		if p == tmpPath {
-			alreadyAdded = true
-			break
+	// Remove stale path for this context if overwrite failed above
+	if existingPath != "" {
+		updated := kubeconfigPaths[:0]
+		for _, p := range kubeconfigPaths {
+			if p != existingPath {
+				updated = append(updated, p)
+			}
 		}
+		kubeconfigPaths = updated
 	}
-	if !alreadyAdded {
-		kubeconfigPaths = append(kubeconfigPaths, tmpPath)
-	}
+	kubeconfigPaths = append(kubeconfigPaths, tmpPath)
 	capiKubeconfigs[contextName] = tmpPath
 	clientMu.Unlock()
 
