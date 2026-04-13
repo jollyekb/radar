@@ -100,6 +100,14 @@ export type CoreNodeKind =
   | 'TLSOption'          // Traefik TLSOption
   | 'TLSStore'           // Traefik TLSStore
   | 'HTTPProxy'          // Contour HTTPProxy
+  | 'CAPICluster'        // Cluster API Cluster
+  | 'MachineDeployment'  // Cluster API MachineDeployment
+  | 'MachineSet'         // Cluster API MachineSet
+  | 'Machine'            // Cluster API Machine
+  | 'MachinePool'        // Cluster API MachinePool
+  | 'KubeadmControlPlane' // Cluster API KubeadmControlPlane
+  | 'ClusterClass'       // Cluster API ClusterClass
+  | 'MachineHealthCheck' // Cluster API MachineHealthCheck
 
 // NodeKind can be a core kind or any arbitrary CRD kind string
 export type NodeKind = CoreNodeKind | (string & {})
@@ -122,6 +130,14 @@ export function displayKind(kind: string): string {
     TraefikService: 'Traefik Svc',
     ServersTransport: 'Transport',
     ServersTransportTCP: 'Transport TCP',
+    CAPICluster: 'Cluster',
+    MachineDeployment: 'Machine Deploy',
+    MachineSet: 'MachineSet',
+    Machine: 'Machine',
+    MachinePool: 'MachinePool',
+    KubeadmControlPlane: 'Control Plane',
+    ClusterClass: 'ClusterClass',
+    MachineHealthCheck: 'Health Check',
   }
   return shortNames[kind] || kind
 }
@@ -310,8 +326,8 @@ export type MainView = 'home' | 'topology' | 'resources' | 'timeline' | 'helm'
 
 // Topology view mode (for backwards compatibility, also exported as ViewMode)
 // NOTE: Must match Go backend constants in internal/topology/types.go
-export type TopologyMode = 'resources' | 'traffic'
-export type ViewMode = 'resources' | 'traffic'
+export type TopologyMode = 'resources' | 'traffic' | 'fleet'
+export type ViewMode = 'resources' | 'traffic' | 'fleet'
 
 // Grouping mode
 export type GroupingMode = 'none' | 'namespace' | 'app' | 'label'

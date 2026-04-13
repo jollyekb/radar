@@ -22,10 +22,12 @@ import (
 	"github.com/go-chi/cors"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/clientcmd"
 
 	"github.com/skyhook-io/radar/internal/auth"
 	"github.com/skyhook-io/radar/internal/config"
@@ -324,6 +326,10 @@ func (s *Server) setupRoutes() {
 			// Context routes
 			r.Get("/contexts", s.handleListContexts)
 			r.Post("/contexts/{name}", s.handleSwitchContext)
+
+			// CAPI routes
+			r.Get("/capi/clusters/{ns}/{name}/kubeconfig", s.handleCAPIClusterKubeconfig)
+			r.Post("/capi/clusters/{ns}/{name}/connect", s.handleCAPIClusterConnect)
 
 			// Connection status routes (for graceful startup)
 			r.Get("/connection", s.handleConnectionStatus)
@@ -2327,6 +2333,166 @@ func (s *Server) handleConnectionRetry(w http.ResponseWriter, r *http.Request) {
 	})
 
 	s.writeJSON(w, k8s.GetConnectionStatus())
+}
+
+// CAPI handlers
+
+func (s *Server) handleCAPIClusterKubeconfig(w http.ResponseWriter, r *http.Request) {
+	if !s.requireConnected(w) {
+		return
+	}
+
+	ns := chi.URLParam(r, "ns")
+	name := chi.URLParam(r, "name")
+	if ns == "" || name == "" {
+		s.writeError(w, http.StatusBadRequest, "namespace and name are required")
+		return
+	}
+
+	client := k8s.GetClient()
+	if client == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "kubernetes client not initialized")
+		return
+	}
+
+	// CAPI stores workload cluster kubeconfig in a Secret named "{cluster-name}-kubeconfig"
+	secretName := name + "-kubeconfig"
+	secret, err := client.CoreV1().Secrets(ns).Get(r.Context(), secretName, metav1.GetOptions{})
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			s.writeError(w, http.StatusNotFound, fmt.Sprintf("kubeconfig secret %q not found in namespace %q", secretName, ns))
+			return
+		}
+		if apierrors.IsForbidden(err) {
+			s.writeError(w, http.StatusForbidden, fmt.Sprintf("insufficient permissions to read kubeconfig secret in namespace %q", ns))
+			return
+		}
+		log.Printf("[capi] Failed to get kubeconfig secret %s/%s: %v", ns, secretName, err)
+		s.writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	// The kubeconfig is stored in the "value" key
+	kubeconfigData, ok := secret.Data["value"]
+	if !ok {
+		s.writeError(w, http.StatusNotFound, "kubeconfig secret does not contain 'value' key")
+		return
+	}
+
+	// Return as YAML download
+	w.Header().Set("Content-Type", "application/x-yaml")
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", name+"-kubeconfig.yaml"))
+	if _, err := w.Write(kubeconfigData); err != nil {
+		log.Printf("[capi] Failed to write kubeconfig response for %s/%s: %v", ns, name, err)
+	}
+}
+
+func (s *Server) handleCAPIClusterConnect(w http.ResponseWriter, r *http.Request) {
+	if !s.requireConnected(w) {
+		return
+	}
+
+	ns := chi.URLParam(r, "ns")
+	name := chi.URLParam(r, "name")
+	if ns == "" || name == "" {
+		s.writeError(w, http.StatusBadRequest, "namespace and name are required")
+		return
+	}
+
+	if k8s.IsInCluster() {
+		s.writeError(w, http.StatusBadRequest, "cannot connect to workload cluster when running in-cluster")
+		return
+	}
+
+	client := k8s.GetClient()
+	if client == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "kubernetes client not initialized")
+		return
+	}
+
+	// Fetch the kubeconfig Secret
+	secretName := name + "-kubeconfig"
+	secret, err := client.CoreV1().Secrets(ns).Get(r.Context(), secretName, metav1.GetOptions{})
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			s.writeError(w, http.StatusNotFound, fmt.Sprintf("kubeconfig secret %q not found in namespace %q", secretName, ns))
+			return
+		}
+		if apierrors.IsForbidden(err) {
+			s.writeError(w, http.StatusForbidden, fmt.Sprintf("insufficient permissions to read kubeconfig secret in namespace %q", ns))
+			return
+		}
+		log.Printf("[capi] Failed to get kubeconfig secret %s/%s: %v", ns, secretName, err)
+		s.writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	kubeconfigData, ok := secret.Data["value"]
+	if !ok {
+		s.writeError(w, http.StatusNotFound, "kubeconfig secret does not contain 'value' key")
+		return
+	}
+
+	// Parse the workload cluster kubeconfig
+	newConfig, err := clientcmd.Load(kubeconfigData)
+	if err != nil {
+		log.Printf("[capi] Failed to parse kubeconfig from secret %s/%s: %v", ns, secretName, err)
+		s.writeError(w, http.StatusInternalServerError, "failed to parse kubeconfig: "+err.Error())
+		return
+	}
+
+	// Determine the context name to use from the workload kubeconfig
+	contextName := newConfig.CurrentContext
+	if contextName == "" {
+		// Use the first available context
+		for ctxName := range newConfig.Contexts {
+			contextName = ctxName
+			break
+		}
+	}
+	if contextName == "" {
+		s.writeError(w, http.StatusBadRequest, "workload cluster kubeconfig contains no contexts")
+		return
+	}
+
+	// Merge into the user's kubeconfig
+	mergedPath, err := k8s.MergeAndSwitchContext(kubeconfigData, contextName)
+	if err != nil {
+		log.Printf("[capi] Failed to merge kubeconfig for cluster %s/%s: %v", ns, name, err)
+		s.writeError(w, http.StatusInternalServerError, "failed to connect: "+err.Error())
+		return
+	}
+
+	// Stop active sessions before switching
+	StopAllSessions()
+	if s.permCache != nil {
+		s.permCache.Invalidate()
+	}
+
+	// Switch to the new context
+	if err := k8s.PerformContextSwitch(contextName); err != nil {
+		k8s.SetConnectionStatus(k8s.ConnectionStatus{
+			State:     k8s.StateDisconnected,
+			Context:   contextName,
+			Error:     err.Error(),
+			ErrorType: k8s.ClassifyError(err),
+		})
+		s.writeError(w, http.StatusInternalServerError, "failed to switch context: "+err.Error())
+		return
+	}
+
+	k8s.SetConnectionStatus(k8s.ConnectionStatus{
+		State:       k8s.StateConnected,
+		Context:     k8s.GetContextName(),
+		ClusterName: k8s.GetClusterName(),
+	})
+
+	log.Printf("[capi] Connected to workload cluster %s/%s (context: %s, kubeconfig: %s)", ns, name, contextName, mergedPath)
+
+	s.writeJSON(w, map[string]string{
+		"status":  "connected",
+		"context": contextName,
+	})
 }
 
 // Helper methods

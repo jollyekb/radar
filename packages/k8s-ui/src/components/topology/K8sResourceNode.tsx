@@ -135,6 +135,14 @@ export const NODE_DIMENSIONS: Record<NodeKind, { width: number; height: number }
   TLSOption: { width: 280, height: 56 },
   TLSStore: { width: 280, height: 56 },
   HTTPProxy: { width: 280, height: 56 }, // Contour
+  CAPICluster: { width: 280, height: 56 }, // Cluster API
+  MachineDeployment: { width: 300, height: 56 },
+  MachineSet: { width: 280, height: 56 },
+  Machine: { width: 260, height: 56 },
+  MachinePool: { width: 280, height: 56 },
+  KubeadmControlPlane: { width: 300, height: 56 },
+  ClusterClass: { width: 280, height: 56 },
+  MachineHealthCheck: { width: 300, height: 56 },
 }
 
 

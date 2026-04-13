@@ -25,6 +25,9 @@ Common collisions:
 | Broker | — | Knative `eventing.knative.dev` |
 | Channel | — | Knative `messaging.knative.dev` |
 | Backup | Velero `velero.io` | CloudNativePG `cnpg.io` |
+| Cluster | — | CAPI `cluster.x-k8s.io`, CloudNativePG `postgresql.cnpg.io` |
+| Machine | — | CAPI `cluster.x-k8s.io` |
+| MachineSet | — | CAPI `cluster.x-k8s.io` |
 
 If your kind collides, you need group-qualified handling throughout (marked with  below).
 

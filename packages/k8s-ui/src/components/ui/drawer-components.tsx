@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { ChevronRight, Copy, Check, Tag, AlertTriangle, CheckCircle, ExternalLink, Layers } from 'lucide-react'
 import { clsx } from 'clsx'
-import { formatAge } from '../resources/resource-utils'
+import { formatAge, formatDuration } from '../resources/resource-utils'
 import { Tooltip } from './Tooltip'
 import { getKindColorClass } from '../ui/Badge'
 
@@ -185,23 +185,60 @@ export function Property({ label, value, copyable, onCopy, copied }: PropertyPro
 export function ConditionsSection({ conditions }: { conditions?: any[] }) {
   if (!conditions || conditions.length === 0) return null
 
+  // Sort by lastTransitionTime (most recent first), then alphabetically for ties
+  const sorted = [...conditions].sort((a: any, b: any) => {
+    const tA = a.lastTransitionTime ? new Date(a.lastTransitionTime).getTime() : 0
+    const tB = b.lastTransitionTime ? new Date(b.lastTransitionTime).getTime() : 0
+    if (tA !== tB) return tB - tA
+    return (a.type || '').localeCompare(b.type || '')
+  })
+
+  const failCount = sorted.filter((c: any) => c.status === 'False').length
+
   return (
-    <Section title={`Conditions (${conditions.length})`} defaultExpanded={conditions.length <= 4}>
-      <div className="space-y-2">
-        {conditions.map((cond: any) => (
-          <div key={cond.type} className="flex items-start gap-2 text-sm">
-            <span className={clsx(
-              'w-4 h-4 rounded-full flex items-center justify-center text-xs shrink-0 mt-0.5',
-              cond.status === 'True' ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'
-            )}>
-              {cond.status === 'True' ? '✓' : '✗'}
-            </span>
-            <div>
-              <div className="text-theme-text-primary">{cond.type}</div>
-              {cond.message && <div className="text-xs text-theme-text-tertiary">{cond.message}</div>}
-            </div>
-          </div>
-        ))}
+    <Section
+      title={`Conditions (${conditions.length})${failCount > 0 ? ` · ${failCount} failing` : ''}`}
+      defaultExpanded={conditions.length <= 6}
+    >
+      <div className="relative">
+        {/* Timeline line — sits between timestamp column and dot */}
+        <div className="absolute left-[52px] top-2 bottom-2 w-px bg-theme-border" />
+
+        <div className="space-y-0.5">
+          {sorted.map((cond: any) => {
+            const isOk = cond.status === 'True'
+            const isUnknown = cond.status === 'Unknown'
+            const isFail = !isOk && !isUnknown
+            return (
+              <div key={cond.type} className={clsx(
+                'flex items-start py-1.5 pr-1 text-sm relative',
+                isFail && 'border-l-2 border-red-400/60 dark:border-red-500/40'
+              )}>
+                {/* Timestamp column — fixed width on the left */}
+                <div className="w-[48px] shrink-0 text-[10px] text-theme-text-tertiary text-right pr-2 pt-0.5">
+                  {cond.lastTransitionTime ? formatDuration(Date.now() - new Date(cond.lastTransitionTime).getTime(), true) : ''}
+                </div>
+                {/* Timeline dot */}
+                <span className={clsx(
+                  'w-[13px] h-[13px] rounded-full flex items-center justify-center text-[8px] shrink-0 mt-[3px] z-10 ring-2 ring-theme-surface',
+                  isOk ? 'bg-emerald-500/20 text-emerald-500 dark:bg-emerald-500/30'
+                    : isUnknown ? 'bg-gray-400/20 text-gray-400 dark:bg-gray-400/30'
+                    : 'bg-red-500/25 text-red-500 dark:bg-red-500/35'
+                )}>
+                  {isOk ? '✓' : isUnknown ? '?' : '✗'}
+                </span>
+                {/* Content */}
+                <div className="min-w-0 flex-1 pl-2">
+                  <span className={clsx('font-medium text-[13px]', isOk ? 'text-theme-text-primary' : isUnknown ? 'text-theme-text-secondary' : 'text-red-600 dark:text-red-400')}>{cond.type}</span>
+                  {cond.reason && cond.reason !== cond.type && (
+                    <div className="text-[10px] text-theme-text-secondary">{cond.reason}</div>
+                  )}
+                  {cond.message && <div className="text-[10.5px] text-theme-text-tertiary break-words leading-relaxed">{cond.message}</div>}
+                </div>
+              </div>
+            )
+          })}
+        </div>
       </div>
     </Section>
   )

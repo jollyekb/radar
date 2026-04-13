@@ -484,7 +484,8 @@ export function TopologyGraph({
     // Smart default: start all namespace groups as chips for large clusters.
     // Fires once per topology lifecycle (reset on context switch). Returns early
     // so the re-render with groupLevels set computes the actual layout.
-    if (!hasAppliedSmartDefaultRef.current && groupLevels.size === 0 && groupingMode === 'namespace' && !hideGroupHeader) {
+    // Fleet mode: skip collapse — CAPI resources are already filtered, always show expanded
+    if (!hasAppliedSmartDefaultRef.current && groupLevels.size === 0 && groupingMode === 'namespace' && !hideGroupHeader && viewMode !== 'fleet') {
       const uniqueNamespaces = new Set(workingNodes.map(n => n.data.namespace as string).filter(Boolean))
       if (uniqueNamespaces.size > LARGE_CLUSTER_NS_THRESHOLD) {
         hasAppliedSmartDefaultRef.current = true

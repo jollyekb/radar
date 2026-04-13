@@ -9,6 +9,8 @@ interface TopologyControlsProps {
   showNoGrouping?: boolean
   showPolicyEffect?: boolean
   onShowPolicyEffectChange?: (show: boolean) => void
+  /** Show the "Fleet" button (CAPI cluster management view) */
+  showFleetMode?: boolean
 }
 
 export function TopologyControls({
@@ -19,6 +21,7 @@ export function TopologyControls({
   showNoGrouping = true,
   showPolicyEffect = false,
   onShowPolicyEffectChange,
+  showFleetMode = false,
 }: TopologyControlsProps) {
   return (
     <div className="absolute top-4 right-4 z-10 flex items-center gap-2">
@@ -76,6 +79,19 @@ export function TopologyControls({
         >
           Traffic
         </button>
+        {showFleetMode && (
+          <button
+            onClick={() => onViewModeChange('fleet')}
+            className={`px-2.5 py-1 text-xs rounded-md transition-colors ${
+              viewMode === 'fleet'
+                ? 'bg-skyhook-600 text-white'
+                : 'text-theme-text-secondary hover:text-theme-text-primary hover:bg-theme-elevated'
+            }`}
+            title="Cluster API fleet view — shows only CAPI resources and nodes"
+          >
+            Fleet
+          </button>
+        )}
       </div>
     </div>
   )

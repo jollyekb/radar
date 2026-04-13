@@ -45,6 +45,22 @@ func summarizeUnstructured(obj *unstructured.Unstructured) *ResourceSummary {
 		return summarizeGatewayRoute(obj)
 	case group == "projectcontour.io" && kind == "HTTPProxy":
 		return summarizeContourHTTPProxy(obj)
+	case group == "cluster.x-k8s.io" && kind == "Cluster":
+		return summarizeCAPICluster(obj)
+	case group == "cluster.x-k8s.io" && kind == "Machine":
+		return summarizeCAPIMachine(obj)
+	case group == "cluster.x-k8s.io" && kind == "MachineDeployment":
+		return summarizeCAPIMachineDeployment(obj)
+	case group == "cluster.x-k8s.io" && kind == "MachineSet":
+		return summarizeCAPIMachineSet(obj)
+	case group == "cluster.x-k8s.io" && kind == "MachinePool":
+		return summarizeCAPIMachinePool(obj)
+	case group == "cluster.x-k8s.io" && kind == "ClusterClass":
+		return summarizeCAPIClusterClass(obj)
+	case group == "cluster.x-k8s.io" && kind == "MachineHealthCheck":
+		return summarizeCAPIMachineHealthCheck(obj)
+	case group == "controlplane.cluster.x-k8s.io" && kind == "KubeadmControlPlane":
+		return summarizeCAPIKubeadmControlPlane(obj)
 	}
 
 	// Generic fallback
@@ -659,6 +675,313 @@ func summarizeContourHTTPProxy(obj *unstructured.Unstructured) *ResourceSummary 
 	}
 
 	return s
+}
+
+// --- Cluster API (CAPI) summarizers ---
+
+func summarizeCAPICluster(obj *unstructured.Unstructured) *ResourceSummary {
+	s := &ResourceSummary{
+		Kind:      "Cluster",
+		Name:      obj.GetName(),
+		Namespace: obj.GetNamespace(),
+		Age:       age(obj.GetCreationTimestamp().Time),
+	}
+
+	phase, _, _ := unstructured.NestedString(obj.Object, "status", "phase")
+	if phase != "" {
+		s.Status = phase
+	} else {
+		s.Status = extractCAPICondition(obj)
+	}
+
+	// Version from topology
+	version, _, _ := unstructured.NestedString(obj.Object, "spec", "topology", "version")
+	if version != "" {
+		s.Version = version
+	}
+
+	// Control plane endpoint
+	host, _, _ := unstructured.NestedString(obj.Object, "spec", "controlPlaneEndpoint", "host")
+	port, _, _ := unstructured.NestedInt64(obj.Object, "spec", "controlPlaneEndpoint", "port")
+	if host != "" {
+		s.Target = fmt.Sprintf("%s:%d", host, port)
+	}
+
+	// Cluster class
+	className, _, _ := unstructured.NestedString(obj.Object, "spec", "topology", "class")
+	if className != "" {
+		s.Type = className
+	}
+
+	return s
+}
+
+func summarizeCAPIMachine(obj *unstructured.Unstructured) *ResourceSummary {
+	s := &ResourceSummary{
+		Kind:      "Machine",
+		Name:      obj.GetName(),
+		Namespace: obj.GetNamespace(),
+		Age:       age(obj.GetCreationTimestamp().Time),
+	}
+
+	phase, _, _ := unstructured.NestedString(obj.Object, "status", "phase")
+	if phase != "" {
+		s.Status = phase
+	} else {
+		s.Status = extractCAPICondition(obj)
+	}
+
+	// Version
+	version, _, _ := unstructured.NestedString(obj.Object, "spec", "version")
+	if version != "" {
+		s.Version = version
+	}
+
+	// Node ref
+	nodeName, _, _ := unstructured.NestedString(obj.Object, "status", "nodeRef", "name")
+	if nodeName != "" {
+		s.Node = nodeName
+	}
+
+	// Provider — parse from providerID or infrastructureRef
+	providerID, _, _ := unstructured.NestedString(obj.Object, "spec", "providerID")
+	if providerID != "" {
+		s.Type = parseProviderName(providerID)
+	} else {
+		infraKind, _, _ := unstructured.NestedString(obj.Object, "spec", "infrastructureRef", "kind")
+		if infraKind != "" {
+			s.Type = infraKind
+		}
+	}
+
+	return s
+}
+
+func summarizeCAPIMachineDeployment(obj *unstructured.Unstructured) *ResourceSummary {
+	s := &ResourceSummary{
+		Kind:      "MachineDeployment",
+		Name:      obj.GetName(),
+		Namespace: obj.GetNamespace(),
+		Age:       age(obj.GetCreationTimestamp().Time),
+	}
+
+	phase, _, _ := unstructured.NestedString(obj.Object, "status", "phase")
+	if phase != "" {
+		s.Status = phase
+	} else {
+		s.Status = extractCAPICondition(obj)
+	}
+
+	replicas, _, _ := unstructured.NestedInt64(obj.Object, "spec", "replicas")
+	readyReplicas, _, _ := unstructured.NestedInt64(obj.Object, "status", "readyReplicas")
+	if replicas > 0 {
+		s.Ready = formatInt64Pair(readyReplicas, replicas)
+	}
+
+	// Version from template
+	version, _, _ := unstructured.NestedString(obj.Object, "spec", "template", "spec", "version")
+	if version != "" {
+		s.Version = version
+	}
+
+	// Strategy
+	strategyType, _, _ := unstructured.NestedString(obj.Object, "spec", "strategy", "type")
+	if strategyType != "" {
+		s.Strategy = strategyType
+	}
+
+	return s
+}
+
+func summarizeCAPIMachineSet(obj *unstructured.Unstructured) *ResourceSummary {
+	s := &ResourceSummary{
+		Kind:      "MachineSet",
+		Name:      obj.GetName(),
+		Namespace: obj.GetNamespace(),
+		Age:       age(obj.GetCreationTimestamp().Time),
+	}
+
+	phase, _, _ := unstructured.NestedString(obj.Object, "status", "phase")
+	if phase != "" {
+		s.Status = phase
+	} else {
+		s.Status = extractCAPICondition(obj)
+	}
+
+	replicas, _, _ := unstructured.NestedInt64(obj.Object, "spec", "replicas")
+	readyReplicas, _, _ := unstructured.NestedInt64(obj.Object, "status", "readyReplicas")
+	if replicas > 0 {
+		s.Ready = formatInt64Pair(readyReplicas, replicas)
+	}
+
+	return s
+}
+
+func summarizeCAPIMachinePool(obj *unstructured.Unstructured) *ResourceSummary {
+	s := &ResourceSummary{
+		Kind:      "MachinePool",
+		Name:      obj.GetName(),
+		Namespace: obj.GetNamespace(),
+		Age:       age(obj.GetCreationTimestamp().Time),
+	}
+
+	phase, _, _ := unstructured.NestedString(obj.Object, "status", "phase")
+	if phase != "" {
+		s.Status = phase
+	} else {
+		s.Status = extractCAPICondition(obj)
+	}
+
+	replicas, _, _ := unstructured.NestedInt64(obj.Object, "spec", "replicas")
+	readyReplicas, _, _ := unstructured.NestedInt64(obj.Object, "status", "readyReplicas")
+	if replicas > 0 {
+		s.Ready = formatInt64Pair(readyReplicas, replicas)
+	}
+
+	return s
+}
+
+func summarizeCAPIClusterClass(obj *unstructured.Unstructured) *ResourceSummary {
+	s := &ResourceSummary{
+		Kind:      "ClusterClass",
+		Name:      obj.GetName(),
+		Namespace: obj.GetNamespace(),
+		Age:       age(obj.GetCreationTimestamp().Time),
+	}
+
+	s.Status = extractCAPICondition(obj)
+
+	// Count variables and patches
+	variables, _, _ := unstructured.NestedSlice(obj.Object, "spec", "variables")
+	patches, _, _ := unstructured.NestedSlice(obj.Object, "spec", "patches")
+	if len(variables) > 0 || len(patches) > 0 {
+		s.Ready = fmt.Sprintf("%d vars, %d patches", len(variables), len(patches))
+	}
+
+	return s
+}
+
+func summarizeCAPIMachineHealthCheck(obj *unstructured.Unstructured) *ResourceSummary {
+	s := &ResourceSummary{
+		Kind:      "MachineHealthCheck",
+		Name:      obj.GetName(),
+		Namespace: obj.GetNamespace(),
+		Age:       age(obj.GetCreationTimestamp().Time),
+	}
+
+	s.Status = extractCAPICondition(obj)
+
+	// Expected vs healthy machines
+	expectedMachines, _, _ := unstructured.NestedInt64(obj.Object, "status", "expectedMachines")
+	currentHealthy, _, _ := unstructured.NestedInt64(obj.Object, "status", "currentHealthy")
+	if expectedMachines > 0 {
+		s.Ready = formatInt64Pair(currentHealthy, expectedMachines)
+	}
+
+	// Cluster name
+	clusterName, _, _ := unstructured.NestedString(obj.Object, "spec", "clusterName")
+	if clusterName != "" {
+		s.Target = clusterName
+	}
+
+	return s
+}
+
+func summarizeCAPIKubeadmControlPlane(obj *unstructured.Unstructured) *ResourceSummary {
+	s := &ResourceSummary{
+		Kind:      "KubeadmControlPlane",
+		Name:      obj.GetName(),
+		Namespace: obj.GetNamespace(),
+		Age:       age(obj.GetCreationTimestamp().Time),
+	}
+
+	s.Status = extractCAPICondition(obj)
+
+	replicas, _, _ := unstructured.NestedInt64(obj.Object, "spec", "replicas")
+	readyReplicas, _, _ := unstructured.NestedInt64(obj.Object, "status", "readyReplicas")
+	if replicas > 0 {
+		s.Ready = formatInt64Pair(readyReplicas, replicas)
+	}
+
+	// Version
+	version, _, _ := unstructured.NestedString(obj.Object, "spec", "version")
+	if version != "" {
+		s.Version = version
+	}
+
+	return s
+}
+
+// extractCAPICondition reads conditions from a CAPI resource, handling both
+// v1beta1 (status.conditions) and v1beta2 (status.v1beta2.conditions) layouts.
+func extractCAPICondition(obj *unstructured.Unstructured) string {
+	// Try v1beta2 first
+	conditions, found, _ := unstructured.NestedSlice(obj.Object, "status", "v1beta2", "conditions")
+	if !found || len(conditions) == 0 {
+		conditions, found, _ = unstructured.NestedSlice(obj.Object, "status", "conditions")
+	}
+	if !found || len(conditions) == 0 {
+		return ""
+	}
+
+	priority := map[string]int{"Ready": 0, "Available": 1}
+	bestPriority := 999
+	bestStatus := ""
+
+	for _, c := range conditions {
+		cond, ok := c.(map[string]any)
+		if !ok {
+			continue
+		}
+		condType, _ := cond["type"].(string)
+		condStatus, _ := cond["status"].(string)
+
+		p, known := priority[condType]
+		if known && p < bestPriority {
+			bestPriority = p
+			if condStatus == "True" {
+				bestStatus = condType
+			} else {
+				reason, _ := cond["reason"].(string)
+				if reason != "" {
+					bestStatus = reason
+				} else {
+					bestStatus = "Not" + condType
+				}
+			}
+		}
+	}
+
+	return bestStatus
+}
+
+// parseProviderName extracts a short provider label from a CAPI providerID URI.
+// e.g., "aws:///us-east-1a/i-123" → "AWS/us-east-1a", "gce:///proj/zone/inst" → "GCP/zone"
+func parseProviderName(providerID string) string {
+	switch {
+	case strings.HasPrefix(providerID, "aws://"):
+		parts := strings.Split(strings.TrimPrefix(providerID, "aws:///"), "/")
+		if len(parts) >= 1 && parts[0] != "" {
+			return "AWS/" + parts[0]
+		}
+		return "AWS"
+	case strings.HasPrefix(providerID, "gce://"):
+		parts := strings.Split(strings.TrimPrefix(providerID, "gce:///"), "/")
+		if len(parts) >= 2 && parts[1] != "" {
+			return "GCP/" + parts[1]
+		}
+		return "GCP"
+	case strings.HasPrefix(providerID, "azure://"):
+		return "Azure"
+	case strings.HasPrefix(providerID, "vsphere://"):
+		return "vSphere"
+	case strings.HasPrefix(providerID, "docker://"):
+		return "Docker"
+	}
+	if i := strings.Index(providerID, ":"); i > 0 {
+		return providerID[:i]
+	}
+	return providerID
 }
 
 // extractConditionByType extracts the status of a specific condition type from a K8s resource.

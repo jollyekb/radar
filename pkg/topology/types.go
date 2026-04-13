@@ -98,6 +98,14 @@ const (
 	KindClusterNetworkPolicy           NodeKind = "ClusterNetworkPolicy"
 	KindVPA                          NodeKind = "VerticalPodAutoscaler"
 	KindNamespace     NodeKind = "Namespace"
+	KindCAPICluster           NodeKind = "CAPICluster"           // Cluster API Cluster
+	KindMachineDeployment     NodeKind = "MachineDeployment"     // Cluster API MachineDeployment
+	KindMachineSet            NodeKind = "MachineSet"            // Cluster API MachineSet
+	KindMachine               NodeKind = "Machine"               // Cluster API Machine
+	KindMachinePool           NodeKind = "MachinePool"           // Cluster API MachinePool
+	KindKubeadmControlPlane   NodeKind = "KubeadmControlPlane"   // Cluster API KubeadmControlPlane
+	KindClusterClass          NodeKind = "ClusterClass"          // Cluster API ClusterClass
+	KindMachineHealthCheck    NodeKind = "MachineHealthCheck"    // Cluster API MachineHealthCheck
 )
 
 // HealthStatus represents the health status of a node

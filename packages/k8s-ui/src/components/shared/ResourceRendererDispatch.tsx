@@ -66,6 +66,10 @@ import {
   getRevisionStatus,
 } from '../resources/resource-utils-knative'
 import { getHTTPProxyStatus } from '../resources/resource-utils-contour'
+import { getClusterStatus as getCAPIClusterStatus, getMachineStatus, getMachineDeploymentStatus, getMachineSetStatus, getMachinePoolStatus, getKCPStatus, getClusterClassStatus, getMachineHealthCheckStatus } from '../resources/resource-utils-capi'
+import { getAWSMCPStatus, getAWSMMPStatus, getAWSMachineStatus, getAWSManagedClusterStatus } from '../resources/resource-utils-aws-capi'
+import { getGCPMCPStatus, getGCPMMPStatus, getGCPMachineStatus, getGCPManagedClusterStatus } from '../resources/resource-utils-gcp-capi'
+import { getAzureMCPStatus, getAzureMMPStatus, getAzureMachineStatus, getAzureManagedClusterStatus } from '../resources/resource-utils-azure-capi'
 import {
   PodRenderer,
   WorkloadRenderer,
@@ -174,9 +178,31 @@ import {
   LeaseRenderer,
   TraefikIngressRouteRenderer,
   ContourHTTPProxyRenderer,
+  CAPIClusterRenderer,
+  CAPIMachineRenderer,
+  CAPIMachineDeploymentRenderer,
+  CAPIKubeadmControlPlaneRenderer,
+  CAPIMachineSetRenderer,
+  CAPIMachinePoolRenderer,
+  CAPIClusterClassRenderer,
+  CAPIMachineHealthCheckRenderer,
+  CAPIMachineDrainRuleRenderer,
+  CAPIKubeadmConfigRenderer,
+  AWSManagedControlPlaneRenderer,
+  AWSManagedMachinePoolRenderer,
+  AWSMachineRenderer,
+  AWSMachineTemplateRenderer,
+  AWSManagedClusterRenderer,
+  GCPManagedControlPlaneRenderer,
+  GCPManagedMachinePoolRenderer,
+  GCPMachineRenderer,
+  AzureManagedControlPlaneRenderer,
+  AzureManagedMachinePoolRenderer,
+  AzureMachineRenderer,
 } from '../resources/renderers'
 import type { SelectedResource, Relationships, ResourceRef, SecretCertificateInfo, ResolvedEnvFrom } from '../../types'
 import type { CopyHandler } from '../ui/drawer-components'
+import { AlertBanner } from '../ui/drawer-components'
 
 /**
  * Override map letting each platform consumer swap in its own renderer components.
@@ -243,6 +269,19 @@ const KNOWN_KINDS = new Set([
   'knativeingresses', 'knativecertificates', 'serverlessservices', 'domainmappings',
   'ingressroutes', 'ingressroutetcps', 'ingressrouteudps',
   'httpproxies',
+  'machinedeployments', 'machines', 'machinesets', 'machinepools',
+  'kubeadmcontrolplanes', 'clusterclasses', 'machinehealthchecks',
+  'machinedrainrules', 'kubeadmconfigs', 'kubeadmconfigtemplates',
+  'kubeadmcontrolplanetemplates',
+  // AWS CAPI Infrastructure Provider
+  'awsmanagedcontrolplanes', 'awsmanagedmachinepools', 'awsmachines',
+  'awsmachinetemplates', 'awsmanagedclusters',
+  // GCP CAPI Infrastructure Provider
+  'gcpmanagedcontrolplanes', 'gcpmanagedmachinepools', 'gcpmachines',
+  'gcpmachinetemplates', 'gcpmanagedclusters',
+  // Azure CAPI Infrastructure Provider
+  'azuremanagedcontrolplanes', 'azuremanagedmachinepools', 'azuremachines',
+  'azuremachinetemplates', 'azuremanagedclusters',
 ])
 
 // ============================================================================
@@ -397,9 +436,40 @@ export function ResourceRendererDispatch({
         {kind === 'externalsecrets' && <ExternalSecretRenderer data={data} onNavigate={onNavigate} />}
         {kind === 'clusterexternalsecrets' && <ClusterExternalSecretRenderer data={data} onNavigate={onNavigate} />}
         {(kind === 'secretstores' || kind === 'clustersecretstores') && <SecretStoreRenderer data={data} />}
-        {kind === 'clusters' && <CNPGClusterRenderer data={data} onNavigate={onNavigate} />}
+        {kind === 'clusters' && !data?.apiVersion?.includes('cluster.x-k8s.io') && <CNPGClusterRenderer data={data} onNavigate={onNavigate} />}
+        {kind === 'clusters' && data?.apiVersion?.includes('cluster.x-k8s.io') && <CAPIClusterRenderer data={data} onNavigate={onNavigate} />}
         {kind === 'scheduledbackups' && <CNPGScheduledBackupRenderer data={data} onNavigate={onNavigate} />}
         {kind === 'poolers' && <CNPGPoolerRenderer data={data} onNavigate={onNavigate} />}
+        {/* Cluster API (CAPI) */}
+        {'topology.cluster.x-k8s.io/owned' in (data?.metadata?.labels ?? {}) && data?.apiVersion?.includes('cluster.x-k8s.io') && (
+          <AlertBanner
+            variant="warning"
+            title="Topology-controlled — this resource is managed by ClusterClass. Manual changes will be reconciled back."
+          />
+        )}
+        {kind === 'machines' && data?.apiVersion?.includes('cluster.x-k8s.io') && <CAPIMachineRenderer data={data} onNavigate={onNavigate} />}
+        {kind === 'machinedeployments' && <CAPIMachineDeploymentRenderer data={data} onNavigate={onNavigate} />}
+        {kind === 'machinesets' && data?.apiVersion?.includes('cluster.x-k8s.io') && <CAPIMachineSetRenderer data={data} onNavigate={onNavigate} />}
+        {kind === 'machinepools' && <CAPIMachinePoolRenderer data={data} onNavigate={onNavigate} />}
+        {kind === 'kubeadmcontrolplanes' && <CAPIKubeadmControlPlaneRenderer data={data} onNavigate={onNavigate} />}
+        {kind === 'clusterclasses' && <CAPIClusterClassRenderer data={data} />}
+        {kind === 'machinehealthchecks' && <CAPIMachineHealthCheckRenderer data={data} />}
+        {kind === 'machinedrainrules' && <CAPIMachineDrainRuleRenderer data={data} />}
+        {(kind === 'kubeadmconfigs' || kind === 'kubeadmconfigtemplates') && <CAPIKubeadmConfigRenderer data={data} />}
+        {/* AWS CAPI Infrastructure Provider */}
+        {kind === 'awsmanagedcontrolplanes' && <AWSManagedControlPlaneRenderer data={data} onNavigate={onNavigate} />}
+        {kind === 'awsmanagedmachinepools' && <AWSManagedMachinePoolRenderer data={data} onNavigate={onNavigate} />}
+        {kind === 'awsmachines' && <AWSMachineRenderer data={data} onNavigate={onNavigate} />}
+        {kind === 'awsmachinetemplates' && <AWSMachineTemplateRenderer data={data} />}
+        {kind === 'awsmanagedclusters' && <AWSManagedClusterRenderer data={data} />}
+        {/* GCP CAPI Infrastructure Provider */}
+        {kind === 'gcpmanagedcontrolplanes' && <GCPManagedControlPlaneRenderer data={data} onNavigate={onNavigate} />}
+        {kind === 'gcpmanagedmachinepools' && <GCPManagedMachinePoolRenderer data={data} onNavigate={onNavigate} />}
+        {kind === 'gcpmachines' && <GCPMachineRenderer data={data} onNavigate={onNavigate} />}
+        {/* Azure CAPI Infrastructure Provider */}
+        {kind === 'azuremanagedcontrolplanes' && <AzureManagedControlPlaneRenderer data={data} onNavigate={onNavigate} />}
+        {kind === 'azuremanagedmachinepools' && <AzureManagedMachinePoolRenderer data={data} onNavigate={onNavigate} />}
+        {kind === 'azuremachines' && <AzureMachineRenderer data={data} onNavigate={onNavigate} />}
         {kind === 'virtualservices' && <IstioVirtualServiceRenderer data={data} onNavigate={onNavigate} />}
         {kind === 'destinationrules' && <IstioDestinationRuleRenderer data={data} onNavigate={onNavigate} />}
         {kind === 'serviceentries' && <IstioServiceEntryRenderer data={data} />}
@@ -546,7 +616,32 @@ export function getResourceStatus(kind: string, data: any): { text: string; colo
   if (k === 'clusterexternalsecrets') return getClusterExternalSecretStatus(data)
   if (k === 'secretstores') return getSecretStoreStatus(data)
   if (k === 'clustersecretstores') return getClusterSecretStoreStatus(data)
-  if (k === 'clusters') return getCNPGClusterStatus(data)
+  if (k === 'clusters') {
+    if (data.apiVersion?.includes('cluster.x-k8s.io')) return getCAPIClusterStatus(data)
+    return getCNPGClusterStatus(data)
+  }
+  if (k === 'machines' && data.apiVersion?.includes('cluster.x-k8s.io')) return getMachineStatus(data)
+  if (k === 'machinedeployments') return getMachineDeploymentStatus(data)
+  if (k === 'machinesets') return getMachineSetStatus(data)
+  if (k === 'machinepools') return getMachinePoolStatus(data)
+  if (k === 'kubeadmcontrolplanes') return getKCPStatus(data)
+  if (k === 'clusterclasses') return getClusterClassStatus(data)
+  if (k === 'machinehealthchecks') return getMachineHealthCheckStatus(data)
+  // AWS CAPI Infrastructure Provider
+  if (k === 'awsmanagedcontrolplanes') return getAWSMCPStatus(data)
+  if (k === 'awsmanagedmachinepools') return getAWSMMPStatus(data)
+  if (k === 'awsmachines') return getAWSMachineStatus(data)
+  if (k === 'awsmanagedclusters') return getAWSManagedClusterStatus(data)
+  // GCP CAPI Infrastructure Provider
+  if (k === 'gcpmanagedcontrolplanes') return getGCPMCPStatus(data)
+  if (k === 'gcpmanagedmachinepools') return getGCPMMPStatus(data)
+  if (k === 'gcpmachines') return getGCPMachineStatus(data)
+  if (k === 'gcpmanagedclusters') return getGCPManagedClusterStatus(data)
+  // Azure CAPI Infrastructure Provider
+  if (k === 'azuremanagedcontrolplanes') return getAzureMCPStatus(data)
+  if (k === 'azuremanagedmachinepools') return getAzureMMPStatus(data)
+  if (k === 'azuremachines') return getAzureMachineStatus(data)
+  if (k === 'azuremanagedclusters') return getAzureManagedClusterStatus(data)
   if (k === 'scheduledbackups') return getCNPGScheduledBackupStatus(data)
   if (k === 'poolers') return getCNPGPoolerStatus(data)
   if (k === 'virtualservices') return getVirtualServiceStatus(data)

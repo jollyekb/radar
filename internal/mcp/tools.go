@@ -948,6 +948,7 @@ type mcpProblem struct {
 	Kind      string `json:"kind"`
 	Namespace string `json:"namespace,omitempty"`
 	Name      string `json:"name"`
+	Group     string `json:"group,omitempty"`
 	Reason    string `json:"reason"`
 	Message   string `json:"message,omitempty"`
 	Age       string `json:"age"`
@@ -1028,6 +1029,22 @@ func buildDashboard(ctx context.Context, cache *k8s.ResourceCache, namespace str
 			Kind:      p.Kind,
 			Namespace: p.Namespace,
 			Name:      p.Name,
+			Reason:    p.Reason,
+			Message:   p.Message,
+			Age:       p.Age,
+		})
+	}
+
+	// CAPI problems (Cluster API resources)
+	for _, p := range k8s.DetectCAPIProblems(k8s.GetDynamicResourceCache(), k8s.GetResourceDiscovery(), namespace) {
+		if len(d.Problems) >= 10 {
+			break
+		}
+		d.Problems = append(d.Problems, mcpProblem{
+			Kind:      p.Kind,
+			Namespace: p.Namespace,
+			Name:      p.Name,
+			Group:     p.Group,
 			Reason:    p.Reason,
 			Message:   p.Message,
 			Age:       p.Age,

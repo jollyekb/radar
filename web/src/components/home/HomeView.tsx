@@ -194,6 +194,7 @@ function ProblemsPanel({ problems, onResourceClick }: ProblemsPanelProps) {
                 kind: kindToPlural(p.kind),
                 namespace: p.namespace,
                 name: p.name,
+                group: p.group,
               })}
             >
               <span className={clsx(

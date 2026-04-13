@@ -139,6 +139,10 @@ import { VirtualServiceCell, DestinationRuleCell, IstioGatewayCell, ServiceEntry
 import { KnativeServiceCell, ConfigurationCell as KnativeConfigurationCell, RevisionCell as KnativeRevisionCell, RouteCell as KnativeRouteCell, BrokerCell, TriggerCell, EventTypeCell, PingSourceCell, ApiServerSourceCell, ContainerSourceCell, SinkBindingCell, ChannelCell, InMemoryChannelCell, SubscriptionCell, SequenceCell, ParallelCell, DomainMappingCell, ServerlessServiceCell, KnativeIngressCell, KnativeCertificateCell } from './renderers/knative-cells'
 import { IngressRouteCell, MiddlewareCell, TraefikServiceCell, ServersTransportCell, TLSOptionCell } from './renderers/traefik-cells'
 import { HTTPProxyCell } from './renderers/contour-cells'
+import { CAPIClusterCell, CAPIMachineCell, CAPIMachineDeploymentCell, CAPIMachineSetCell, CAPIMachinePoolCell, CAPIKubeadmControlPlaneCell, CAPIClusterClassCell, CAPIMachineHealthCheckCell } from './renderers/capi-cells'
+import { AWSManagedControlPlaneCell, AWSManagedMachinePoolCell, AWSMachineCell, AWSMachineTemplateCell, AWSManagedClusterCell } from './renderers/aws-capi-cells'
+import { GCPManagedControlPlaneCell, GCPManagedMachinePoolCell, GCPMachineCell, GCPMachineTemplateCell, GCPManagedClusterCell } from './renderers/gcp-capi-cells'
+import { AzureManagedControlPlaneCell, AzureManagedMachinePoolCell, AzureMachineCell, AzureMachineTemplateCell, AzureManagedClusterCell } from './renderers/azure-capi-cells'
 import { useRegisterShortcut, useRegisterShortcuts } from '../../hooks/useKeyboardShortcuts'
 import { ResourcesSidebar } from './ResourcesSidebar'
 import type { SelectedKindInfo } from './ResourcesSidebar'
@@ -264,7 +268,7 @@ const KNOWN_COLUMNS: Record<string, Column[]> = {
     { key: 'rules', label: 'Rules', width: 'min-w-56', hideOnMobile: true },
     { key: 'tls', label: 'TLS', width: 'w-14 shrink-0' },
     { key: 'address', label: 'Address', width: 'min-w-32', hideOnMobile: true },
-    { key: 'age', label: 'Age', width: 'w-16 shrink-0' },
+    { key: 'age', label: 'Age', width: 'w-20 shrink-0' },
   ],
   nodes: [
     { key: 'name', label: 'Name' },
@@ -969,7 +973,7 @@ const KNOWN_COLUMNS: Record<string, Column[]> = {
   // ============================================================================
   // CLOUDNATIVEPG (CNPG) POSTGRESQL
   // ============================================================================
-  clusters: [
+  cnpgclusters: [
     { key: 'name', label: 'Name' },
     { key: 'namespace', label: 'Namespace', width: 'w-36' },
     { key: 'status', label: 'Status', width: 'w-28' },
@@ -1217,7 +1221,7 @@ const KNOWN_COLUMNS: Record<string, Column[]> = {
     { key: 'routes', label: 'Routes', width: 'min-w-48', hideOnMobile: true },
     { key: 'tls', label: 'TLS', width: 'w-14 shrink-0' },
     { key: 'middlewares', label: 'MW', width: 'w-14 shrink-0', tooltip: 'Unique middleware count' },
-    { key: 'age', label: 'Age', width: 'w-16 shrink-0' },
+    { key: 'age', label: 'Age', width: 'w-20 shrink-0' },
   ],
   ingressroutetcps: [
     { key: 'name', label: 'Name', width: 'min-w-40' },
@@ -1227,58 +1231,249 @@ const KNOWN_COLUMNS: Record<string, Column[]> = {
     { key: 'routes', label: 'Routes', width: 'min-w-48', hideOnMobile: true },
     { key: 'tls', label: 'TLS', width: 'w-14 shrink-0' },
     { key: 'middlewares', label: 'MW', width: 'w-14 shrink-0', tooltip: 'Unique middleware count' },
-    { key: 'age', label: 'Age', width: 'w-16 shrink-0' },
+    { key: 'age', label: 'Age', width: 'w-20 shrink-0' },
   ],
   ingressrouteudps: [
     { key: 'name', label: 'Name', width: 'min-w-40' },
     { key: 'namespace', label: 'Namespace', width: 'w-36 shrink-0' },
     { key: 'entrypoints', label: 'Entry Points', width: 'w-32 shrink-0' },
     { key: 'routes', label: 'Routes', width: 'min-w-48' },
-    { key: 'age', label: 'Age', width: 'w-16 shrink-0' },
+    { key: 'age', label: 'Age', width: 'w-20 shrink-0' },
   ],
   middlewares: [
     { key: 'name', label: 'Name', width: 'min-w-40' },
     { key: 'namespace', label: 'Namespace', width: 'w-36 shrink-0' },
     { key: 'type', label: 'Type', width: 'w-32 shrink-0' },
-    { key: 'age', label: 'Age', width: 'w-16 shrink-0' },
+    { key: 'age', label: 'Age', width: 'w-20 shrink-0' },
   ],
   middlewaretcps: [
     { key: 'name', label: 'Name', width: 'min-w-40' },
     { key: 'namespace', label: 'Namespace', width: 'w-36 shrink-0' },
     { key: 'type', label: 'Type', width: 'w-32 shrink-0' },
-    { key: 'age', label: 'Age', width: 'w-16 shrink-0' },
+    { key: 'age', label: 'Age', width: 'w-20 shrink-0' },
   ],
   traefikservices: [
     { key: 'name', label: 'Name', width: 'min-w-40' },
     { key: 'namespace', label: 'Namespace', width: 'w-36 shrink-0' },
     { key: 'type', label: 'Type', width: 'w-36 shrink-0' },
     { key: 'targets', label: 'Targets', width: 'min-w-48' },
-    { key: 'age', label: 'Age', width: 'w-16 shrink-0' },
+    { key: 'age', label: 'Age', width: 'w-20 shrink-0' },
   ],
   serverstransports: [
     { key: 'name', label: 'Name', width: 'min-w-40' },
     { key: 'namespace', label: 'Namespace', width: 'w-36 shrink-0' },
     { key: 'serverName', label: 'Server Name', width: 'w-40' },
     { key: 'insecure', label: 'Skip Verify', width: 'w-24 shrink-0' },
-    { key: 'age', label: 'Age', width: 'w-16 shrink-0' },
+    { key: 'age', label: 'Age', width: 'w-20 shrink-0' },
   ],
   serverstransporttcps: [
     { key: 'name', label: 'Name', width: 'min-w-40' },
     { key: 'namespace', label: 'Namespace', width: 'w-36 shrink-0' },
     { key: 'serverName', label: 'Server Name', width: 'w-40' },
     { key: 'insecure', label: 'Skip Verify', width: 'w-24 shrink-0' },
-    { key: 'age', label: 'Age', width: 'w-16 shrink-0' },
+    { key: 'age', label: 'Age', width: 'w-20 shrink-0' },
   ],
   tlsoptions: [
     { key: 'name', label: 'Name', width: 'min-w-40' },
     { key: 'namespace', label: 'Namespace', width: 'w-36 shrink-0' },
     { key: 'minVersion', label: 'Min TLS', width: 'w-24 shrink-0' },
-    { key: 'age', label: 'Age', width: 'w-16 shrink-0' },
+    { key: 'age', label: 'Age', width: 'w-20 shrink-0' },
   ],
   tlsstores: [
     { key: 'name', label: 'Name', width: 'min-w-40' },
     { key: 'namespace', label: 'Namespace', width: 'w-36 shrink-0' },
-    { key: 'age', label: 'Age', width: 'w-16 shrink-0' },
+    { key: 'age', label: 'Age', width: 'w-20 shrink-0' },
+  ],
+  // Cluster API (CAPI)
+  capiclusters: [
+    { key: 'name', label: 'Name', width: 'min-w-40' },
+    { key: 'namespace', label: 'Namespace', width: 'w-36 shrink-0' },
+    { key: 'provider', label: 'Provider', width: 'w-20 shrink-0' },
+    { key: 'class', label: 'Class', width: 'w-32 shrink-0' },
+    { key: 'cpReplicas', label: 'CP Ready', width: 'w-24 shrink-0', tooltip: 'Control plane replicas (ready/desired)' },
+    { key: 'workerReplicas', label: 'Workers', width: 'w-20 shrink-0', tooltip: 'Worker replicas (ready/desired)' },
+    { key: 'phase', label: 'Phase', width: 'w-28 shrink-0' },
+    { key: 'version', label: 'Version', width: 'w-24 shrink-0' },
+    { key: 'age', label: 'Age', width: 'w-20 shrink-0' },
+  ],
+  machinedeployments: [
+    { key: 'name', label: 'Name', width: 'min-w-40' },
+    { key: 'namespace', label: 'Namespace', width: 'w-36 shrink-0' },
+    { key: 'cluster', label: 'Cluster', width: 'w-32 shrink-0' },
+    { key: 'ready', label: 'Ready', width: 'w-20 shrink-0', tooltip: 'Ready replicas / desired' },
+    { key: 'phase', label: 'Phase', width: 'w-28 shrink-0' },
+    { key: 'version', label: 'Version', width: 'w-24 shrink-0' },
+    { key: 'age', label: 'Age', width: 'w-20 shrink-0' },
+  ],
+  machines: [
+    { key: 'name', label: 'Name', width: 'min-w-40' },
+    { key: 'namespace', label: 'Namespace', width: 'w-36 shrink-0' },
+    { key: 'cluster', label: 'Cluster', width: 'w-32 shrink-0' },
+    { key: 'role', label: 'Role', width: 'w-28 shrink-0' },
+    { key: 'phase', label: 'Phase', width: 'w-28 shrink-0' },
+    { key: 'node', label: 'Node', width: 'w-32 shrink-0' },
+    { key: 'version', label: 'Version', width: 'w-24 shrink-0' },
+    { key: 'age', label: 'Age', width: 'w-20 shrink-0' },
+  ],
+  machinesets: [
+    { key: 'name', label: 'Name', width: 'min-w-40' },
+    { key: 'namespace', label: 'Namespace', width: 'w-36 shrink-0' },
+    { key: 'cluster', label: 'Cluster', width: 'w-32 shrink-0' },
+    { key: 'ready', label: 'Ready', width: 'w-20 shrink-0' },
+    { key: 'phase', label: 'Phase', width: 'w-28 shrink-0' },
+    { key: 'age', label: 'Age', width: 'w-20 shrink-0' },
+  ],
+  machinepools: [
+    { key: 'name', label: 'Name', width: 'min-w-40' },
+    { key: 'namespace', label: 'Namespace', width: 'w-36 shrink-0' },
+    { key: 'cluster', label: 'Cluster', width: 'w-32 shrink-0' },
+    { key: 'ready', label: 'Ready', width: 'w-20 shrink-0' },
+    { key: 'phase', label: 'Phase', width: 'w-28 shrink-0' },
+    { key: 'age', label: 'Age', width: 'w-20 shrink-0' },
+  ],
+  kubeadmcontrolplanes: [
+    { key: 'name', label: 'Name', width: 'min-w-40' },
+    { key: 'namespace', label: 'Namespace', width: 'w-36 shrink-0' },
+    { key: 'cluster', label: 'Cluster', width: 'w-32 shrink-0' },
+    { key: 'ready', label: 'Ready', width: 'w-20 shrink-0' },
+    { key: 'initialized', label: 'Initialized', width: 'w-24 shrink-0' },
+    { key: 'version', label: 'Version', width: 'w-24 shrink-0' },
+    { key: 'age', label: 'Age', width: 'w-20 shrink-0' },
+  ],
+  clusterclasses: [
+    { key: 'name', label: 'Name', width: 'min-w-40' },
+    { key: 'namespace', label: 'Namespace', width: 'w-36 shrink-0' },
+    { key: 'status', label: 'Status', width: 'w-28 shrink-0' },
+    { key: 'age', label: 'Age', width: 'w-20 shrink-0' },
+  ],
+  machinehealthchecks: [
+    { key: 'name', label: 'Name', width: 'min-w-40' },
+    { key: 'namespace', label: 'Namespace', width: 'w-36 shrink-0' },
+    { key: 'cluster', label: 'Cluster', width: 'w-32 shrink-0' },
+    { key: 'healthy', label: 'Healthy', width: 'w-20 shrink-0', tooltip: 'Healthy machines / expected' },
+    { key: 'status', label: 'Status', width: 'w-28 shrink-0' },
+    { key: 'age', label: 'Age', width: 'w-20 shrink-0' },
+  ],
+  // AWS CAPI Infrastructure Provider
+  awsmanagedcontrolplanes: [
+    { key: 'name', label: 'Name', width: 'min-w-40' },
+    { key: 'namespace', label: 'Namespace', width: 'w-36 shrink-0' },
+    { key: 'eksCluster', label: 'EKS Cluster', width: 'w-36 shrink-0' },
+    { key: 'region', label: 'Region', width: 'w-28 shrink-0' },
+    { key: 'version', label: 'Version', width: 'w-24 shrink-0' },
+    { key: 'status', label: 'Status', width: 'w-28 shrink-0' },
+    { key: 'age', label: 'Age', width: 'w-20 shrink-0' },
+  ],
+  awsmanagedmachinepools: [
+    { key: 'name', label: 'Name', width: 'min-w-40' },
+    { key: 'namespace', label: 'Namespace', width: 'w-36 shrink-0' },
+    { key: 'instanceType', label: 'Instance', width: 'w-28 shrink-0' },
+    { key: 'replicas', label: 'Ready', width: 'w-20 shrink-0', tooltip: 'Ready replicas' },
+    { key: 'capacityType', label: 'Capacity', width: 'w-28 shrink-0' },
+    { key: 'status', label: 'Status', width: 'w-28 shrink-0' },
+    { key: 'age', label: 'Age', width: 'w-20 shrink-0' },
+  ],
+  awsmachines: [
+    { key: 'name', label: 'Name', width: 'min-w-40' },
+    { key: 'namespace', label: 'Namespace', width: 'w-36 shrink-0' },
+    { key: 'instanceType', label: 'Instance', width: 'w-28 shrink-0' },
+    { key: 'instanceState', label: 'State', width: 'w-24 shrink-0' },
+    { key: 'instanceID', label: 'Instance ID', width: 'w-40 shrink-0' },
+    { key: 'status', label: 'Status', width: 'w-28 shrink-0' },
+    { key: 'age', label: 'Age', width: 'w-20 shrink-0' },
+  ],
+  awsmachinetemplates: [
+    { key: 'name', label: 'Name', width: 'min-w-40' },
+    { key: 'namespace', label: 'Namespace', width: 'w-36 shrink-0' },
+    { key: 'instanceType', label: 'Instance', width: 'w-28 shrink-0' },
+    { key: 'capacity', label: 'Capacity', width: 'w-32 shrink-0', tooltip: 'Computed CPU/memory' },
+    { key: 'age', label: 'Age', width: 'w-20 shrink-0' },
+  ],
+  awsmanagedclusters: [
+    { key: 'name', label: 'Name', width: 'min-w-40' },
+    { key: 'namespace', label: 'Namespace', width: 'w-36 shrink-0' },
+    { key: 'endpoint', label: 'Endpoint', width: 'min-w-44' },
+    { key: 'status', label: 'Status', width: 'w-28 shrink-0' },
+    { key: 'age', label: 'Age', width: 'w-20 shrink-0' },
+  ],
+  // GCP CAPI Infrastructure Provider
+  gcpmanagedcontrolplanes: [
+    { key: 'name', label: 'Name', width: 'min-w-40' },
+    { key: 'namespace', label: 'Namespace', width: 'w-36 shrink-0' },
+    { key: 'gkeCluster', label: 'GKE Cluster', width: 'w-36 shrink-0' },
+    { key: 'project', label: 'Project', width: 'w-36 shrink-0' },
+    { key: 'location', label: 'Location', width: 'w-28 shrink-0' },
+    { key: 'version', label: 'Version', width: 'w-24 shrink-0' },
+    { key: 'status', label: 'Status', width: 'w-28 shrink-0' },
+    { key: 'age', label: 'Age', width: 'w-20 shrink-0' },
+  ],
+  gcpmanagedmachinepools: [
+    { key: 'name', label: 'Name', width: 'min-w-40' },
+    { key: 'namespace', label: 'Namespace', width: 'w-36 shrink-0' },
+    { key: 'machineType', label: 'Machine Type', width: 'w-32 shrink-0' },
+    { key: 'replicas', label: 'Replicas', width: 'w-20 shrink-0' },
+    { key: 'status', label: 'Status', width: 'w-28 shrink-0' },
+    { key: 'age', label: 'Age', width: 'w-20 shrink-0' },
+  ],
+  gcpmachines: [
+    { key: 'name', label: 'Name', width: 'min-w-40' },
+    { key: 'namespace', label: 'Namespace', width: 'w-36 shrink-0' },
+    { key: 'instanceType', label: 'Instance', width: 'w-28 shrink-0' },
+    { key: 'zone', label: 'Zone', width: 'w-28 shrink-0' },
+    { key: 'status', label: 'Status', width: 'w-28 shrink-0' },
+    { key: 'age', label: 'Age', width: 'w-20 shrink-0' },
+  ],
+  gcpmachinetemplates: [
+    { key: 'name', label: 'Name', width: 'min-w-40' },
+    { key: 'namespace', label: 'Namespace', width: 'w-36 shrink-0' },
+    { key: 'instanceType', label: 'Instance', width: 'w-28 shrink-0' },
+    { key: 'age', label: 'Age', width: 'w-20 shrink-0' },
+  ],
+  gcpmanagedclusters: [
+    { key: 'name', label: 'Name', width: 'min-w-40' },
+    { key: 'namespace', label: 'Namespace', width: 'w-36 shrink-0' },
+    { key: 'project', label: 'Project', width: 'w-36 shrink-0' },
+    { key: 'status', label: 'Status', width: 'w-28 shrink-0' },
+    { key: 'age', label: 'Age', width: 'w-20 shrink-0' },
+  ],
+  // Azure CAPI Infrastructure Provider
+  azuremanagedcontrolplanes: [
+    { key: 'name', label: 'Name', width: 'min-w-40' },
+    { key: 'namespace', label: 'Namespace', width: 'w-36 shrink-0' },
+    { key: 'location', label: 'Location', width: 'w-28 shrink-0' },
+    { key: 'resourceGroup', label: 'Resource Group', width: 'w-40 shrink-0' },
+    { key: 'version', label: 'Version', width: 'w-24 shrink-0' },
+    { key: 'status', label: 'Status', width: 'w-28 shrink-0' },
+    { key: 'age', label: 'Age', width: 'w-20 shrink-0' },
+  ],
+  azuremanagedmachinepools: [
+    { key: 'name', label: 'Name', width: 'min-w-40' },
+    { key: 'namespace', label: 'Namespace', width: 'w-36 shrink-0' },
+    { key: 'sku', label: 'VM Size', width: 'w-32 shrink-0' },
+    { key: 'mode', label: 'Mode', width: 'w-20 shrink-0' },
+    { key: 'replicas', label: 'Replicas', width: 'w-20 shrink-0' },
+    { key: 'priority', label: 'Priority', width: 'w-24 shrink-0' },
+    { key: 'status', label: 'Status', width: 'w-28 shrink-0' },
+    { key: 'age', label: 'Age', width: 'w-20 shrink-0' },
+  ],
+  azuremachines: [
+    { key: 'name', label: 'Name', width: 'min-w-40' },
+    { key: 'namespace', label: 'Namespace', width: 'w-36 shrink-0' },
+    { key: 'vmSize', label: 'VM Size', width: 'w-32 shrink-0' },
+    { key: 'status', label: 'Status', width: 'w-28 shrink-0' },
+    { key: 'age', label: 'Age', width: 'w-20 shrink-0' },
+  ],
+  azuremachinetemplates: [
+    { key: 'name', label: 'Name', width: 'min-w-40' },
+    { key: 'namespace', label: 'Namespace', width: 'w-36 shrink-0' },
+    { key: 'vmSize', label: 'VM Size', width: 'w-32 shrink-0' },
+    { key: 'age', label: 'Age', width: 'w-20 shrink-0' },
+  ],
+  azuremanagedclusters: [
+    { key: 'name', label: 'Name', width: 'min-w-40' },
+    { key: 'namespace', label: 'Namespace', width: 'w-36 shrink-0' },
+    { key: 'status', label: 'Status', width: 'w-28 shrink-0' },
+    { key: 'age', label: 'Age', width: 'w-20 shrink-0' },
   ],
   // Contour
   httpproxies: [
@@ -1288,13 +1483,14 @@ const KNOWN_COLUMNS: Record<string, Column[]> = {
     { key: 'routes', label: 'Routes', width: 'w-20 shrink-0' },
     { key: 'includes', label: 'Includes', width: 'w-24 shrink-0' },
     { key: 'tls', label: 'TLS', width: 'w-14 shrink-0' },
-    { key: 'status', label: 'Status', width: 'w-24 shrink-0' },
-    { key: 'age', label: 'Age', width: 'w-16 shrink-0' },
+    { key: 'status', label: 'Status', width: 'w-28 shrink-0' },
+    { key: 'age', label: 'Age', width: 'w-20 shrink-0' },
   ],
 }
 
 // Map (plural, group) → KNOWN_COLUMNS key for kinds that collide with core K8s
 const GROUP_QUALIFIED_COLUMN_KEYS: Record<string, Record<string, string>> = {
+  clusters: { 'postgresql.cnpg.io': 'cnpgclusters', 'cluster.x-k8s.io': 'capiclusters' },
   services: { 'serving.knative.dev': 'knativeservices' },
   configurations: { 'serving.knative.dev': 'knativeconfigurations' },
   revisions: { 'serving.knative.dev': 'knativerevisions' },
@@ -3804,6 +4000,7 @@ function CellContent({ resource, kind, column, group, majorityNodeMinorVersion }
     case 'backupstoragelocations':
       return <BackupStorageLocationCell resource={resource} column={column} />
     // CloudNativePG
+    case 'cnpgclusters':
     case 'clusters':
       return <CNPGClusterCell resource={resource} column={column} />
     case 'scheduledbackups':
@@ -3885,6 +4082,62 @@ function CellContent({ resource, kind, column, group, majorityNodeMinorVersion }
     // Contour
     case 'httpproxies':
       return <HTTPProxyCell resource={resource} column={column} />
+    // Cluster API (CAPI)
+    case 'capiclusters':
+      return <CAPIClusterCell resource={resource} column={column} />
+    case 'machines':
+      return <CAPIMachineCell resource={resource} column={column} />
+    case 'machinedeployments':
+      return <CAPIMachineDeploymentCell resource={resource} column={column} />
+    case 'machinesets':
+      return <CAPIMachineSetCell resource={resource} column={column} />
+    case 'machinepools':
+      return <CAPIMachinePoolCell resource={resource} column={column} />
+    case 'kubeadmcontrolplanes':
+      return <CAPIKubeadmControlPlaneCell resource={resource} column={column} />
+    case 'clusterclasses':
+      return <CAPIClusterClassCell resource={resource} column={column} />
+    case 'machinehealthchecks':
+      return <CAPIMachineHealthCheckCell resource={resource} column={column} />
+    case 'machinedrainrules':
+    case 'kubeadmconfigs':
+    case 'kubeadmconfigtemplates':
+    case 'kubeadmcontrolplanetemplates':
+      // These use default columns — no custom cell renderer needed
+      return <GenericCell resource={resource} column={column} />
+    // AWS CAPI Infrastructure Provider
+    case 'awsmanagedcontrolplanes':
+      return <AWSManagedControlPlaneCell resource={resource} column={column} />
+    case 'awsmanagedmachinepools':
+      return <AWSManagedMachinePoolCell resource={resource} column={column} />
+    case 'awsmachines':
+      return <AWSMachineCell resource={resource} column={column} />
+    case 'awsmachinetemplates':
+      return <AWSMachineTemplateCell resource={resource} column={column} />
+    case 'awsmanagedclusters':
+      return <AWSManagedClusterCell resource={resource} column={column} />
+    // GCP CAPI Infrastructure
+    case 'gcpmanagedcontrolplanes':
+      return <GCPManagedControlPlaneCell resource={resource} column={column} />
+    case 'gcpmanagedmachinepools':
+      return <GCPManagedMachinePoolCell resource={resource} column={column} />
+    case 'gcpmachines':
+      return <GCPMachineCell resource={resource} column={column} />
+    case 'gcpmachinetemplates':
+      return <GCPMachineTemplateCell resource={resource} column={column} />
+    case 'gcpmanagedclusters':
+      return <GCPManagedClusterCell resource={resource} column={column} />
+    // Azure CAPI Infrastructure
+    case 'azuremanagedcontrolplanes':
+      return <AzureManagedControlPlaneCell resource={resource} column={column} />
+    case 'azuremanagedmachinepools':
+      return <AzureManagedMachinePoolCell resource={resource} column={column} />
+    case 'azuremachines':
+      return <AzureMachineCell resource={resource} column={column} />
+    case 'azuremachinetemplates':
+      return <AzureMachineTemplateCell resource={resource} column={column} />
+    case 'azuremanagedclusters':
+      return <AzureManagedClusterCell resource={resource} column={column} />
     default:
       // Generic cell for CRDs and unknown resources
       return <GenericCell resource={resource} column={column} />

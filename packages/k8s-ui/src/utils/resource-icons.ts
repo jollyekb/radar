@@ -61,6 +61,10 @@ import {
   Lock,
   ArrowRightLeft,
 
+  // Cluster API
+  HeartPulse,
+  BookOpen,
+
   // Fallback
   Puzzle,
 } from 'lucide-react'
@@ -189,6 +193,37 @@ const KIND_ICON_MAP: Record<string, LucideIcon> = {
 
   // Contour
   httpproxy: Globe,
+
+  // Cluster API
+  capicluster: Server,
+  machinedeployment: Layers,
+  machineset: Layers,
+  machine: Cpu,
+  machinepool: Layers,
+  kubeadmcontrolplane: Shield,
+  clusterclass: BookOpen,
+  machinehealthcheck: HeartPulse,
+
+  // AWS CAPI Infrastructure Provider
+  awsmanagedcontrolplane: Shield,
+  awsmanagedmachinepool: Layers,
+  awsmachine: Cpu,
+  awsmachinetemplate: Cpu,
+  awsmanagedcluster: Server,
+
+  // GCP CAPI Infrastructure Provider
+  gcpmanagedcontrolplane: Shield,
+  gcpmanagedmachinepool: Layers,
+  gcpmachine: Cpu,
+  gcpmachinetemplate: Cpu,
+  gcpmanagedcluster: Server,
+
+  // Azure CAPI Infrastructure Provider
+  azuremanagedcontrolplane: Shield,
+  azuremanagedmachinepool: Layers,
+  azuremachine: Cpu,
+  azuremachinetemplate: Cpu,
+  azuremanagedcluster: Server,
 
   // Trivy Operator
   vulnerabilityreport: Shield,

@@ -97,6 +97,35 @@
 .topology-icon-nodeclaim { background: #6366f1; }
 .topology-icon-nodeclass { background: #6366f1; }
 .topology-icon-httpproxy { background: #7c3aed; }
+.topology-icon-capicluster { background: #4338ca; }
+.topology-icon-machinedeployment { background: #5b4fcf; }
+.topology-icon-machineset { background: #6d5fd6; }
+.topology-icon-machine { background: #7c6fdd; }
+.topology-icon-machinepool { background: #5b4fcf; }
+.topology-icon-kubeadmcontrolplane { background: #4338ca; }
+.topology-icon-clusterclass { background: #3b2fba; }
+.topology-icon-machinehealthcheck { background: #8b7fe4; }
+/* AWS CAPI infrastructure provider */
+.topology-icon-awsmanagedcontrolplane { background: #d97706; }
+.topology-icon-awsmanagedmachinepool { background: #d97706; }
+.topology-icon-awsmachine { background: #f59e0b; }
+.topology-icon-awsmachinetemplate { background: #f59e0b; }
+.topology-icon-awsmanagedcluster { background: #d97706; }
+.topology-icon-eksconfig { background: #f59e0b; }
+.topology-icon-eksconfigtemplate { background: #f59e0b; }
+
+/* GCP CAPI infrastructure provider */
+.topology-icon-gcpmanagedcontrolplane { background: #0d9488; }
+.topology-icon-gcpmanagedmachinepool { background: #0d9488; }
+.topology-icon-gcpmachine { background: #14b8a6; }
+.topology-icon-gcpmachinetemplate { background: #14b8a6; }
+.topology-icon-gcpmanagedcluster { background: #0d9488; }
+/* Azure CAPI infrastructure provider */
+.topology-icon-azuremanagedcontrolplane { background: #2563eb; }
+.topology-icon-azuremanagedmachinepool { background: #2563eb; }
+.topology-icon-azuremachine { background: #3b82f6; }
+.topology-icon-azuremachinetemplate { background: #3b82f6; }
+.topology-icon-azuremanagedcluster { background: #2563eb; }
 
 /* Background dots - uses CSS variable for theme awareness */
 .react-flow__background pattern circle {

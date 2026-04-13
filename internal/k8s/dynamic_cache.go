@@ -211,6 +211,11 @@ func WarmupCommonCRDs() {
 		"TLSOption",                    // Traefik
 		"TLSStore",                     // Traefik
 		"HTTPProxy",                    // Contour
+		"ClusterClass",                 // Cluster API (CAPI)
+		"MachineDeployment",            // Cluster API (CAPI)
+		"MachinePool",                  // Cluster API (CAPI)
+		"MachineHealthCheck",           // Cluster API (CAPI)
+		"MachineDrainRule",             // Cluster API (CAPI)
 	}
 
 	var gvrs []schema.GroupVersionResource
@@ -237,6 +242,19 @@ func WarmupCommonCRDs() {
 		if gvr, ok := discovery.GetGVRWithGroup(iq.kind, iq.group); ok {
 			gvrs = append(gvrs, gvr)
 			log.Printf("Warming up CRD: %s (%s)", iq.kind, iq.group)
+		}
+	}
+
+	// CAPI kinds that collide with other CRDs (Cluster collides with CNPG, Machine/MachineSet could collide)
+	capiQualified := []struct{ kind, group string }{
+		{"Cluster", "cluster.x-k8s.io"},
+		{"Machine", "cluster.x-k8s.io"},
+		{"MachineSet", "cluster.x-k8s.io"},
+	}
+	for _, cq := range capiQualified {
+		if gvr, ok := discovery.GetGVRWithGroup(cq.kind, cq.group); ok {
+			gvrs = append(gvrs, gvr)
+			log.Printf("Warming up CRD: %s (%s)", cq.kind, cq.group)
 		}
 	}
 

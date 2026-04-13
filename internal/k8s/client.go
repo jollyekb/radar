@@ -755,3 +755,73 @@ func SwitchContext(name string) error {
 
 	return nil
 }
+
+// capiKubeconfigs tracks temp kubeconfig files by context name to avoid accumulation.
+var capiKubeconfigs = make(map[string]string) // contextName -> tmpPath
+
+// MergeAndSwitchContext writes the provided kubeconfig data to a temporary file
+// and adds it to Radar's kubeconfig search path so that the context becomes
+// available for switching. Returns the temp file path.
+func MergeAndSwitchContext(kubeconfigData []byte, contextName string) (string, error) {
+	// Parse the incoming kubeconfig
+	newConfig, err := clientcmd.Load(kubeconfigData)
+	if err != nil {
+		return "", fmt.Errorf("failed to parse kubeconfig: %w", err)
+	}
+
+	// Verify the context exists
+	if _, ok := newConfig.Contexts[contextName]; !ok {
+		return "", fmt.Errorf("context %q not found in provided kubeconfig", contextName)
+	}
+
+	// Reuse existing temp file for same context (avoids accumulation)
+	clientMu.Lock()
+	existingPath := capiKubeconfigs[contextName]
+	clientMu.Unlock()
+
+	if existingPath != "" {
+		// Overwrite existing file with fresh kubeconfig data
+		if err := clientcmd.WriteToFile(*newConfig, existingPath); err == nil {
+			log.Printf("[capi] Updated existing kubeconfig for context %s: %s", contextName, existingPath)
+			return existingPath, nil
+		}
+		// If overwrite fails, fall through to create a new file
+	}
+
+	// Write to a new temp file
+	tmpFile, err := os.CreateTemp("", "radar-capi-kubeconfig-*.yaml")
+	if err != nil {
+		return "", fmt.Errorf("failed to create temp kubeconfig: %w", err)
+	}
+	tmpPath := tmpFile.Name()
+	tmpFile.Close()
+
+	if err := clientcmd.WriteToFile(*newConfig, tmpPath); err != nil {
+		os.Remove(tmpPath)
+		return "", fmt.Errorf("failed to write kubeconfig: %w", err)
+	}
+
+	// Add the temp file to Radar's kubeconfig search path.
+	// In single-kubeconfig mode, kubeconfigPaths is empty — seed it with the
+	// original path so SwitchContext still sees the user's other contexts.
+	clientMu.Lock()
+	if len(kubeconfigPaths) == 0 && kubeconfigPath != "" {
+		kubeconfigPaths = []string{kubeconfigPath}
+	}
+	// Remove stale path for this context if overwrite failed above
+	if existingPath != "" {
+		updated := kubeconfigPaths[:0]
+		for _, p := range kubeconfigPaths {
+			if p != existingPath {
+				updated = append(updated, p)
+			}
+		}
+		kubeconfigPaths = updated
+	}
+	kubeconfigPaths = append(kubeconfigPaths, tmpPath)
+	capiKubeconfigs[contextName] = tmpPath
+	clientMu.Unlock()
+
+	log.Printf("[capi] Added workload cluster kubeconfig: %s (context: %s)", tmpPath, contextName)
+	return tmpPath, nil
+}
