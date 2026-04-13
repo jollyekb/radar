@@ -792,6 +792,17 @@ func (s *Server) handleListResources(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, http.StatusForbidden, fmt.Sprintf("insufficient permissions to list %s", resourceKind))
 	}
 
+	// notReadyOrForbidden returns 503 when a deferred resource is still syncing,
+	// or 403 when RBAC denied access. Callers use this for deferred resource types
+	// (configmaps, secrets, events, etc.) where a nil lister can mean either case.
+	notReadyOrForbidden := func(resourceKind string) {
+		if cache.IsDeferredPending(resourceKind) {
+			s.writeError(w, http.StatusServiceUnavailable, fmt.Sprintf("%s are still loading, please retry shortly", resourceKind))
+			return
+		}
+		forbiddenMsg(resourceKind)
+	}
+
 	// When a group is specified, skip the typed cache and use the dynamic cache
 	// directly. This handles CRDs whose plural name collides with core resources
 	// (e.g., KNative "services" vs core "services").
@@ -880,6 +891,8 @@ func (s *Server) handleListResources(w http.ResponseWriter, r *http.Request) {
 		)
 	case "replicasets":
 		if cache.ReplicaSets() == nil {
+			// ReplicaSets lister uses isEnabled (not isReady) — available before deferred sync completes.
+			// Nil here means RBAC denied, not deferred-pending.
 			forbiddenMsg("replicasets")
 			return
 		}
@@ -898,7 +911,7 @@ func (s *Server) handleListResources(w http.ResponseWriter, r *http.Request) {
 		)
 	case "configmaps":
 		if cache.ConfigMaps() == nil {
-			forbiddenMsg("configmaps")
+			notReadyOrForbidden("configmaps")
 			return
 		}
 		result, err = listPerNs(
@@ -908,7 +921,7 @@ func (s *Server) handleListResources(w http.ResponseWriter, r *http.Request) {
 	case "secrets":
 		lister := cache.Secrets()
 		if lister == nil {
-			forbiddenMsg("secrets")
+			notReadyOrForbidden("secrets")
 			return
 		}
 		result, err = listPerNs(
@@ -917,7 +930,7 @@ func (s *Server) handleListResources(w http.ResponseWriter, r *http.Request) {
 		)
 	case "events":
 		if cache.Events() == nil {
-			forbiddenMsg("events")
+			notReadyOrForbidden("events")
 			return
 		}
 		result, err = listPerNs(
@@ -926,7 +939,7 @@ func (s *Server) handleListResources(w http.ResponseWriter, r *http.Request) {
 		)
 	case "persistentvolumeclaims", "pvcs":
 		if cache.PersistentVolumeClaims() == nil {
-			forbiddenMsg("persistentvolumeclaims")
+			notReadyOrForbidden("persistentvolumeclaims")
 			return
 		}
 		result, err = listPerNs(
@@ -955,6 +968,7 @@ func (s *Server) handleListResources(w http.ResponseWriter, r *http.Request) {
 		)
 	case "hpas", "horizontalpodautoscalers":
 		if cache.HorizontalPodAutoscalers() == nil {
+			// HPA lister uses isEnabled (not isReady) — available before deferred sync completes.
 			forbiddenMsg("horizontalpodautoscalers")
 			return
 		}
@@ -978,19 +992,19 @@ func (s *Server) handleListResources(w http.ResponseWriter, r *http.Request) {
 		result, err = cache.Namespaces().List(labels.Everything())
 	case "persistentvolumes", "pvs":
 		if cache.PersistentVolumes() == nil {
-			forbiddenMsg("persistentvolumes")
+			notReadyOrForbidden("persistentvolumes")
 			return
 		}
 		result, err = cache.PersistentVolumes().List(labels.Everything())
 	case "storageclasses", "sc":
 		if cache.StorageClasses() == nil {
-			forbiddenMsg("storageclasses")
+			notReadyOrForbidden("storageclasses")
 			return
 		}
 		result, err = cache.StorageClasses().List(labels.Everything())
 	case "poddisruptionbudgets", "pdbs":
 		if cache.PodDisruptionBudgets() == nil {
-			forbiddenMsg("poddisruptionbudgets")
+			notReadyOrForbidden("poddisruptionbudgets")
 			return
 		}
 		result, err = listPerNs(
@@ -1001,7 +1015,7 @@ func (s *Server) handleListResources(w http.ResponseWriter, r *http.Request) {
 		)
 	case "networkpolicies", "netpol":
 		if cache.NetworkPolicies() == nil {
-			forbiddenMsg("networkpolicies")
+			notReadyOrForbidden("networkpolicies")
 			return
 		}
 		result, err = listPerNs(
@@ -1100,6 +1114,15 @@ func (s *Server) handleGetResource(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, http.StatusForbidden, fmt.Sprintf("insufficient permissions to access %s", resourceKind))
 	}
 
+	// notReadyOrForbiddenGet is the single-resource counterpart of notReadyOrForbidden (see handleListResources).
+	notReadyOrForbiddenGet := func(resourceKind string) {
+		if cache.IsDeferredPending(resourceKind) {
+			s.writeError(w, http.StatusServiceUnavailable, fmt.Sprintf("%s are still loading, please retry shortly", resourceKind))
+			return
+		}
+		forbiddenGet(resourceKind)
+	}
+
 	// When a group is specified, skip the typed cache and use the dynamic cache
 	// directly. This handles CRDs whose plural name collides with core resources
 	// (e.g., KNative "services" vs core "services").
@@ -1181,26 +1204,26 @@ func (s *Server) handleGetResource(w http.ResponseWriter, r *http.Request) {
 		resource, err = cache.Ingresses().Ingresses(namespace).Get(name)
 	case "configmaps", "configmap":
 		if cache.ConfigMaps() == nil {
-			forbiddenGet("configmaps")
+			notReadyOrForbiddenGet("configmaps")
 			return
 		}
 		resource, err = cache.ConfigMaps().ConfigMaps(namespace).Get(name)
 	case "secrets", "secret":
 		lister := cache.Secrets()
 		if lister == nil {
-			forbiddenGet("secrets")
+			notReadyOrForbiddenGet("secrets")
 			return
 		}
 		resource, err = lister.Secrets(namespace).Get(name)
 	case "events", "event":
 		if cache.Events() == nil {
-			forbiddenGet("events")
+			notReadyOrForbiddenGet("events")
 			return
 		}
 		resource, err = cache.Events().Events(namespace).Get(name)
 	case "persistentvolumeclaims", "persistentvolumeclaim", "pvcs", "pvc":
 		if cache.PersistentVolumeClaims() == nil {
-			forbiddenGet("persistentvolumeclaims")
+			notReadyOrForbiddenGet("persistentvolumeclaims")
 			return
 		}
 		resource, err = cache.PersistentVolumeClaims().PersistentVolumeClaims(namespace).Get(name)
@@ -1236,25 +1259,25 @@ func (s *Server) handleGetResource(w http.ResponseWriter, r *http.Request) {
 		resource, err = cache.Namespaces().Get(name)
 	case "persistentvolumes", "persistentvolume", "pvs", "pv":
 		if cache.PersistentVolumes() == nil {
-			forbiddenGet("persistentvolumes")
+			notReadyOrForbiddenGet("persistentvolumes")
 			return
 		}
 		resource, err = cache.PersistentVolumes().Get(name)
 	case "storageclasses", "storageclass", "sc":
 		if cache.StorageClasses() == nil {
-			forbiddenGet("storageclasses")
+			notReadyOrForbiddenGet("storageclasses")
 			return
 		}
 		resource, err = cache.StorageClasses().Get(name)
 	case "poddisruptionbudgets", "poddisruptionbudget", "pdbs", "pdb":
 		if cache.PodDisruptionBudgets() == nil {
-			forbiddenGet("poddisruptionbudgets")
+			notReadyOrForbiddenGet("poddisruptionbudgets")
 			return
 		}
 		resource, err = cache.PodDisruptionBudgets().PodDisruptionBudgets(namespace).Get(name)
 	case "networkpolicies", "networkpolicy", "netpol":
 		if cache.NetworkPolicies() == nil {
-			forbiddenGet("networkpolicies")
+			notReadyOrForbiddenGet("networkpolicies")
 			return
 		}
 		resource, err = cache.NetworkPolicies().NetworkPolicies(namespace).Get(name)

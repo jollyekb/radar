@@ -473,6 +473,7 @@ func NewResourceCache(cfg CacheConfig) (*ResourceCache, error) {
 				rc.deferredMu.Unlock()
 				stdlog.Printf("Background Events sync complete in %v", time.Since(bgStart))
 			} else {
+				rc.deferredFailed.Store(true)
 				stdlog.Printf("WARNING: Background Events sync failed after %v", time.Since(bgStart))
 			}
 		}()
@@ -950,4 +951,27 @@ func (rc *ResourceCache) isReady(key string) bool {
 	rc.deferredMu.RLock()
 	defer rc.deferredMu.RUnlock()
 	return rc.deferredSynced[key]
+}
+
+// IsDeferredPending returns true when the resource type passed RBAC checks
+// (informer is enabled) but deferred sync has not completed yet. Callers
+// can use this to distinguish "no permission" (return 403) from "not ready
+// yet" (return 503) when a lister returns nil.
+// Returns false once deferred sync has permanently failed (avoids infinite spinner).
+func (rc *ResourceCache) IsDeferredPending(key string) bool {
+	if rc == nil {
+		return false
+	}
+	if !rc.isEnabled(key) {
+		return false
+	}
+	if rc.config.DeferredTypes == nil || !rc.config.DeferredTypes[key] {
+		return false
+	}
+	if rc.deferredFailed.Load() {
+		return false
+	}
+	rc.deferredMu.RLock()
+	defer rc.deferredMu.RUnlock()
+	return !rc.deferredSynced[key]
 }
