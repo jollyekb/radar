@@ -296,3 +296,10 @@ export function getClusterProvider(resource: any): string {
   if (infraKind) return getProviderFromInfraKind(infraKind)
   return '-'
 }
+
+/** Parse CAPI compound condition messages ("* Foo: bar * Baz: qux") into a structured list */
+export function parseCAPIConditionMessage(message: string): string[] | null {
+  if (!message || !message.includes('*')) return null
+  const items = message.split(/\s*\*\s*/).filter(Boolean).map(s => s.trim())
+  return items.length > 1 ? items : null
+}

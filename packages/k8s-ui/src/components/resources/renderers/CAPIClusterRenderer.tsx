@@ -3,7 +3,7 @@ import { Server, Globe, Network, Layers, Download, CheckCircle, AlertCircle } fr
 import { Section, PropertyList, Property, ConditionsSection, AlertBanner, ResourceLink } from '../../ui/drawer-components'
 import { kindToPlural } from '../../../utils/navigation'
 import { formatAge } from '../resource-utils'
-import { getClusterStatus, getClusterClass, getClusterVersion, getClusterEndpoint, getProviderFromInfraKind } from '../resource-utils-capi'
+import { getClusterStatus, getClusterClass, getClusterVersion, getClusterEndpoint, getProviderFromInfraKind, parseCAPIConditionMessage } from '../resource-utils-capi'
 
 interface Props {
   data: any
@@ -102,13 +102,11 @@ export function CAPIClusterRenderer({ data, onNavigate, apiBase = '' }: Props) {
         />
       )}
 
-      {isFailed && (
-        <AlertBanner
-          variant="error"
-          title="Cluster Not Ready"
-          message={readyCond?.message || `Cluster is in ${phase} state.`}
-        />
-      )}
+      {isFailed && (() => {
+        const msg = readyCond?.message || `Cluster is in ${phase} state.`
+        const items = parseCAPIConditionMessage(msg)
+        return <AlertBanner variant="error" title="Cluster Not Ready" items={items || undefined} message={items ? undefined : msg} />
+      })()}
 
       {/* Overview */}
       <Section title="Overview" icon={Globe}>

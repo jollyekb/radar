@@ -2,7 +2,7 @@ import { Cpu, Server, Network, Cloud } from 'lucide-react'
 import { Section, PropertyList, Property, ConditionsSection, AlertBanner, ResourceLink } from '../../ui/drawer-components'
 import { kindToPlural } from '../../../utils/navigation'
 import { formatAge } from '../resource-utils'
-import { getMachineStatus, getMachineRole, getMachineClusterName, getMachineNodeRef, getMachineVersion, getMachineProviderID, parseProviderID, getProviderFromInfraKind } from '../resource-utils-capi'
+import { getMachineStatus, getMachineRole, getMachineClusterName, getMachineNodeRef, getMachineVersion, getMachineProviderID, parseProviderID, getProviderFromInfraKind, parseCAPIConditionMessage } from '../resource-utils-capi'
 
 interface Props {
   data: any
@@ -17,6 +17,10 @@ export function CAPIMachineRenderer({ data, onNavigate }: Props) {
   const machineStatus = getMachineStatus(data)
   const isFailed = machineStatus.level === 'unhealthy'
   const readyCond = conditions.find((c: any) => c.type === 'Ready')
+  // Find the most informative False condition for the alert message
+  const falseCond = conditions.find((c: any) =>
+    c.status === 'False' && ['BootstrapReady', 'InfrastructureReady', 'NodeHealthy', 'Ready'].includes(c.type)
+  )
 
   const phase = status.phase || 'Unknown'
   const role = getMachineRole(data)
@@ -34,13 +38,15 @@ export function CAPIMachineRenderer({ data, onNavigate }: Props) {
 
   return (
     <>
-      {isFailed && (
-        <AlertBanner
-          variant="error"
-          title="Machine Not Ready"
-          message={readyCond?.message || `Machine is in ${phase} state.`}
-        />
-      )}
+      {isFailed && (() => {
+        const msg = falseCond?.message || readyCond?.message || `Machine is in ${phase} state.`
+        const items = parseCAPIConditionMessage(msg)
+        return <AlertBanner variant="error" title="Machine Not Ready" items={items || undefined} message={items ? undefined : msg} />
+      })()}
+      {!isFailed && falseCond && (() => {
+        const items = parseCAPIConditionMessage(falseCond.message || '')
+        return <AlertBanner variant="warning" title={`${falseCond.type}: ${falseCond.reason || 'False'}`} items={items || undefined} message={items ? undefined : (falseCond.message || `Condition ${falseCond.type} is False.`)} />
+      })()}
 
       {/* Overview */}
       <Section title="Overview" icon={Cpu}>
@@ -96,7 +102,16 @@ export function CAPIMachineRenderer({ data, onNavigate }: Props) {
         <Section title="References" icon={Network}>
           <PropertyList>
             {bootstrapRef.kind && (
-              <Property label="Bootstrap" value={`${bootstrapRef.kind}/${bootstrapRef.name}`} />
+              <Property label="Bootstrap" value={
+                <ResourceLink
+                  name={bootstrapRef.name}
+                  kind={kindToPlural(bootstrapRef.kind)}
+                  namespace={bootstrapRef.namespace || data.metadata?.namespace}
+                  group={bootstrapRef.apiVersion?.split('/')?.[0]}
+                  label={`${bootstrapRef.kind}/${bootstrapRef.name}`}
+                  onNavigate={onNavigate}
+                />
+              } />
             )}
             {infraRef.kind && (
               <Property label="Infrastructure" value={

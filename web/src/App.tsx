@@ -1092,7 +1092,11 @@ function AppInner() {
                   {/* Topology controls overlay - top right */}
                   <TopologyControls
                     viewMode={topologyMode}
-                    onViewModeChange={setTopologyMode}
+                    onViewModeChange={(mode) => {
+                      setTopologyMode(mode)
+                      // Fleet mode: namespace grouping for structure, but expanded (not collapsed chips)
+                      if (mode === 'fleet') setGroupingMode('namespace')
+                    }}
                     groupingMode={groupingMode}
                     onGroupingModeChange={setGroupingMode}
                     showNoGrouping={hasNamespaceFilter}

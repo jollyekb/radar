@@ -118,39 +118,37 @@ All provider-specific NodeClass variants are automatically detected and supporte
 
 **Topology-controlled badge:** Resources managed by ClusterClass (label `topology.cluster.x-k8s.io/owned`) show a warning banner.
 
-**Fleet topology mode:** Dedicated "Fleet" view in topology filters CAPI and infrastructure provider resources, giving a clean cluster-management view without application workload noise.
+**Fleet topology mode:** Dedicated "Fleet" view filters to CAPI and infrastructure provider resources only, giving a clean cluster-management view without application workload noise. Groups start expanded by default.
 
-![CAPI Fleet Topology](images/capi/topology.png)
+![CAPI Fleet Topology — 5 GKE clusters with MachineDeployments, MachinePools, and provider resources](images/capi/fleet-topology.png)
 
-### AWS Infrastructure Provider
+**Resource browser** with smart columns per CAPI kind — Provider detection, phase badges, replica counts:
 
-Radar has first-class support for AWS CAPI provider resources (CAPA). These renderers surface EKS-specific operational data — instance types, scaling config, VPC topology, security groups, EKS addons — that would otherwise be buried in raw YAML.
+![CAPI Cluster list with Provider column](images/capi/cluster-list.png)
 
-**AWSManagedControlPlane** (EKS control plane):
+**Cluster detail view** with Connect to Cluster and Download Kubeconfig actions, provider detection, and clickable references to infrastructure resources:
 
-![AWSManagedControlPlane Detail](images/capi/aws-controlplane.png)
+![Cluster detail with Connect button and provider references](images/capi/cluster-detail.png)
 
-- EKS cluster name, region, version, endpoint access (public/private)
-- VPC ID and CIDR, subnets table with AZ and Public/Private badges
-- Security groups (cluster, node, node-eks-additional)
-- EKS addons with version and status (vpc-cni, coredns, kube-proxy)
-- NAT gateway IPs, failure domains, IAM role
-- 18 conditions
+### Infrastructure Provider Renderers
 
-**AWSManagedMachinePool** (EKS managed node group):
+Radar has first-class renderers for **AWS (CAPA)**, **GCP (CAPG)**, and **Azure (CAPZ)** infrastructure provider resources. These surface provider-specific operational data — instance types, scaling config, VPC/subnet topology, managed service addons — that would otherwise be buried in raw YAML.
 
-![AWSManagedMachinePool Detail](images/capi/aws-machinepool.png)
+**AWS EKS control plane** — VPC topology with subnets (Public/Private badges), security groups, EKS addons, IAM roles:
 
-- Node group name, instance type, AMI type, capacity type (On-Demand/Spot badge)
-- Scaling config (min/max/current), update config
-- Subnet IDs, node labels, IAM role
+![AWSManagedControlPlane with VPC, subnets, and IAM details](images/capi/aws-controlplane.png)
 
-**AWSMachine** (EC2 instance):
-- Instance type, ID, state badge (running/pending/terminated)
-- Provider ID, subnet, IAM instance profile
-- Addresses table, conditions
+**GCP GKE control plane** — project, location, release channel, and conditions timeline with left-aligned timestamps:
 
-**AWSMachineTemplate**, **AWSManagedCluster**: Lightweight renderers for instance templates (with resolved capacity from status) and cluster stubs (endpoint + failure domains).
+![GCPManagedControlPlane with conditions timeline](images/capi/gcp-controlplane.png)
+
+**Managed machine pools**: Instance/VM types, scaling config (autoscaling min/max), capacity type badges (On-Demand/Spot), node management (auto-repair/upgrade), labels and taints.
+
+**Azure AKS**: Location, resource group, SKU tier, network plugin/policy, System/User mode badges, Regular/Spot priority, availability zones.
+
+**Individual machines**: Instance type/state badges, provider IDs, addresses, conditions.
+
+**Templates and cluster stubs**: Lightweight renderers for instance templates (with resolved capacity) and cluster infrastructure stubs (endpoint + failure domains).
 
 ### Supported CRDs
 
