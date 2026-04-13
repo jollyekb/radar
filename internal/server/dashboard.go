@@ -69,13 +69,14 @@ type DashboardProblem struct {
 	Kind            string `json:"kind"`
 	Namespace       string `json:"namespace"`
 	Name            string `json:"name"`
-	Severity        string `json:"severity"`        // "critical", "high", or "medium"
+	Group           string `json:"group,omitempty"`  // API group for CRD disambiguation (e.g., "cluster.x-k8s.io")
+	Severity        string `json:"severity"`         // "critical", "high", or "medium"
 	Reason          string `json:"reason"`
 	Message         string `json:"message"`
 	Age             string `json:"age"`
-	AgeSeconds      int64  `json:"ageSeconds"`      // For sorting: lower = more recent
-	Duration        string `json:"duration"`         // How long the problem has persisted
-	DurationSeconds int64  `json:"durationSeconds"`  // For sorting by problem age
+	AgeSeconds      int64  `json:"ageSeconds"`       // For sorting: lower = more recent
+	Duration        string `json:"duration"`          // How long the problem has persisted
+	DurationSeconds int64  `json:"durationSeconds"`   // For sorting by problem age
 	PodCount        int    `json:"podCount,omitempty"` // For workload rollups: number of affected pods
 }
 
@@ -428,6 +429,23 @@ func (s *Server) getDashboardHealth(cache *k8s.ResourceCache, namespace string) 
 			Kind:            p.Kind,
 			Namespace:       p.Namespace,
 			Name:            p.Name,
+			Severity:        p.Severity,
+			Reason:          p.Reason,
+			Message:         p.Message,
+			Age:             p.Age,
+			AgeSeconds:      p.AgeSeconds,
+			Duration:        p.Duration,
+			DurationSeconds: p.DurationSeconds,
+		})
+	}
+
+	// CAPI problems (Cluster API resources)
+	for _, p := range k8s.DetectCAPIProblems(k8s.GetDynamicResourceCache(), k8s.GetResourceDiscovery(), namespace) {
+		problems = append(problems, DashboardProblem{
+			Kind:            p.Kind,
+			Namespace:       p.Namespace,
+			Name:            p.Name,
+			Group:           p.Group,
 			Severity:        p.Severity,
 			Reason:          p.Reason,
 			Message:         p.Message,

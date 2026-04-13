@@ -109,6 +109,7 @@ export interface DashboardProblem {
   kind: string
   namespace: string
   name: string
+  group?: string
   severity: 'critical' | 'high' | 'medium'
   reason: string
   message: string
