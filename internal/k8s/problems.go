@@ -2,6 +2,7 @@ package k8s
 
 import (
 	"fmt"
+	"log"
 	"strings"
 	"time"
 
@@ -282,20 +283,22 @@ func DetectCAPIProblems(dynamicCache *DynamicResourceCache, discovery *ResourceD
 		if group != "" {
 			gvr, ok := discovery.GetGVRWithGroup(kind, group)
 			if !ok {
-				return nil
+				return nil // CRD not installed — expected
 			}
 			resources, err := dynamicCache.List(gvr, namespace)
 			if err != nil {
+				log.Printf("[capi-problems] Failed to list %s (%s): %v", kind, group, err)
 				return nil
 			}
 			return resources
 		}
 		gvr, ok := discovery.GetGVR(kind)
 		if !ok {
-			return nil
+			return nil // CRD not installed — expected
 		}
 		resources, err := dynamicCache.List(gvr, namespace)
 		if err != nil {
+			log.Printf("[capi-problems] Failed to list %s: %v", kind, err)
 			return nil
 		}
 		return resources

@@ -948,6 +948,7 @@ type mcpProblem struct {
 	Kind      string `json:"kind"`
 	Namespace string `json:"namespace,omitempty"`
 	Name      string `json:"name"`
+	Group     string `json:"group,omitempty"`
 	Reason    string `json:"reason"`
 	Message   string `json:"message,omitempty"`
 	Age       string `json:"age"`
@@ -1043,6 +1044,7 @@ func buildDashboard(ctx context.Context, cache *k8s.ResourceCache, namespace str
 			Kind:      p.Kind,
 			Namespace: p.Namespace,
 			Name:      p.Name,
+			Group:     p.Group,
 			Reason:    p.Reason,
 			Message:   p.Message,
 			Age:       p.Age,

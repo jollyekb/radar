@@ -1435,9 +1435,9 @@ func (b *Builder) buildResourcesTopology(opts BuildOptions) (*Topology, error) {
 				if ownerRef.Kind == "Cluster" {
 					if clID, ok := capiClusterIDs[ns+"/"+ownerRef.Name]; ok {
 						edges = append(edges, Edge{
-							ID:     fmt.Sprintf("%s-to-%s", clID, mhcID),
-							Source: clID,
-							Target: mhcID,
+							ID:     fmt.Sprintf("%s-to-%s", mhcID, clID),
+							Source: mhcID,
+							Target: clID,
 							Type:   EdgeProtects,
 						})
 					}

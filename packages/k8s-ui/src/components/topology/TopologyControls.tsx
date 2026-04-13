@@ -84,7 +84,7 @@ export function TopologyControls({
             onClick={() => onViewModeChange('fleet')}
             className={`px-2.5 py-1 text-xs rounded-md transition-colors ${
               viewMode === 'fleet'
-                ? 'bg-indigo-600 text-white'
+                ? 'bg-skyhook-600 text-white'
                 : 'text-theme-text-secondary hover:text-theme-text-primary hover:bg-theme-elevated'
             }`}
             title="Cluster API fleet view — shows only CAPI resources and nodes"
