@@ -48,28 +48,22 @@ const KeyboardShortcutContext = createContext<KeyboardShortcutContextType | null
 
 let nextRegistrationId = 0
 
-// Check if focus is in an element that should suppress shortcuts
-function shouldSuppressShortcut(e: KeyboardEvent): boolean {
+// Classify suppression level for the currently-focused element.
+//   none — no suppression, all shortcuts fire
+//   soft — plain text inputs; bypassed by shortcuts with allowInInputs
+//   hard — rich editors (Monaco, xterm) that own their own keyboard UX;
+//          never bypassed, since Cmd+K / Ctrl+Shift+D have meaning there
+type SuppressionLevel = 'none' | 'soft' | 'hard'
+
+function getSuppressionLevel(e: KeyboardEvent): SuppressionLevel {
   const target = e.target as HTMLElement
-  if (!target) return false
-
-  // Always allow Escape
-  if (e.key === 'Escape') return false
-
-  // Suppress in text inputs
+  if (!target) return 'none'
+  if (e.key === 'Escape') return 'none'
+  if (target.closest('.monaco-editor') || target.closest('.xterm')) return 'hard'
   const tagName = target.tagName
-  if (tagName === 'INPUT' || tagName === 'TEXTAREA' || tagName === 'SELECT') return true
-
-  // Suppress in contenteditable
-  if (target.isContentEditable) return true
-
-  // Suppress in Monaco editor
-  if (target.closest('.monaco-editor')) return true
-
-  // Suppress in xterm terminal
-  if (target.closest('.xterm')) return true
-
-  return false
+  if (tagName === 'INPUT' || tagName === 'TEXTAREA' || tagName === 'SELECT') return 'soft'
+  if (target.isContentEditable) return 'soft'
+  return 'none'
 }
 
 // Parse a key string like "Shift+N", "Cmd+K", "g g" into match criteria
@@ -160,7 +154,8 @@ export function KeyboardShortcutProvider({ children }: { children: ReactNode }) 
   // Global keydown listener
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      const suppressed = shouldSuppressShortcut(e)
+      const suppression = getSuppressionLevel(e)
+      const suppressed = suppression !== 'none'
 
       // Get all enabled shortcuts, sorted by scope priority (highest first)
       const shortcuts = Array.from(shortcutsRef.current.values())
@@ -217,7 +212,7 @@ export function KeyboardShortcutProvider({ children }: { children: ReactNode }) 
           return
         }
 
-        if (suppressed && !shortcut.allowInInputs) continue
+        if (suppressed && !(shortcut.allowInInputs && suppression === 'soft')) continue
 
         if (matchesKey(e, matcher, '')) {
           e.preventDefault()
