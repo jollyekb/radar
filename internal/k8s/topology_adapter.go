@@ -106,6 +106,9 @@ func (a *topologyResourceProvider) Ingresses() ([]*networkingv1.Ingress, error) 
 func (a *topologyResourceProvider) ConfigMaps() ([]*corev1.ConfigMap, error) {
 	lister := a.cache.ConfigMaps()
 	if lister == nil {
+		if a.cache.IsDeferredPending(k8score.ConfigMaps) {
+			return nil, nil
+		}
 		return nil, fmt.Errorf("configmaps not available (RBAC not granted)")
 	}
 	return lister.List(labels.Everything())
@@ -114,6 +117,9 @@ func (a *topologyResourceProvider) ConfigMaps() ([]*corev1.ConfigMap, error) {
 func (a *topologyResourceProvider) Secrets() ([]*corev1.Secret, error) {
 	lister := a.cache.Secrets()
 	if lister == nil {
+		if a.cache.IsDeferredPending(k8score.Secrets) {
+			return nil, nil
+		}
 		return nil, fmt.Errorf("secrets not available (RBAC not granted)")
 	}
 	return lister.List(labels.Everything())
@@ -122,6 +128,9 @@ func (a *topologyResourceProvider) Secrets() ([]*corev1.Secret, error) {
 func (a *topologyResourceProvider) PersistentVolumeClaims() ([]*corev1.PersistentVolumeClaim, error) {
 	lister := a.cache.PersistentVolumeClaims()
 	if lister == nil {
+		if a.cache.IsDeferredPending(k8score.PersistentVolumeClaims) {
+			return nil, nil
+		}
 		return nil, fmt.Errorf("persistentvolumeclaims not available (RBAC not granted)")
 	}
 	return lister.List(labels.Everything())
@@ -130,6 +139,9 @@ func (a *topologyResourceProvider) PersistentVolumeClaims() ([]*corev1.Persisten
 func (a *topologyResourceProvider) PersistentVolumes() ([]*corev1.PersistentVolume, error) {
 	lister := a.cache.PersistentVolumes()
 	if lister == nil {
+		if a.cache.IsDeferredPending(k8score.PersistentVolumes) {
+			return nil, nil
+		}
 		return nil, fmt.Errorf("persistentvolumes not available (RBAC not granted)")
 	}
 	return lister.List(labels.Everything())
@@ -146,6 +158,9 @@ func (a *topologyResourceProvider) HorizontalPodAutoscalers() ([]*autoscalingv2.
 func (a *topologyResourceProvider) PodDisruptionBudgets() ([]*policyv1.PodDisruptionBudget, error) {
 	lister := a.cache.PodDisruptionBudgets()
 	if lister == nil {
+		if a.cache.IsDeferredPending(k8score.PodDisruptionBudgets) {
+			return nil, nil
+		}
 		return nil, fmt.Errorf("poddisruptionbudgets not available (RBAC not granted)")
 	}
 	return lister.List(labels.Everything())
@@ -154,6 +169,9 @@ func (a *topologyResourceProvider) PodDisruptionBudgets() ([]*policyv1.PodDisrup
 func (a *topologyResourceProvider) NetworkPolicies() ([]*networkingv1.NetworkPolicy, error) {
 	lister := a.cache.NetworkPolicies()
 	if lister == nil {
+		if a.cache.IsDeferredPending(k8score.NetworkPolicies) {
+			return nil, nil
+		}
 		return nil, fmt.Errorf("networkpolicies not available (RBAC not granted)")
 	}
 	return lister.List(labels.Everything())

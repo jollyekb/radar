@@ -146,6 +146,13 @@ type CacheConfig struct {
 	// Zero means wait indefinitely (original behavior).
 	SyncTimeout time.Duration
 
+	// DeferredSyncTimeout caps how long we wait for deferred informers to
+	// finish syncing before giving up. When the deadline fires, deferredDone
+	// is closed and deferredFailed is set so any still-unsynced types return
+	// 403 from HTTP handlers instead of perpetual 503s. Synced types are
+	// unaffected. Zero means wait indefinitely.
+	DeferredSyncTimeout time.Duration
+
 	// DebugEvents enables verbose event debug logging.
 	DebugEvents bool
 

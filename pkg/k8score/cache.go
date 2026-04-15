@@ -402,14 +402,32 @@ func NewResourceCache(cfg CacheConfig) (*ResourceCache, error) {
 			progressTicker := time.NewTicker(5 * time.Second)
 			defer progressTicker.Stop()
 
+			var deadlineCh <-chan time.Time
+			if cfg.DeferredSyncTimeout > 0 {
+				t := time.NewTimer(cfg.DeferredSyncTimeout)
+				defer t.Stop()
+				deadlineCh = t.C
+			}
+
+			timedOut := false
 			for {
+				// Mark each informer synced the moment its own HasSynced() is
+				// true. A permanently-failing informer (e.g. HPA autoscaling/v2
+				// on K8s <1.23) must not block siblings from becoming ready.
+				rc.deferredMu.Lock()
 				allSynced := true
-				for _, fn := range deferredSyncFuncs {
-					if !fn() {
+				for i, fn := range deferredSyncFuncs {
+					k := deferredKeys[i]
+					if rc.deferredSynced[k] {
+						continue
+					}
+					if fn() {
+						rc.deferredSynced[k] = true
+					} else {
 						allSynced = false
-						break
 					}
 				}
+				rc.deferredMu.Unlock()
 				if allSynced {
 					break
 				}
@@ -417,9 +435,11 @@ func NewResourceCache(cfg CacheConfig) (*ResourceCache, error) {
 				select {
 				case <-stopCh:
 					rc.deferredFailed.Store(true)
-					stdlog.Printf("ERROR: Deferred resource cache sync failed after %v", time.Since(deferredStart))
+					stdlog.Printf("ERROR: Deferred resource cache sync aborted after %v", time.Since(deferredStart))
 					close(deferredDone)
 					return
+				case <-deadlineCh:
+					timedOut = true
 				case <-progressTicker.C:
 					counts := rc.GetKindObjectCounts()
 					rc.informerMu.RLock()
@@ -445,16 +465,36 @@ func NewResourceCache(cfg CacheConfig) (*ResourceCache, error) {
 				default:
 					time.Sleep(100 * time.Millisecond)
 				}
+
+				if timedOut {
+					break
+				}
 			}
 
-			rc.deferredMu.Lock()
-			for _, k := range deferredKeys {
-				rc.deferredSynced[k] = true
+			if timedOut {
+				// Stop waiting on stragglers. deferredFailed is the "give up"
+				// signal read by IsDeferredPending — stragglers start reporting
+				// not-pending, so HTTP handlers return 403 instead of perpetual
+				// 503. Informers that already synced keep their own
+				// deferredSynced[k]=true and continue serving normally.
+				rc.deferredMu.RLock()
+				var pending []string
+				for _, k := range deferredKeys {
+					if !rc.deferredSynced[k] {
+						pending = append(pending, k)
+					}
+				}
+				rc.deferredMu.RUnlock()
+				rc.deferredFailed.Store(true)
+				stdlog.Printf("WARNING: Deferred sync timed out after %v; %d informer(s) never synced: %s. "+
+					"These resources will return 403 to API consumers. Common cause: the corresponding API "+
+					"version isn't served on this cluster (check `kubectl api-resources | grep <resource>`).",
+					cfg.DeferredSyncTimeout, len(pending), strings.Join(pending, ", "))
+			} else {
+				logf("    Phase 2 sync (%d deferred informers): %v", len(deferredSyncFuncs), time.Since(deferredStart))
+				stdlog.Printf("Deferred resource caches synced in %v (total: %v)", time.Since(deferredStart), time.Since(syncStart))
 			}
-			rc.deferredMu.Unlock()
 			close(deferredDone)
-			logf("    Phase 2 sync (%d deferred informers): %v", len(deferredSyncFuncs), time.Since(deferredStart))
-			stdlog.Printf("Deferred resource caches synced in %v (total: %v)", time.Since(deferredStart), time.Since(syncStart))
 		}()
 	} else {
 		close(deferredDone)

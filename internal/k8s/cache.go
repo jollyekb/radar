@@ -128,14 +128,15 @@ func InitResourceCache(ctx context.Context) error {
 		}
 
 		cfg := k8score.CacheConfig{
-			Client:          k8sClient,
-			ResourceTypes:   enabled,
-			DeferredTypes:   deferredResources,
-			NamespaceScoped: permResult.NamespaceScoped,
-			Namespace:       permResult.Namespace,
-			DebugEvents:     DebugEvents,
-			TimingLogger:    logTiming,
-			SyncTimeout:     60 * time.Second,
+			Client:              k8sClient,
+			ResourceTypes:       enabled,
+			DeferredTypes:       deferredResources,
+			NamespaceScoped:     permResult.NamespaceScoped,
+			Namespace:           permResult.Namespace,
+			DebugEvents:         DebugEvents,
+			TimingLogger:        logTiming,
+			SyncTimeout:         60 * time.Second,
+			DeferredSyncTimeout: 3 * time.Minute,
 
 			OnReceived: func(kind string) {
 				timeline.IncrementReceived(kind)
