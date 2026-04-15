@@ -30,18 +30,59 @@ interface CommandItem {
   action: () => void
   /** Extra terms to match against during search (not displayed) */
   searchTerms?: string[]
+  /** Small priority bonus added to the final score (only if the item matched). Used to nudge built-in k8s kinds above CRDs on tied queries like "policy" or "event". */
+  priorityBonus?: number
 }
 
-// Fuzzy match scoring: exact prefix > word boundary > substring
+// Built-in k8s API groups. Used to nudge these above CRDs on tied matches.
+const CORE_GROUP_BONUS = 10
+const WELL_KNOWN_GROUP_BONUS = 5
+const WELL_KNOWN_GROUPS = new Set([
+  'apps',
+  'batch',
+  'autoscaling',
+  'policy',
+  'networking.k8s.io',
+  'rbac.authorization.k8s.io',
+  'storage.k8s.io',
+  'scheduling.k8s.io',
+  'coordination.k8s.io',
+  'apiextensions.k8s.io',
+  'admissionregistration.k8s.io',
+  'apiregistration.k8s.io',
+  'certificates.k8s.io',
+  'events.k8s.io',
+  'discovery.k8s.io',
+  'flowcontrol.apiserver.k8s.io',
+  'node.k8s.io',
+  'authentication.k8s.io',
+  'authorization.k8s.io',
+])
+
+function groupPriorityBonus(group: string): number {
+  if (!group) return CORE_GROUP_BONUS
+  if (WELL_KNOWN_GROUPS.has(group)) return WELL_KNOWN_GROUP_BONUS
+  return 0
+}
+
+// Fuzzy match scoring: exact > prefix > word boundary > substring.
+// Within a tier, a coverage bonus (up to +20) breaks ties in favor of
+// shorter labels — so "serv" picks Service over ServiceAccount, and
+// "service" picks Service (exact) decisively. Bonus is capped below the
+// 25-point tier gap, so tier ordering is preserved.
 function scoreMatch(text: string, query: string): number {
   const lower = text.toLowerCase()
   const q = query.toLowerCase()
   if (!lower.includes(q)) return 0
-  if (lower.startsWith(q)) return 100
-  // Word boundary match
-  const wordStart = lower.indexOf(q)
-  if (wordStart > 0 && (lower[wordStart - 1] === ' ' || lower[wordStart - 1] === '/' || lower[wordStart - 1] === '-' || lower[wordStart - 1] === '.')) return 75
-  return 50
+  let base: number
+  if (lower === q) base = 150
+  else if (lower.startsWith(q)) base = 100
+  else {
+    const wordStart = lower.indexOf(q)
+    const prev = lower[wordStart - 1]
+    base = wordStart > 0 && (prev === ' ' || prev === '/' || prev === '-' || prev === '.') ? 75 : 50
+  }
+  return base + (q.length / lower.length) * 20
 }
 
 function bestScore(item: CommandItem, query: string): number {
@@ -59,7 +100,9 @@ function bestScore(item: CommandItem, query: string): number {
       best = Math.max(best, scoreMatch(term, query))
     }
   }
-  return best
+  // Only apply the priority bonus to items that actually matched, so we don't
+  // surface unrelated built-ins ahead of a relevant CRD.
+  return best > 0 ? best + (item.priorityBonus || 0) : 0
 }
 
 export function CommandPalette({
@@ -142,6 +185,7 @@ export function CommandPalette({
         icon: getResourceIcon(r.kind),
         action: () => { onNavigateKind(r.name, r.group) },
         searchTerms: [r.name, r.kind],
+        priorityBonus: groupPriorityBonus(r.group),
       })
     }
 

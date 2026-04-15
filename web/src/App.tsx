@@ -361,6 +361,7 @@ function AppInner() {
       description: 'Open command palette',
       category: 'General' as const,
       scope: 'global' as const,
+      allowInInputs: true,
       handler: () => setShowCommandPalette(true),
     },
     {
@@ -369,6 +370,7 @@ function AppInner() {
       description: 'Open diagnostics',
       category: 'General' as const,
       scope: 'global' as const,
+      allowInInputs: true,
       handler: () => setShowDiagnostics(prev => !prev),
     },
   ])
