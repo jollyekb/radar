@@ -106,9 +106,10 @@ run-dev:
 
 ## Utility targets
 
-# Kill any running radar process
+# Kill any running radar process (on configured port and by process name)
 kill:
 	@lsof -ti:$(PORT) | xargs kill -9 2>/dev/null || true
+	@pkill -9 -f './radar' 2>/dev/null || true
 
 # Install all dependencies
 deps:
