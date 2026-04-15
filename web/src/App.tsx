@@ -322,9 +322,6 @@ function AppInner() {
     navigate(-1)
   }, [navigate])
 
-  // Pending navigation that needs namespace filter confirmation
-  const [pendingKindNav, setPendingKindNav] = useState<{ kind: string; group: string } | null>(null)
-
   // Theme toggle for keyboard shortcut
   const { toggleTheme } = useTheme()
 
@@ -1266,24 +1263,24 @@ function AppInner() {
           onClose={() => setShowCommandPalette(false)}
           onNavigateView={(view) => setMainView(view)}
           onNavigateKind={(kind, group) => {
-            if (namespaces.length > 0) {
-              // Namespace filter is active — confirm before navigating
-              setPendingKindNav({ kind, group })
-            } else {
-              const params = new URLSearchParams(searchParams)
-              params.delete('kind')
-              if (group) params.set('apiGroup', group)
-              else params.delete('apiGroup')
-              params.delete('resource')
-              navigate({ pathname: `/resources/${kind}`, search: params.toString() })
-              // Focus the table search after navigation — the user came from ⌘K
-              // (keyboard flow) and expects to type a resource name immediately.
-              setTimeout(() => {
-                (document.querySelector('input[placeholder="Search... (press /)"]') as HTMLInputElement)?.focus()
-              }, 100)
-            }
+            const params = new URLSearchParams(searchParams)
+            params.delete('kind')
+            if (group) params.set('apiGroup', group)
+            else params.delete('apiGroup')
+            params.delete('resource')
+            navigate({ pathname: `/resources/${kind}`, search: params.toString() })
+            // Focus the table search after navigation — the user came from ⌘K
+            // (keyboard flow) and expects to type a resource name immediately.
+            setTimeout(() => {
+              (document.querySelector('input[placeholder="Search... (press /)"]') as HTMLInputElement)?.focus()
+            }, 100)
           }}
-          onSwitchContext={(name) => switchContext.mutate({ name })}
+          onSwitchContext={(name) => switchContext.mutate(
+            { name },
+            // Namespace filter from the previous context may not exist in the
+            // new one — clear it so resource lists don't silently go empty.
+            { onSettled: () => setNamespaces([]) },
+          )}
           onSetNamespaces={setNamespaces}
           onToggleTheme={toggleTheme}
           onShowDiagnostics={() => setShowDiagnostics(true)}
@@ -1296,92 +1293,12 @@ function AppInner() {
       {/* Settings dialog */}
       <SettingsDialog open={showSettings} onClose={() => setShowSettings(false)} />
 
-      {/* Namespace filter confirmation for command palette navigation */}
-      {pendingKindNav && (
-        <NamespaceFilterDialog
-          namespaces={namespaces}
-          onConfirm={() => {
-            setNamespaces([])
-            const params = new URLSearchParams()
-            if (pendingKindNav.group) params.set('apiGroup', pendingKindNav.group)
-            navigate({ pathname: `/resources/${pendingKindNav.kind}`, search: params.toString() })
-            setPendingKindNav(null)
-            setTimeout(() => { (document.querySelector('input[placeholder="Search... (press /)"]') as HTMLInputElement)?.focus() }, 100)
-          }}
-          onKeep={() => {
-            const params = new URLSearchParams(searchParams)
-            params.delete('kind')
-            if (pendingKindNav.group) params.set('apiGroup', pendingKindNav.group)
-            else params.delete('apiGroup')
-            params.delete('resource')
-            navigate({ pathname: `/resources/${pendingKindNav.kind}`, search: params.toString() })
-            setPendingKindNav(null)
-            setTimeout(() => { (document.querySelector('input[placeholder="Search... (press /)"]') as HTMLInputElement)?.focus() }, 100)
-          }}
-          onClose={() => setPendingKindNav(null)}
-        />
-      )}
-
       {/* Debug overlay - only in dev mode */}
       {import.meta.env.DEV && <DebugOverlay />}
     </div>
     </PortForwardProvider>
   )
 }
-
-// Lightweight dialog to confirm clearing namespace filter when navigating from command palette
-function NamespaceFilterDialog({ namespaces, onConfirm, onKeep, onClose }: {
-  namespaces: string[]
-  onConfirm: () => void
-  onKeep: () => void
-  onClose: () => void
-}) {
-  const confirmRef = useRef<HTMLButtonElement>(null)
-
-  useEffect(() => {
-    confirmRef.current?.focus()
-  }, [])
-
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); onClose() }
-    }
-    document.addEventListener('keydown', handler, true)
-    return () => document.removeEventListener('keydown', handler, true)
-  }, [onClose])
-
-  const label = namespaces.length === 1 ? namespaces[0] : `${namespaces.length} namespaces`
-
-  return (
-    <div className="fixed inset-0 z-[100] flex items-start justify-center pt-[20vh]">
-      <div className="absolute inset-0 bg-theme-base/60 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative dialog max-w-sm w-full mx-4 p-4">
-        <p className="text-sm text-theme-text-primary mb-1">
-          Namespace filter is active
-        </p>
-        <p className="text-xs text-theme-text-secondary mb-4">
-          Currently filtered to <span className="font-medium text-theme-text-primary">{label}</span>. Clear filter to show all namespaces?
-        </p>
-        <div className="flex items-center justify-end gap-2">
-          <button
-            onClick={onKeep}
-            className="px-3 py-1.5 text-xs font-medium text-theme-text-secondary hover:text-theme-text-primary hover:bg-theme-elevated rounded-lg transition-colors"
-          >
-            Keep filter
-          </button>
-          <button
-            ref={confirmRef}
-            onClick={onConfirm}
-            className="px-3 py-1.5 text-xs font-medium btn-brand rounded-lg focus:outline-none focus:ring-2 focus:ring-skyhook-500 focus:ring-offset-1 focus:ring-offset-theme-surface"
-          >
-            Clear filter
-          </button>
-        </div>
-      </div>
-    </div>
-  )
-}
-
 
 // Spacer component that adds padding when dock is open
 function DockSpacer() {
