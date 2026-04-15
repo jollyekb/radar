@@ -30,6 +30,8 @@ export interface KeyboardShortcut {
   handler: (e: KeyboardEvent) => void
   /** Whether this shortcut is currently active */
   enabled?: boolean
+  /** Fire even when focus is inside an input/textarea. For global modifier combos (⌘K, Ctrl+Shift+D) that can't collide with typing. */
+  allowInInputs?: boolean
 }
 
 // Internal registration with stable ID
@@ -215,7 +217,7 @@ export function KeyboardShortcutProvider({ children }: { children: ReactNode }) 
           return
         }
 
-        if (suppressed) continue
+        if (suppressed && !shortcut.allowInInputs) continue
 
         if (matchesKey(e, matcher, '')) {
           e.preventDefault()
