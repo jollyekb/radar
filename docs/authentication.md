@@ -93,6 +93,34 @@ Radar discovers the provider's `end_session_endpoint` automatically from the OID
 
 To redirect users back to Radar after IdP logout, set `--auth-oidc-post-logout-redirect-url` (or `auth.oidc.postLogoutRedirectURL` in Helm). This URL **must be registered** with your identity provider as a valid post-logout redirect URI.
 
+**Back-Channel Logout (IdP-initiated session revocation):**
+
+When an admin disables a user at the IdP level (e.g., disables an Okta account), Radar has no way to know — the existing session cookie remains valid until it expires. Back-Channel Logout ([spec](https://openid.net/specs/openid-connect-backchannel-1_0.html)) solves this: the IdP POSTs a signed `logout_token` to Radar's `/auth/backchannel-logout` endpoint, and Radar immediately revokes the matching session.
+
+To enable, set `--auth-oidc-backchannel-logout` (or `auth.oidc.backchannelLogout: true` in Helm), then register `https://radar.example.com/auth/backchannel-logout` as the Back-Channel Logout URI in your IdP.
+
+```yaml
+auth:
+  mode: oidc
+  oidc:
+    issuerURL: https://your-idp.example.com
+    clientID: radar
+    backchannelLogout: true
+```
+
+Check the startup logs to confirm IdP support:
+```
+[oidc] Backchannel Logout enabled (sid-based revocation)
+# or
+[oidc] WARNING: --auth-oidc-backchannel-logout is set, but IdP does not advertise backchannel_logout_supported.
+```
+
+**Limitations:**
+- **Single-replica only.** Revocations are stored in memory and not shared across pods. If Radar runs multiple replicas behind a load balancer, a revocation hitting one pod won't affect sessions on other pods.
+- **Lost on restart.** If Radar restarts, all pending revocations are lost. The session will expire naturally at cookie TTL (4h default).
+- **`sid` required for targeted revocation.** If the IdP's logout_token contains only `sub` (no `sid`), Radar cannot target the specific session — it logs a warning and the session expires at cookie TTL. Most major IdPs (Okta, Keycloak, Auth0, Azure AD) include `sid`.
+- **Google does not support back-channel logout.** For Google, session exposure is bounded by cookie TTL only.
+
 **Using K8s Secrets for sensitive values:**
 
 For production, use K8s Secrets instead of storing credentials in Helm values (which are visible in Helm release history):
@@ -340,8 +368,11 @@ Radar uses stateless HMAC-SHA256 signed cookies for sessions. The cookie contain
 | OIDC redirect URL | `--auth-oidc-redirect-url` | `auth.oidc.redirectURL` | — |
 | OIDC groups claim | `--auth-oidc-groups-claim` | `auth.oidc.groupsClaim` | `groups` |
 | OIDC post-logout redirect | `--auth-oidc-post-logout-redirect-url` | `auth.oidc.postLogoutRedirectURL` | — |
+| OIDC username prefix | `--auth-oidc-username-prefix` | `auth.oidc.usernamePrefix` | — |
+| OIDC groups prefix | `--auth-oidc-groups-prefix` | `auth.oidc.groupsPrefix` | — |
 | OIDC CA certificate | `--auth-oidc-ca-cert` | `auth.oidc.caCert` | — |
 | OIDC skip TLS verify | `--auth-oidc-insecure-skip-verify` | `auth.oidc.insecureSkipVerify` | `false` |
+| OIDC backchannel logout | `--auth-oidc-backchannel-logout` | `auth.oidc.backchannelLogout` | `false` |
 
 ## Troubleshooting
 

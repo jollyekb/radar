@@ -31,6 +31,19 @@ func Authenticate(cfg Config) func(http.Handler) http.Handler {
 			// Try to get user from session cookie first.
 			// Cookie-valid path slides the TTL; header-auth path below is a full re-auth.
 			if session := ParseSessionCookie(r, cfg.Secret); session != nil {
+				// Check if the session has been revoked (backchannel logout)
+				if cfg.Revoker != nil && cfg.Revoker.IsRevoked(session.SID) {
+					log.Printf("[auth] Revoked session rejected: user=%s sid=%s", session.User.Username, session.SID)
+					http.SetCookie(w, ClearSessionCookie())
+					w.Header().Set("Content-Type", "application/json")
+					w.WriteHeader(http.StatusUnauthorized)
+					json.NewEncoder(w).Encode(map[string]string{
+						"error":    "session revoked",
+						"authMode": cfg.Mode,
+					})
+					return
+				}
+
 				// Sliding TTL: re-issue cookie if past half-life or if remaining exceeds
 				// the configured TTL (handles TTL downgrade, e.g. 24h → 4h).
 				// SetCookie runs before next.ServeHTTP so the handler can't commit headers first.

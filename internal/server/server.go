@@ -112,6 +112,14 @@ func New(cfg Config) *Server {
 			if err != nil {
 				log.Fatalf("[auth] OIDC initialization failed (issuer=%s): %v — cannot start with auth-mode=oidc", s.authConfig.OIDCIssuer, err)
 			}
+
+			// Wire up backchannel logout revocation store
+			if s.authConfig.OIDCBackchannelLogout {
+				revoker := auth.NewMemoryRevoker()
+				oidcHandler.SetRevoker(revoker)
+				s.authConfig.Revoker = revoker // middleware uses this for IsRevoked checks
+			}
+
 			s.oidcHandler = oidcHandler
 		}
 
@@ -159,6 +167,9 @@ func (s *Server) setupRoutes() {
 		r.Get("/auth/login", s.oidcHandler.HandleLogin)
 		r.Get("/auth/callback", s.oidcHandler.HandleCallback)
 		r.Get("/auth/logout", s.oidcHandler.HandleLogout)
+		if s.authConfig.OIDCBackchannelLogout {
+			r.Post("/auth/backchannel-logout", s.oidcHandler.HandleBackchannelLogout)
+		}
 	} else if s.authConfig.Enabled() {
 		// Proxy mode: register a simple logout that clears the session cookie
 		r.Get("/auth/logout", s.handleLogout)

@@ -26,9 +26,14 @@ type OIDCHandler struct {
 	cfg                Config
 	provider           *oidc.Provider
 	oauth              oauth2.Config
-	verifier           *oidc.IDTokenVerifier
-	endSessionEndpoint string       // from OIDC discovery; empty if IdP doesn't support RP-Initiated Logout
-	httpClient         *http.Client // custom TLS client for OIDC provider calls; nil = default
+	verifier           *oidc.IDTokenVerifier // used for both ID tokens and logout_tokens (nonce checked manually, not by verifier)
+	endSessionEndpoint string                // from OIDC discovery; empty if IdP doesn't support RP-Initiated Logout
+	httpClient         *http.Client          // custom TLS client for OIDC provider calls; nil = default
+	revoker            *MemoryRevoker        // session revocation store; nil = backchannel logout disabled
+
+	// Discovery: backchannel logout support
+	backchannelLogoutSupported        bool
+	backchannelLogoutSessionSupported bool
 }
 
 // NewOIDCHandler creates a new OIDC handler. Returns an error if the provider
@@ -78,9 +83,11 @@ func NewOIDCHandler(ctx context.Context, cfg Config) (*OIDCHandler, error) {
 
 	verifier := provider.Verifier(&oidc.Config{ClientID: cfg.OIDCClientID})
 
-	// Extract end_session_endpoint from OIDC discovery document for RP-Initiated Logout
+	// Extract endpoints and feature flags from OIDC discovery document
 	var providerClaims struct {
-		EndSessionEndpoint string `json:"end_session_endpoint"`
+		EndSessionEndpoint                string `json:"end_session_endpoint"`
+		BackchannelLogoutSupported        bool   `json:"backchannel_logout_supported"`
+		BackchannelLogoutSessionSupported bool   `json:"backchannel_logout_session_supported"`
 	}
 	if err := provider.Claims(&providerClaims); err != nil {
 		log.Printf("[oidc] Warning: failed to parse end_session_endpoint from discovery document: %v", err)
@@ -90,14 +97,29 @@ func NewOIDCHandler(ctx context.Context, cfg Config) (*OIDCHandler, error) {
 		log.Printf("[oidc] IdP does not advertise end_session_endpoint — will use prompt=login on next auth after logout")
 	}
 
-	return &OIDCHandler{
-		cfg:                cfg,
-		provider:           provider,
-		oauth:              oauthCfg,
-		verifier:           verifier,
-		endSessionEndpoint: providerClaims.EndSessionEndpoint,
-		httpClient:         httpClient,
-	}, nil
+	h := &OIDCHandler{
+		cfg:                               cfg,
+		provider:                          provider,
+		oauth:                             oauthCfg,
+		verifier:                          verifier,
+		endSessionEndpoint:                providerClaims.EndSessionEndpoint,
+		httpClient:                        httpClient,
+		backchannelLogoutSupported:        providerClaims.BackchannelLogoutSupported,
+		backchannelLogoutSessionSupported: providerClaims.BackchannelLogoutSessionSupported,
+	}
+
+	if cfg.OIDCBackchannelLogout {
+		switch {
+		case providerClaims.BackchannelLogoutSupported && providerClaims.BackchannelLogoutSessionSupported:
+			log.Printf("[oidc] Backchannel Logout enabled (sid-based revocation)")
+		case providerClaims.BackchannelLogoutSupported:
+			log.Printf("[oidc] Backchannel Logout enabled (sub-based revocation — IdP does not advertise sid support)")
+		default:
+			log.Printf("[oidc] WARNING: --auth-oidc-backchannel-logout is set, but IdP does not advertise backchannel_logout_supported. The endpoint will be registered but this IdP will not use it. Exposure is bounded by cookie TTL (%s).", cfg.CookieTTL)
+		}
+	}
+
+	return h, nil
 }
 
 // HandleLogin redirects to the OIDC provider for authentication
@@ -230,6 +252,16 @@ func (h *OIDCHandler) HandleCallback(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Apply OIDC prefix to match Kubernetes API server's --oidc-username-prefix / --oidc-groups-prefix
+	if h.cfg.OIDCUsernamePrefix != "" {
+		username = h.cfg.OIDCUsernamePrefix + username
+	}
+	if h.cfg.OIDCGroupsPrefix != "" {
+		for i, g := range groups {
+			groups[i] = h.cfg.OIDCGroupsPrefix + g
+		}
+	}
+
 	user := &User{Username: username, Groups: groups}
 
 	// Extract session ID from ID token if present (needed for backchannel logout matching),
@@ -305,4 +337,129 @@ func (h *OIDCHandler) HandleLogout(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(resp)
+}
+
+// SetRevoker injects the session revocation store for backchannel logout.
+// Must be called before the handler is registered if backchannel logout is enabled.
+func (h *OIDCHandler) SetRevoker(r *MemoryRevoker) {
+	h.revoker = r
+}
+
+// backchannelLogoutEventURI is the OIDC event type that must appear in the
+// logout_token's "events" claim per the Back-Channel Logout spec §2.4.
+const backchannelLogoutEventURI = "http://schemas.openid.net/event/backchannel-logout"
+
+// HandleBackchannelLogout handles POST /auth/backchannel-logout.
+// The IdP sends a signed logout_token JWT to notify Radar that a session
+// should be revoked. See: https://openid.net/specs/openid-connect-backchannel-1_0.html
+func (h *OIDCHandler) HandleBackchannelLogout(w http.ResponseWriter, r *http.Request) {
+	// Spec §2.5: response MUST include Cache-Control: no-store
+	w.Header().Set("Cache-Control", "no-store")
+
+	if h.revoker == nil {
+		http.Error(w, "backchannel logout not configured", http.StatusNotImplemented)
+		return
+	}
+
+	if r.Method != http.MethodPost {
+		http.Error(w, "POST required", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Parse logout_token from form body (application/x-www-form-urlencoded)
+	if err := r.ParseForm(); err != nil {
+		log.Printf("[oidc] Backchannel logout: failed to parse form: %v", err)
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+	rawToken := r.FormValue("logout_token")
+	if rawToken == "" {
+		http.Error(w, "missing logout_token parameter", http.StatusBadRequest)
+		return
+	}
+
+	// Verify JWT signature, issuer, audience, and expiry using the OIDC provider's JWKS.
+	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+	defer cancel()
+
+	if h.httpClient != nil {
+		ctx = context.WithValue(ctx, oauth2.HTTPClient, h.httpClient)
+	}
+
+	idToken, err := h.verifier.Verify(ctx, rawToken)
+	if err != nil {
+		log.Printf("[oidc] Backchannel logout: token verification failed: %v", err)
+		http.Error(w, "invalid logout_token", http.StatusBadRequest)
+		return
+	}
+
+	// Parse all claims for validation
+	var claims map[string]any
+	if err := idToken.Claims(&claims); err != nil {
+		log.Printf("[oidc] Backchannel logout: failed to parse claims: %v", err)
+		http.Error(w, "invalid logout_token claims", http.StatusBadRequest)
+		return
+	}
+
+	// Spec §2.4: MUST contain "events" claim with the backchannel logout event URI
+	events, ok := claims["events"].(map[string]any)
+	if !ok {
+		log.Printf("[oidc] Backchannel logout: missing or invalid 'events' claim")
+		http.Error(w, "missing events claim", http.StatusBadRequest)
+		return
+	}
+	if _, hasEvent := events[backchannelLogoutEventURI]; !hasEvent {
+		log.Printf("[oidc] Backchannel logout: events claim missing backchannel-logout event URI")
+		http.Error(w, "missing backchannel-logout event", http.StatusBadRequest)
+		return
+	}
+
+	// Spec §2.4: MUST NOT contain a "nonce" claim
+	if _, hasNonce := claims["nonce"]; hasNonce {
+		log.Printf("[oidc] Backchannel logout: logout_token contains 'nonce' claim (rejected per spec)")
+		http.Error(w, "logout_token must not contain nonce", http.StatusBadRequest)
+		return
+	}
+
+	// Extract sid and/or sub — at least one must be present (spec §2.4)
+	sid, _ := claims["sid"].(string)
+	sub := idToken.Subject
+
+	if sid == "" && sub == "" {
+		log.Printf("[oidc] Backchannel logout: logout_token has neither 'sid' nor 'sub' claim")
+		http.Error(w, "logout_token must contain sid or sub", http.StatusBadRequest)
+		return
+	}
+
+	// JTI dedupe — spec §2.7 requires idempotent handling of retries
+	jti, _ := claims["jti"].(string)
+	if jti == "" {
+		log.Printf("[oidc] Backchannel logout: logout_token has no 'jti' claim — idempotency protection disabled for this token (sub=%s, sid=%s)", sub, sid)
+	}
+	jtiExpiry := idToken.Expiry
+	if jtiExpiry.IsZero() {
+		jtiExpiry = time.Now().Add(h.cfg.CookieTTL) // fall back to cookie TTL
+	}
+	if h.revoker.SeenJTI(jti, jtiExpiry) {
+		// Already processed this logout_token — return 200 (idempotent)
+		log.Printf("[oidc] Backchannel logout: duplicate jti=%s (idempotent 200)", jti)
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	// Revoke the session
+	revocationExpiry := time.Now().Add(h.cfg.CookieTTL)
+	if sid != "" {
+		h.revoker.Revoke(sid, revocationExpiry)
+		log.Printf("[oidc] Backchannel logout: revoked sid=%s (sub=%s, jti=%s)", sid, sub, jti)
+	} else {
+		// sub-only: we can't do targeted revocation (our store is sid-keyed).
+		// Return 501 so the IdP knows this wasn't processed, rather than
+		// returning 200 and silently doing nothing.
+		log.Printf("[oidc] Backchannel logout: sub-only revocation not supported (sub=%s, jti=%s) — IdP did not provide sid", sub, jti)
+		http.Error(w, "sub-only revocation not supported; sid claim required", http.StatusNotImplemented)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
 }

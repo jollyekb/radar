@@ -21,6 +21,9 @@ type Config struct {
 	UserHeader   string // default "X-Forwarded-User"
 	GroupsHeader string // default "X-Forwarded-Groups"
 
+	// Session revocation (optional, used by backchannel logout)
+	Revoker SessionRevoker
+
 	// OIDC mode
 	OIDCIssuer       string
 	OIDCClientID     string
@@ -28,8 +31,17 @@ type Config struct {
 	OIDCRedirectURL           string
 	OIDCGroupsClaim           string // default "groups"
 	OIDCPostLogoutRedirectURL  string // optional, URL to redirect after IdP logout
+	OIDCUsernamePrefix         string // prefix added to OIDC username for K8s impersonation (e.g., "oidc:")
+	OIDCGroupsPrefix           string // prefix added to OIDC groups for K8s impersonation (e.g., "oidc:")
 	OIDCInsecureSkipVerify     bool   // skip TLS verification for OIDC provider (dev/test only)
 	OIDCCACert                 string // path to CA certificate file for OIDC provider TLS
+	OIDCBackchannelLogout      bool   // enable backchannel logout endpoint
+}
+
+// SessionRevoker checks whether a session has been revoked (e.g., via OIDC
+// backchannel logout). Used by the auth middleware to reject revoked sessions.
+type SessionRevoker interface {
+	IsRevoked(sid string) bool
 }
 
 // User represents an authenticated user

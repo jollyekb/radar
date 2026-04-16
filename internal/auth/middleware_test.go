@@ -584,3 +584,93 @@ func TestMiddleware_NoReissueOnExpiredCookie(t *testing.T) {
 		t.Errorf("status = %d, want 401 for expired cookie", rec.Code)
 	}
 }
+
+// --- Revocation tests ---
+
+func TestMiddleware_RevokedSession_Returns401(t *testing.T) {
+	cfg := proxyConfig()
+	revoker := NewMemoryRevoker()
+	defer revoker.Stop()
+	cfg.Revoker = revoker
+
+	mw := Authenticate(cfg)
+	handler := mw(http.HandlerFunc(echoUser))
+
+	// Create a valid session cookie
+	sid := "revoke-me-sid-1234567890abcdef"
+	cookie := CreateSessionCookie(&User{Username: "alice"}, sid, "", cfg.Secret, cfg.CookieTTL, false)
+
+	// Revoke the session
+	revoker.Revoke(sid, time.Now().Add(1*time.Hour))
+
+	req := httptest.NewRequest("GET", "/api/topology", nil)
+	req.AddCookie(cookie)
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("status = %d, want 401 for revoked session", rec.Code)
+	}
+
+	// Response should indicate session was revoked
+	var resp map[string]string
+	json.NewDecoder(rec.Body).Decode(&resp)
+	if resp["error"] != "session revoked" {
+		t.Errorf("error = %q, want %q", resp["error"], "session revoked")
+	}
+
+	// Session cookie should be cleared
+	for _, c := range rec.Result().Cookies() {
+		if c.Name == DefaultCookieName && c.MaxAge == -1 {
+			return // found the clear cookie
+		}
+	}
+	t.Error("revoked session should clear the session cookie")
+}
+
+func TestMiddleware_NonRevokedSession_PassesThrough(t *testing.T) {
+	cfg := proxyConfig()
+	revoker := NewMemoryRevoker()
+	defer revoker.Stop()
+	cfg.Revoker = revoker
+
+	mw := Authenticate(cfg)
+	handler := mw(http.HandlerFunc(echoUser))
+
+	// Create a valid session cookie (NOT revoked)
+	sid := NewSessionID()
+	cookie := CreateSessionCookie(&User{Username: "bob"}, sid, "", cfg.Secret, cfg.CookieTTL, false)
+
+	req := httptest.NewRequest("GET", "/api/topology", nil)
+	req.AddCookie(cookie)
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200 for non-revoked session", rec.Code)
+	}
+}
+
+func TestMiddleware_NoRevoker_SkipsCheck(t *testing.T) {
+	cfg := proxyConfig()
+	// No revoker configured (backchannel logout not enabled)
+	cfg.Revoker = nil
+
+	mw := Authenticate(cfg)
+	handler := mw(http.HandlerFunc(echoUser))
+
+	sid := NewSessionID()
+	cookie := CreateSessionCookie(&User{Username: "carol"}, sid, "", cfg.Secret, cfg.CookieTTL, false)
+
+	req := httptest.NewRequest("GET", "/api/topology", nil)
+	req.AddCookie(cookie)
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200 when no revoker configured", rec.Code)
+	}
+}

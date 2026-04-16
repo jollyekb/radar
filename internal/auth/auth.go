@@ -10,6 +10,7 @@ import pkgauth "github.com/skyhook-io/radar/pkg/auth"
 type Config = pkgauth.Config
 type User = pkgauth.User
 type Session = pkgauth.Session
+type SessionRevoker = pkgauth.SessionRevoker
 type UserPermissions = pkgauth.UserPermissions
 type PermissionCache = pkgauth.PermissionCache
 
