@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"flag"
 	"fmt"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/skyhook-io/radar/internal/app"
 	"github.com/skyhook-io/radar/internal/auth"
+	"github.com/skyhook-io/radar/internal/cloud"
 	"github.com/skyhook-io/radar/internal/config"
 	"github.com/skyhook-io/radar/internal/k8s"
 	_ "k8s.io/client-go/plugin/pkg/client/auth" // Register all auth provider plugins (OIDC, GCP, Azure, etc.)
@@ -69,6 +71,13 @@ func main() {
 	authOIDCInsecureSkipVerify := flag.Bool("auth-oidc-insecure-skip-verify", false, "Skip TLS certificate verification for OIDC provider (insecure, dev/test only)")
 	authOIDCCACert := flag.String("auth-oidc-ca-cert", "", "Path to CA certificate file for OIDC provider TLS verification")
 	authOIDCBackchannelLogout := flag.Bool("auth-oidc-backchannel-logout", false, "Enable OIDC Back-Channel Logout endpoint (single-replica only)")
+	// Radar Hub (cloud) flags — enable hosted mode when --hub-url is set.
+	// Local-binary behavior is unchanged when these flags are empty. Each
+	// flag falls back to an env var so Kubernetes deployments can source
+	// the token from a Secret without exposing it in `ps` output.
+	hubURL := flag.String("hub-url", os.Getenv("RADAR_HUB_URL"), "Radar Hub WebSocket URL (e.g. wss://api.radar.skyhook.io/agent) — empty = local-only. Env: RADAR_HUB_URL")
+	hubToken := flag.String("hub-token", os.Getenv("RADAR_HUB_TOKEN"), "Cluster token from the Radar Hub install wizard (rhc_<random>). Env: RADAR_HUB_TOKEN")
+	hubClusterName := flag.String("cluster-name", os.Getenv("RADAR_HUB_CLUSTER_NAME"), "Human-readable cluster name for Radar Hub (required with --hub-url). Env: RADAR_HUB_CLUSTER_NAME")
 	flag.Parse()
 
 	if *showVersion {
@@ -156,12 +165,19 @@ func main() {
 	srv := app.CreateServer(cfg)
 	k8s.LogTiming(" Server created: %v", time.Since(t))
 
+	// Root context cancelled on SIGINT/SIGTERM. Long-running background
+	// workers (hub tunnel, etc.) observe this to shut down cleanly before
+	// the process exits.
+	rootCtx, rootCancel := context.WithCancel(context.Background())
+	defer rootCancel()
+
 	// Handle shutdown signals
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 
 	go func() {
 		<-sigCh
+		rootCancel()
 		app.Shutdown(srv)
 		os.Exit(0)
 	}()
@@ -195,6 +211,31 @@ func main() {
 	// Now initialize cluster connection and caches (browser will see progress via SSE)
 	app.InitializeCluster()
 	k8s.LogTiming(" Total startup (to connected): %v", time.Since(startupStart))
+
+	// When --hub-url is set, dial out to the hub and serve the existing
+	// router over yamux-tunneled streams. No behavior change when empty.
+	if *hubURL != "" {
+		if *hubToken == "" || *hubClusterName == "" {
+			log.Fatalf("--hub-url requires --hub-token and --cluster-name")
+		}
+		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					log.Printf("[cloud] panic in hub tunnel: %v — local Radar continues to serve", r)
+				}
+			}()
+			runErr := cloud.Run(rootCtx, cloud.Config{
+				HubURL:      *hubURL,
+				Token:       *hubToken,
+				ClusterID:   *hubClusterName,
+				ClusterName: *hubClusterName,
+				Handler:     srv.Handler(),
+			})
+			if runErr != nil && !errors.Is(runErr, context.Canceled) {
+				log.Printf("[cloud] tunnel exited: %v", runErr)
+			}
+		}()
+	}
 
 	// Track opens and maybe prompt to star the repo on GitHub (non-blocking)
 	app.MaybePromptGitHubStar()

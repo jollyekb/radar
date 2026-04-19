@@ -20,6 +20,7 @@ import { PortForwardProvider, PortForwardIndicator, PortForwardPanel } from './c
 import { DockProvider, BottomDock, useDock, useOpenLocalTerminal } from './components/dock'
 import { DURATION_DOCK } from '@skyhook-io/k8s-ui/utils/animation'
 import { ContextSwitcher } from './components/ContextSwitcher'
+import { useNavCustomization } from './context/NavCustomization'
 import { ContextSwitchProvider, useContextSwitch } from './context/ContextSwitchContext'
 import { ConnectionProvider, useConnection } from './context/ConnectionContext'
 import { ConnectionErrorView } from './components/ConnectionErrorView'
@@ -33,6 +34,7 @@ import { CommandPalette } from './components/ui/CommandPalette'
 import { DiagnosticsOverlay } from './components/ui/DiagnosticsOverlay'
 import { useEventSource } from './hooks/useEventSource'
 import { useNamespaces, useSwitchContext, useAuthMe } from './api/client'
+import { routePath, apiUrl, getAuthHeaders, getCredentialsMode } from './api/config'
 import { KeyboardShortcutProvider, useRegisterShortcut, useRegisterShortcuts } from './hooks/useKeyboardShortcuts'
 import { useAnimatedUnmount } from './hooks/useAnimatedUnmount'
 import { Loader2 } from 'lucide-react'
@@ -131,7 +133,7 @@ function getViewFromPath(pathname: string): ExtendedMainView {
 function AuthBarrier({ authMode }: { authMode: string }) {
   useEffect(() => {
     if (authMode === 'oidc') {
-      window.location.href = '/auth/login'
+      window.location.href = routePath('/auth/login')
     }
   }, [authMode])
 
@@ -172,6 +174,7 @@ function AppInner() {
   const [searchParams, setSearchParams] = useSearchParams()
   const capabilities = useCapabilitiesContext()
   const openLocalTerminal = useOpenLocalTerminal()
+  const navCustomization = useNavCustomization()
 
   // Auth check — detect if auth is enabled but user is not authenticated
   const { data: authMe, isPending: authMePending } = useAuthMe()
@@ -752,13 +755,15 @@ function AppInner() {
       <header className="relative z-50 flex items-center justify-between px-4 py-2 bg-theme-base/90 backdrop-blur-sm border-b border-theme-border/50">
         {/* Left: Logo + Cluster info */}
         <div className="flex items-center gap-4 shrink-0">
-          <div className="flex items-center gap-2.5">
-            <Logo />
-            <span className="text-xl text-theme-text-primary leading-none -translate-y-0.5" style={{ fontFamily: "'DM Sans', sans-serif", fontWeight: 520 }}>radar</span>
-          </div>
+          {navCustomization.brandSlot ?? (
+            <div className="flex items-center gap-2.5">
+              <Logo />
+              <span className="text-xl text-theme-text-primary leading-none -translate-y-0.5" style={{ fontFamily: "'DM Sans', sans-serif", fontWeight: 520 }}>radar</span>
+            </div>
+          )}
 
           <div className="flex items-center gap-2">
-            <ContextSwitcher />
+            {navCustomization.contextSlot ?? <ContextSwitcher />}
             {/* Connection status - next to cluster name */}
             <div className="flex items-center gap-1.5 ml-1">
               <Tooltip
@@ -858,10 +863,12 @@ function AppInner() {
             </kbd>
           </button>
 
-          {/* GitHub star */}
-          <div className="hidden lg:block">
-            <GitHubStarButton />
-          </div>
+          {/* GitHub star — hidden in embedded mode (not OSS-distribution chrome). */}
+          {!navCustomization.embedded && (
+            <div className="hidden lg:block">
+              <GitHubStarButton />
+            </div>
+          )}
 
           {/* Local terminal */}
           {capabilities.localTerminal && (
@@ -888,8 +895,13 @@ function AppInner() {
             <Settings className="w-4 h-4" />
           </button>
 
-          {/* User menu (when auth enabled) */}
-          <UserMenu />
+          {/* User menu (when auth enabled) — hidden in embedded mode;
+              host app typically provides its own via rightExtras. */}
+          {!navCustomization.embedded && <UserMenu />}
+
+          {/* Consumer-provided extras (e.g. Radar Hub's Install button +
+              avatar menu) appended to the right of the action bar. */}
+          {navCustomization.rightExtras}
         </div>
       </header>
 
@@ -1243,8 +1255,8 @@ function AppInner() {
       {/* Port Forward floating panel (indicator lives in header) */}
       <PortForwardPanel />
 
-      {/* Update notification */}
-      <UpdateNotification />
+      {/* Update notification — hidden in embedded mode (OSS download nudge). */}
+      {!navCustomization.embedded && <UpdateNotification />}
 
       {/* Bottom Dock for Terminal/Logs */}
       <BottomDock />
@@ -1379,7 +1391,7 @@ function GitHubStarButton() {
       .catch(() => {})
 
     // Check if user already starred (via backend/gh CLI) and whether to show prompt
-    fetch('/api/github/starred')
+    fetch(apiUrl('/github/starred'), { credentials: getCredentialsMode(), headers: getAuthHeaders() })
       .then(res => res.ok ? res.json() : null)
       .then(data => {
         if (data) {
@@ -1388,7 +1400,7 @@ function GitHubStarButton() {
           if (data.shouldPrompt && !data.starred) {
             // Delay the callout, then re-check in case CLI prompted during the wait
             setTimeout(() => {
-              fetch('/api/github/starred')
+              fetch(apiUrl('/github/starred'), { credentials: getCredentialsMode(), headers: getAuthHeaders() })
                 .then(res => res.ok ? res.json() : null)
                 .then(fresh => {
                   if (fresh?.shouldPrompt && !fresh.starred) {
@@ -1405,7 +1417,7 @@ function GitHubStarButton() {
 
   const handleDismiss = useCallback(() => {
     setShowCallout(false)
-    fetch('/api/github/dismiss', { method: 'POST' }).catch(() => {})
+    fetch(apiUrl('/github/dismiss'), { method: 'POST', credentials: getCredentialsMode(), headers: getAuthHeaders() }).catch(() => {})
   }, [])
 
   // Close callout when clicking outside
@@ -1429,7 +1441,7 @@ function GitHubStarButton() {
     if (ghAvailable) {
       // Star via backend gh CLI
       e.preventDefault()
-      fetch('/api/github/star', { method: 'POST' })
+      fetch(apiUrl('/github/star'), { method: 'POST', credentials: getCredentialsMode(), headers: getAuthHeaders() })
         .then(res => res.ok ? res.json() : null)
         .then(data => {
           if (data?.starred) {
@@ -1445,7 +1457,7 @@ function GitHubStarButton() {
     } else {
       // No gh CLI — link opens GitHub; dismiss the callout
       setShowCallout(false)
-      fetch('/api/github/dismiss', { method: 'POST' }).catch(() => {})
+      fetch(apiUrl('/github/dismiss'), { method: 'POST', credentials: getCredentialsMode(), headers: getAuthHeaders() }).catch(() => {})
     }
   }
 
