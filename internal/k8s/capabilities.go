@@ -406,6 +406,7 @@ func CheckCapabilitiesForUser(ctx context.Context, username string, groups []str
 		{"secrets", "list", &caps.Secrets},
 		{"secrets", "update", &caps.SecretsUpdate},
 		{"secrets", "create", &caps.HelmWrite},
+		{"nodes", "patch", &caps.NodeWrite},
 	}
 
 	var wg sync.WaitGroup
