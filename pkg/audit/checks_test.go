@@ -133,6 +133,372 @@ func TestSecurityChecks_Secure(t *testing.T) {
 	}
 }
 
+func TestSecurityChecks_RunAsNonRootInheritedFromPod(t *testing.T) {
+	// Pod-level PodSecurityContext.RunAsNonRoot=true should satisfy the
+	// runAsRoot check for containers that don't set it themselves.
+	// Regression for https://github.com/skyhook-io/radar/issues/484
+	input := &CheckInput{
+		Deployments: []*appsv1.Deployment{{
+			ObjectMeta: metav1.ObjectMeta{Name: "pod-nonroot", Namespace: "default"},
+			Spec: appsv1.DeploymentSpec{
+				Replicas: ptr(int32(2)),
+				Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "x"}},
+				Template: corev1.PodTemplateSpec{
+					Spec: corev1.PodSpec{
+						SecurityContext: &corev1.PodSecurityContext{RunAsNonRoot: ptr(true)},
+						Containers: []corev1.Container{{
+							Name: "app", Image: "nginx:1.25",
+							SecurityContext: &corev1.SecurityContext{
+								ReadOnlyRootFilesystem:   ptr(true),
+								AllowPrivilegeEscalation: ptr(false),
+							},
+						}},
+					},
+				},
+			},
+		}},
+	}
+	for _, f := range RunChecks(input).Findings {
+		if f.CheckID == "runAsRoot" {
+			t.Errorf("runAsRoot flagged despite pod-level RunAsNonRoot=true: %s", f.Message)
+		}
+	}
+}
+
+func TestSecurityChecks_RunAsUserNonZeroSatisfiesNonRoot(t *testing.T) {
+	// A non-zero runAsUser at the pod level also means the container
+	// doesn't run as root, even without RunAsNonRoot being set.
+	input := &CheckInput{
+		Deployments: []*appsv1.Deployment{{
+			ObjectMeta: metav1.ObjectMeta{Name: "pod-uid", Namespace: "default"},
+			Spec: appsv1.DeploymentSpec{
+				Replicas: ptr(int32(2)),
+				Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "x"}},
+				Template: corev1.PodTemplateSpec{
+					Spec: corev1.PodSpec{
+						SecurityContext: &corev1.PodSecurityContext{RunAsUser: ptr(int64(1000))},
+						Containers: []corev1.Container{{
+							Name: "app", Image: "nginx:1.25",
+							SecurityContext: &corev1.SecurityContext{
+								ReadOnlyRootFilesystem:   ptr(true),
+								AllowPrivilegeEscalation: ptr(false),
+							},
+						}},
+					},
+				},
+			},
+		}},
+	}
+	for _, f := range RunChecks(input).Findings {
+		if f.CheckID == "runAsRoot" {
+			t.Errorf("runAsRoot flagged despite pod-level RunAsUser=1000: %s", f.Message)
+		}
+	}
+}
+
+func TestSecurityChecks_ContainerOverridesPod(t *testing.T) {
+	// Container-level RunAsNonRoot=false must override pod-level true.
+	input := &CheckInput{
+		Deployments: []*appsv1.Deployment{{
+			ObjectMeta: metav1.ObjectMeta{Name: "override", Namespace: "default"},
+			Spec: appsv1.DeploymentSpec{
+				Replicas: ptr(int32(2)),
+				Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "x"}},
+				Template: corev1.PodTemplateSpec{
+					Spec: corev1.PodSpec{
+						SecurityContext: &corev1.PodSecurityContext{RunAsNonRoot: ptr(true)},
+						Containers: []corev1.Container{{
+							Name: "app", Image: "nginx:1.25",
+							SecurityContext: &corev1.SecurityContext{RunAsNonRoot: ptr(false)},
+						}},
+					},
+				},
+			},
+		}},
+	}
+	found := false
+	for _, f := range RunChecks(input).Findings {
+		if f.CheckID == "runAsRoot" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("expected runAsRoot finding when container overrides pod with RunAsNonRoot=false")
+	}
+}
+
+func TestSecurityChecks_AutomountFromServiceAccount(t *testing.T) {
+	// Pod doesn't set AutomountServiceAccountToken; its ServiceAccount sets
+	// it to false. No finding should be emitted.
+	input := &CheckInput{
+		Deployments: []*appsv1.Deployment{{
+			ObjectMeta: metav1.ObjectMeta{Name: "sa-noauto", Namespace: "team"},
+			Spec: appsv1.DeploymentSpec{
+				Replicas: ptr(int32(2)),
+				Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "x"}},
+				Template: corev1.PodTemplateSpec{
+					Spec: corev1.PodSpec{
+						ServiceAccountName: "restricted",
+						SecurityContext:    &corev1.PodSecurityContext{RunAsNonRoot: ptr(true)},
+						Containers: []corev1.Container{{
+							Name: "app", Image: "nginx:1.25",
+							SecurityContext: &corev1.SecurityContext{
+								ReadOnlyRootFilesystem:   ptr(true),
+								AllowPrivilegeEscalation: ptr(false),
+							},
+						}},
+					},
+				},
+			},
+		}},
+		ServiceAccounts: []*corev1.ServiceAccount{{
+			ObjectMeta:                   metav1.ObjectMeta{Name: "restricted", Namespace: "team"},
+			AutomountServiceAccountToken: ptr(false),
+		}},
+	}
+	for _, f := range RunChecks(input).Findings {
+		if f.CheckID == "automountServiceAccountToken" {
+			t.Errorf("automount flagged despite SA setting false: %s", f.Message)
+		}
+	}
+}
+
+func TestSecurityChecks_PodOverridesServiceAccountAutomount(t *testing.T) {
+	// SA says false, pod explicitly says true — pod wins, finding emitted.
+	input := &CheckInput{
+		Deployments: []*appsv1.Deployment{{
+			ObjectMeta: metav1.ObjectMeta{Name: "override-auto", Namespace: "team"},
+			Spec: appsv1.DeploymentSpec{
+				Replicas: ptr(int32(2)),
+				Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "x"}},
+				Template: corev1.PodTemplateSpec{
+					Spec: corev1.PodSpec{
+						ServiceAccountName:           "restricted",
+						AutomountServiceAccountToken: ptr(true),
+						SecurityContext:              &corev1.PodSecurityContext{RunAsNonRoot: ptr(true)},
+						Containers: []corev1.Container{{
+							Name: "app", Image: "nginx:1.25",
+							SecurityContext: &corev1.SecurityContext{
+								ReadOnlyRootFilesystem:   ptr(true),
+								AllowPrivilegeEscalation: ptr(false),
+							},
+						}},
+					},
+				},
+			},
+		}},
+		ServiceAccounts: []*corev1.ServiceAccount{{
+			ObjectMeta:                   metav1.ObjectMeta{Name: "restricted", Namespace: "team"},
+			AutomountServiceAccountToken: ptr(false),
+		}},
+	}
+	found := false
+	for _, f := range RunChecks(input).Findings {
+		if f.CheckID == "automountServiceAccountToken" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("expected automount finding when pod explicitly sets it to true")
+	}
+}
+
+func TestEfficiencyChecks_LimitRangeDefaults(t *testing.T) {
+	// Namespace has a LimitRange with container defaults — the containers
+	// below don't set requests/limits, but admission would fill them in, so
+	// no efficiency findings should be emitted.
+	input := &CheckInput{
+		Deployments: []*appsv1.Deployment{{
+			ObjectMeta: metav1.ObjectMeta{Name: "no-explicit", Namespace: "team"},
+			Spec: appsv1.DeploymentSpec{
+				Replicas: ptr(int32(2)),
+				Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "x"}},
+				Template: corev1.PodTemplateSpec{
+					Spec: corev1.PodSpec{
+						Containers: []corev1.Container{{Name: "app", Image: "nginx:1.25"}},
+					},
+				},
+			},
+		}},
+		LimitRanges: []*corev1.LimitRange{{
+			ObjectMeta: metav1.ObjectMeta{Name: "defaults", Namespace: "team"},
+			Spec: corev1.LimitRangeSpec{
+				Limits: []corev1.LimitRangeItem{{
+					Type: corev1.LimitTypeContainer,
+					Default: corev1.ResourceList{
+						corev1.ResourceCPU:    resource.MustParse("500m"),
+						corev1.ResourceMemory: resource.MustParse("512Mi"),
+					},
+					DefaultRequest: corev1.ResourceList{
+						corev1.ResourceCPU:    resource.MustParse("100m"),
+						corev1.ResourceMemory: resource.MustParse("128Mi"),
+					},
+				}},
+			},
+		}},
+	}
+	for _, f := range RunChecks(input).Findings {
+		switch f.CheckID {
+		case "cpuRequestMissing", "memoryRequestMissing", "cpuLimitMissing", "memoryLimitMissing":
+			t.Errorf("efficiency check flagged despite LimitRange defaults: %s", f.Message)
+		}
+	}
+}
+
+func TestEfficiencyChecks_LimitRangePodTypeDoesNotSuppress(t *testing.T) {
+	// LimitRanges with Type=Pod apply to aggregate pod limits, not to
+	// container defaults — container-level findings must still fire.
+	input := &CheckInput{
+		Deployments: []*appsv1.Deployment{{
+			ObjectMeta: metav1.ObjectMeta{Name: "pod-limits", Namespace: "team"},
+			Spec: appsv1.DeploymentSpec{
+				Replicas: ptr(int32(2)),
+				Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "x"}},
+				Template: corev1.PodTemplateSpec{
+					Spec: corev1.PodSpec{
+						Containers: []corev1.Container{{Name: "app", Image: "nginx:1.25"}},
+					},
+				},
+			},
+		}},
+		LimitRanges: []*corev1.LimitRange{{
+			ObjectMeta: metav1.ObjectMeta{Name: "pod-scope", Namespace: "team"},
+			Spec: corev1.LimitRangeSpec{
+				Limits: []corev1.LimitRangeItem{{
+					Type: corev1.LimitTypePod,
+					Default: corev1.ResourceList{
+						corev1.ResourceCPU:    resource.MustParse("1"),
+						corev1.ResourceMemory: resource.MustParse("1Gi"),
+					},
+				}},
+			},
+		}},
+	}
+	need := map[string]bool{"cpuRequestMissing": true, "memoryRequestMissing": true, "cpuLimitMissing": true, "memoryLimitMissing": true}
+	for _, f := range RunChecks(input).Findings {
+		delete(need, f.CheckID)
+	}
+	if len(need) > 0 {
+		t.Errorf("LimitType=Pod should not suppress container findings; missing: %v", need)
+	}
+}
+
+func TestEfficiencyChecks_LimitRangeMaxDoesNotSuppress(t *testing.T) {
+	// LimitRange items with Max/Min but no Default/DefaultRequest enforce
+	// constraints — they do not inject values, so missing-request/limit
+	// findings must still fire.
+	input := &CheckInput{
+		Deployments: []*appsv1.Deployment{{
+			ObjectMeta: metav1.ObjectMeta{Name: "max-only", Namespace: "team"},
+			Spec: appsv1.DeploymentSpec{
+				Replicas: ptr(int32(2)),
+				Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "x"}},
+				Template: corev1.PodTemplateSpec{
+					Spec: corev1.PodSpec{
+						Containers: []corev1.Container{{Name: "app", Image: "nginx:1.25"}},
+					},
+				},
+			},
+		}},
+		LimitRanges: []*corev1.LimitRange{{
+			ObjectMeta: metav1.ObjectMeta{Name: "max-only", Namespace: "team"},
+			Spec: corev1.LimitRangeSpec{
+				Limits: []corev1.LimitRangeItem{{
+					Type: corev1.LimitTypeContainer,
+					Max: corev1.ResourceList{
+						corev1.ResourceCPU:    resource.MustParse("2"),
+						corev1.ResourceMemory: resource.MustParse("4Gi"),
+					},
+				}},
+			},
+		}},
+	}
+	need := map[string]bool{"cpuRequestMissing": true, "memoryRequestMissing": true, "cpuLimitMissing": true, "memoryLimitMissing": true}
+	for _, f := range RunChecks(input).Findings {
+		delete(need, f.CheckID)
+	}
+	if len(need) > 0 {
+		t.Errorf("LimitRange.Max-only should not suppress missing-resource findings; missing: %v", need)
+	}
+}
+
+func TestEfficiencyChecks_LimitRangePartialDefaults(t *testing.T) {
+	// LimitRange sets only DefaultRequest.cpu — only cpuRequestMissing should
+	// be suppressed; the other three findings must still fire.
+	input := &CheckInput{
+		Deployments: []*appsv1.Deployment{{
+			ObjectMeta: metav1.ObjectMeta{Name: "partial", Namespace: "team"},
+			Spec: appsv1.DeploymentSpec{
+				Replicas: ptr(int32(2)),
+				Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "x"}},
+				Template: corev1.PodTemplateSpec{
+					Spec: corev1.PodSpec{
+						Containers: []corev1.Container{{Name: "app", Image: "nginx:1.25"}},
+					},
+				},
+			},
+		}},
+		LimitRanges: []*corev1.LimitRange{{
+			ObjectMeta: metav1.ObjectMeta{Name: "cpu-req-only", Namespace: "team"},
+			Spec: corev1.LimitRangeSpec{
+				Limits: []corev1.LimitRangeItem{{
+					Type: corev1.LimitTypeContainer,
+					DefaultRequest: corev1.ResourceList{
+						corev1.ResourceCPU: resource.MustParse("100m"),
+					},
+				}},
+			},
+		}},
+	}
+	flagged := map[string]bool{}
+	for _, f := range RunChecks(input).Findings {
+		flagged[f.CheckID] = true
+	}
+	if flagged["cpuRequestMissing"] {
+		t.Error("cpuRequestMissing should be suppressed by LimitRange DefaultRequest.cpu")
+	}
+	for _, id := range []string{"memoryRequestMissing", "cpuLimitMissing", "memoryLimitMissing"} {
+		if !flagged[id] {
+			t.Errorf("%s should still fire — LimitRange covered only cpu request", id)
+		}
+	}
+}
+
+func TestSecurityChecks_AutomountDefaultServiceAccount(t *testing.T) {
+	// Pod doesn't set ServiceAccountName — implicit "default" SA applies.
+	// If the default SA has automount=false, no finding should fire.
+	input := &CheckInput{
+		Deployments: []*appsv1.Deployment{{
+			ObjectMeta: metav1.ObjectMeta{Name: "implicit-default", Namespace: "team"},
+			Spec: appsv1.DeploymentSpec{
+				Replicas: ptr(int32(2)),
+				Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "x"}},
+				Template: corev1.PodTemplateSpec{
+					Spec: corev1.PodSpec{
+						SecurityContext: &corev1.PodSecurityContext{RunAsNonRoot: ptr(true)},
+						Containers: []corev1.Container{{
+							Name: "app", Image: "nginx:1.25",
+							SecurityContext: &corev1.SecurityContext{
+								ReadOnlyRootFilesystem:   ptr(true),
+								AllowPrivilegeEscalation: ptr(false),
+							},
+						}},
+					},
+				},
+			},
+		}},
+		ServiceAccounts: []*corev1.ServiceAccount{{
+			ObjectMeta:                   metav1.ObjectMeta{Name: "default", Namespace: "team"},
+			AutomountServiceAccountToken: ptr(false),
+		}},
+	}
+	for _, f := range RunChecks(input).Findings {
+		if f.CheckID == "automountServiceAccountToken" {
+			t.Errorf("automount flagged despite implicit default SA with automount=false: %s", f.Message)
+		}
+	}
+}
+
 func TestReliabilityChecks(t *testing.T) {
 	input := &CheckInput{
 		Deployments: []*appsv1.Deployment{{

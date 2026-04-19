@@ -88,20 +88,82 @@ func checkWorkloadPodSpecs(input *CheckInput) []Finding {
 		}
 	}
 
+	// Index ServiceAccounts and LimitRanges by namespace for inheritance lookups.
+	saByKey := indexServiceAccounts(input.ServiceAccounts)
+	limitsByNs := indexLimitRangesByNamespace(input.LimitRanges)
+
 	for _, w := range specs {
-		findings = append(findings, checkPodSpecSecurity(w.kind, w.namespace, w.name, w.spec)...)
+		findings = append(findings, checkPodSpecSecurity(w.kind, w.namespace, w.name, w.spec, saByKey)...)
 		findings = append(findings, checkPodSpecReliability(w.kind, w.namespace, w.name, w.spec)...)
-		findings = append(findings, checkPodSpecEfficiency(w.kind, w.namespace, w.name, w.spec)...)
+		findings = append(findings, checkPodSpecEfficiency(w.kind, w.namespace, w.name, w.spec, limitsByNs[w.namespace])...)
 		findings = append(findings, checkPodSpecVolumes(w.kind, w.namespace, w.name, w.spec)...)
 	}
 	return findings
+}
+
+// indexServiceAccounts returns a map keyed by "namespace/name".
+func indexServiceAccounts(sas []*corev1.ServiceAccount) map[string]*corev1.ServiceAccount {
+	if len(sas) == 0 {
+		return nil
+	}
+	m := make(map[string]*corev1.ServiceAccount, len(sas))
+	for _, sa := range sas {
+		m[sa.Namespace+"/"+sa.Name] = sa
+	}
+	return m
+}
+
+// indexLimitRangesByNamespace groups LimitRanges by namespace.
+func indexLimitRangesByNamespace(lrs []*corev1.LimitRange) map[string][]*corev1.LimitRange {
+	if len(lrs) == 0 {
+		return nil
+	}
+	m := make(map[string][]*corev1.LimitRange)
+	for _, lr := range lrs {
+		m[lr.Namespace] = append(m[lr.Namespace], lr)
+	}
+	return m
+}
+
+// containerDefaultsFromLimitRanges reports which container resource types
+// (cpu/memory requests/limits) would be filled in by admission based on the
+// namespace's LimitRange defaults. Only LimitRange items with Type=Container
+// contribute to container defaults.
+type containerDefaults struct {
+	cpuRequest, memoryRequest bool
+	cpuLimit, memoryLimit     bool
+}
+
+func containerDefaultsFromLimitRanges(lrs []*corev1.LimitRange) containerDefaults {
+	var d containerDefaults
+	for _, lr := range lrs {
+		for _, item := range lr.Spec.Limits {
+			if item.Type != corev1.LimitTypeContainer {
+				continue
+			}
+			// DefaultRequest covers requests; Default covers limits.
+			if _, ok := item.DefaultRequest[corev1.ResourceCPU]; ok {
+				d.cpuRequest = true
+			}
+			if _, ok := item.DefaultRequest[corev1.ResourceMemory]; ok {
+				d.memoryRequest = true
+			}
+			if _, ok := item.Default[corev1.ResourceCPU]; ok {
+				d.cpuLimit = true
+			}
+			if _, ok := item.Default[corev1.ResourceMemory]; ok {
+				d.memoryLimit = true
+			}
+		}
+	}
+	return d
 }
 
 // ============================================================================
 // Security checks
 // ============================================================================
 
-func checkPodSpecSecurity(kind, namespace, name string, spec corev1.PodSpec) []Finding {
+func checkPodSpecSecurity(kind, namespace, name string, spec corev1.PodSpec, saByKey map[string]*corev1.ServiceAccount) []Finding {
 	var findings []Finding
 	f := func(checkID, severity, msg string) {
 		findings = append(findings, Finding{
@@ -121,27 +183,81 @@ func checkPodSpecSecurity(kind, namespace, name string, spec corev1.PodSpec) []F
 		f("hostIPC", SeverityDanger, "Pod uses host IPC namespace")
 	}
 
-	// automountServiceAccountToken: only flag if not explicitly set to false
-	if spec.AutomountServiceAccountToken == nil || *spec.AutomountServiceAccountToken {
+	// automountServiceAccountToken: honors both pod-level and SA-level settings.
+	// Pod-level takes precedence. If neither is explicitly false, the token is
+	// auto-mounted. Only flag when the effective value is true (or unset, which
+	// defaults to true per K8s).
+	if tokenAutoMounted(namespace, spec, saByKey) {
 		f("automountServiceAccountToken", SeverityWarning, "Service account token is auto-mounted")
 	}
 
 	// Container-level checks (iterate init and regular separately to avoid
-	// mutating the InitContainers backing array via append)
+	// mutating the InitContainers backing array via append).
+	// Pod-level SecurityContext is passed so container checks can honor
+	// fields like runAsNonRoot/runAsUser that inherit from the pod.
 	for i := range spec.InitContainers {
-		checkContainerSecurity(f, &spec.InitContainers[i])
+		checkContainerSecurity(f, &spec.InitContainers[i], spec.SecurityContext)
 	}
 	for i := range spec.Containers {
-		checkContainerSecurity(f, &spec.Containers[i])
+		checkContainerSecurity(f, &spec.Containers[i], spec.SecurityContext)
 	}
 
 	return findings
 }
 
-func checkContainerSecurity(f func(string, string, string), c *corev1.Container) {
+// tokenAutoMounted reports whether a service account token would be mounted
+// into the pod per K8s effective-value rules. Pod-level
+// automountServiceAccountToken overrides the ServiceAccount-level setting;
+// when neither is set, the default is true (token is mounted).
+func tokenAutoMounted(namespace string, spec corev1.PodSpec, saByKey map[string]*corev1.ServiceAccount) bool {
+	if spec.AutomountServiceAccountToken != nil {
+		return *spec.AutomountServiceAccountToken
+	}
+	saName := spec.ServiceAccountName
+	if saName == "" {
+		saName = "default"
+	}
+	if sa, ok := saByKey[namespace+"/"+saName]; ok &&
+		sa.AutomountServiceAccountToken != nil && !*sa.AutomountServiceAccountToken {
+		return false
+	}
+	return true
+}
+
+// effectivelyNonRoot reports whether a container is guaranteed not to run as
+// root, merging the pod-level PodSecurityContext with the container-level
+// override. Each field (runAsNonRoot, runAsUser) independently inherits from
+// the pod and is overridden by any non-nil container-level value. After the
+// merge, the container is non-root if runAsNonRoot is true OR runAsUser is
+// set to a non-zero UID.
+func effectivelyNonRoot(sc *corev1.SecurityContext, podSC *corev1.PodSecurityContext) bool {
+	var runAsNonRoot *bool
+	var runAsUser *int64
+	if podSC != nil {
+		runAsNonRoot = podSC.RunAsNonRoot
+		runAsUser = podSC.RunAsUser
+	}
+	if sc != nil {
+		if sc.RunAsNonRoot != nil {
+			runAsNonRoot = sc.RunAsNonRoot
+		}
+		if sc.RunAsUser != nil {
+			runAsUser = sc.RunAsUser
+		}
+	}
+	if runAsNonRoot != nil && *runAsNonRoot {
+		return true
+	}
+	if runAsUser != nil && *runAsUser != 0 {
+		return true
+	}
+	return false
+}
+
+func checkContainerSecurity(f func(string, string, string), c *corev1.Container, podSC *corev1.PodSecurityContext) {
 	sc := c.SecurityContext
 
-	if sc == nil || sc.RunAsNonRoot == nil || !*sc.RunAsNonRoot {
+	if !effectivelyNonRoot(sc, podSC) {
 		f("runAsRoot", SeverityWarning, fmt.Sprintf("Container %q may run as root (runAsNonRoot not set)", c.Name))
 	}
 
@@ -343,7 +459,7 @@ func checkMissingPDB(deployments []*appsv1.Deployment, statefulSets []*appsv1.St
 // Efficiency checks
 // ============================================================================
 
-func checkPodSpecEfficiency(kind, namespace, name string, spec corev1.PodSpec) []Finding {
+func checkPodSpecEfficiency(kind, namespace, name string, spec corev1.PodSpec, lrs []*corev1.LimitRange) []Finding {
 	var findings []Finding
 	f := func(checkID, severity, msg string) {
 		findings = append(findings, Finding{
@@ -352,18 +468,22 @@ func checkPodSpecEfficiency(kind, namespace, name string, spec corev1.PodSpec) [
 		})
 	}
 
+	// LimitRange defaults in the namespace are applied by admission — skip
+	// flagging missing values that would be filled in automatically.
+	defaults := containerDefaultsFromLimitRanges(lrs)
+
 	for _, c := range spec.Containers {
 		res := c.Resources
-		if res.Requests.Cpu() == nil || res.Requests.Cpu().IsZero() {
+		if (res.Requests.Cpu() == nil || res.Requests.Cpu().IsZero()) && !defaults.cpuRequest {
 			f("cpuRequestMissing", SeverityWarning, fmt.Sprintf("Container %q has no CPU request", c.Name))
 		}
-		if res.Requests.Memory() == nil || res.Requests.Memory().IsZero() {
+		if (res.Requests.Memory() == nil || res.Requests.Memory().IsZero()) && !defaults.memoryRequest {
 			f("memoryRequestMissing", SeverityWarning, fmt.Sprintf("Container %q has no memory request", c.Name))
 		}
-		if res.Limits.Cpu() == nil || res.Limits.Cpu().IsZero() {
+		if (res.Limits.Cpu() == nil || res.Limits.Cpu().IsZero()) && !defaults.cpuLimit {
 			f("cpuLimitMissing", SeverityWarning, fmt.Sprintf("Container %q has no CPU limit", c.Name))
 		}
-		if res.Limits.Memory() == nil || res.Limits.Memory().IsZero() {
+		if (res.Limits.Memory() == nil || res.Limits.Memory().IsZero()) && !defaults.memoryLimit {
 			f("memoryLimitMissing", SeverityWarning, fmt.Sprintf("Container %q has no memory limit", c.Name))
 		}
 	}
