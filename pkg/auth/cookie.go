@@ -10,20 +10,15 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 )
 
-// DefaultCookieName is the default session cookie name
-const DefaultCookieName = "radar_session"
+const DefaultCookieName = "radar_seion"
+const maxCookieSize = 3600
+const cookieChunkSuffix = "_chunk_"
 
-// maxCookieSize is the safe limit for cookie values. RFC 6265 requires
-// browsers to support at least 4096 bytes per cookie, but some proxies
-// and CDNs enforce stricter limits. We use 3800 to leave headroom for
-// the cookie name, attributes (Path, Secure, HttpOnly, SameSite, MaxAge).
-const maxCookieSize = 3800
-
-// Session represents a parsed session cookie.
 type Session struct {
 	User      *User
 	SID       string    // stable session identifier (empty for pre-upgrade cookies)
@@ -31,7 +26,6 @@ type Session struct {
 	ExpiresAt time.Time // when the cookie expires
 }
 
-// cookiePayload is the data stored in the session cookie
 type cookiePayload struct {
 	Username  string   `json:"u"`
 	Groups    []string `json:"g,omitempty"`
@@ -49,10 +43,7 @@ func NewSessionID() string {
 	return hex.EncodeToString(b)
 }
 
-// CreateSessionCookie creates a signed session cookie for the given user.
-// Format: base64(json) + "." + base64(hmac-sha256).
-// The sid must be non-empty — use NewSessionID() to generate one.
-func CreateSessionCookie(user *User, sid, idToken, secret string, ttl time.Duration, secure bool) *http.Cookie {
+func CreateSessionCookie(user *User, sid, idToken, secret string, ttl time.Duration, secure bool) []*http.Cookie {
 	if sid == "" {
 		panic(fmt.Sprintf("[auth] CreateSessionCookie called with empty sid for user %s", user.Username))
 	}
@@ -67,30 +58,83 @@ func CreateSessionCookie(user *User, sid, idToken, secret string, ttl time.Durat
 
 	value := buildCookieValue(payload, secret)
 
-	// Browser cookie size limit is ~4096 bytes. If the payload is too large
-	// (many groups + large ID token), drop the ID token first — it's only
-	// needed for RP-Initiated Logout's id_token_hint and falls back to
-	// client_id gracefully. Log so operators know.
-	if len(value) > maxCookieSize && payload.IDToken != "" {
+	if len(value) <= maxCookieSize {
+		return []*http.Cookie{{
+			Name:     DefaultCookieName,
+			Value:    value,
+			Path:     "/",
+			HttpOnly: true,
+			Secure:   secure,
+			SameSite: http.SameSiteLaxMode,
+			MaxAge:   int(ttl.Seconds()),
+		}}
+	}
+
+	if payload.IDToken != "" {
 		log.Printf("[auth] Session cookie for %s exceeds %d bytes (%d), dropping ID token to fit",
 			user.Username, maxCookieSize, len(value))
 		payload.IDToken = ""
 		value = buildCookieValue(payload, secret)
 	}
-	if len(value) > maxCookieSize {
-		log.Printf("[auth] WARNING: Session cookie for %s is %d bytes (limit ~%d) — browser may silently drop it. Reduce the number of groups in the OIDC token.",
-			user.Username, len(value), maxCookieSize)
+
+	if len(value) <= maxCookieSize {
+		return []*http.Cookie{{
+			Name:     DefaultCookieName,
+			Value:    value,
+			Path:     "/",
+			HttpOnly: true,
+			Secure:   secure,
+			SameSite: http.SameSiteLaxMode,
+			MaxAge:   int(ttl.Seconds()),
+		}}
 	}
 
-	return &http.Cookie{
-		Name:     DefaultCookieName,
-		Value:    value,
+	log.Printf("[auth] WARNING: Session cookie for %s is %d bytes, using chunked cookies", user.Username, len(value))
+	return createChunkedCookies(DefaultCookieName, value, ttl, secure)
+}
+
+func createChunkedCookies(name, value string, ttl time.Duration, secure bool) []*http.Cookie {
+	chunks := splitString(value, maxCookieSize-100)
+	cookies := make([]*http.Cookie, 0, len(chunks)+1)
+
+	for i, chunk := range chunks {
+		cookies = append(cookies, &http.Cookie{
+			Name:     fmt.Sprintf("%s%s%d", name, cookieChunkSuffix, i),
+			Value:    chunk,
+			Path:     "/",
+			HttpOnly: true,
+			Secure:   secure,
+			SameSite: http.SameSiteLaxMode,
+			MaxAge:   int(ttl.Seconds()),
+		})
+	}
+
+	cookies = append(cookies, &http.Cookie{
+		Name:     name + "_chunks",
+		Value:    strconv.Itoa(len(chunks)),
 		Path:     "/",
 		HttpOnly: true,
 		Secure:   secure,
 		SameSite: http.SameSiteLaxMode,
 		MaxAge:   int(ttl.Seconds()),
+	})
+
+	return cookies
+}
+
+func splitString(s string, chunkSize int) []string {
+	if len(s) <= chunkSize {
+		return []string{s}
 	}
+	var chunks []string
+	for i := 0; i < len(s); i += chunkSize {
+		end := i + chunkSize
+		if end > len(s) {
+			end = len(s)
+		}
+		chunks = append(chunks, s[i:end])
+	}
+	return chunks
 }
 
 // ParseSessionCookie validates and parses a session cookie.
@@ -98,11 +142,33 @@ func CreateSessionCookie(user *User, sid, idToken, secret string, ttl time.Durat
 // Pre-upgrade cookies without a SID parse successfully with Session.SID == "".
 func ParseSessionCookie(r *http.Request, secret string) *Session {
 	cookie, err := r.Cookie(DefaultCookieName)
+	if err == nil && cookie.Value != "" {
+		return parseCookieValue(cookie.Value, secret)
+	}
+
+	chunksCookie, err := r.Cookie(DefaultCookieName + "_chunks")
 	if err != nil {
 		return nil
 	}
+	numChunks, err := strconv.Atoi(chunksCookie.Value)
+	if err != nil || numChunks == 0 {
+		return nil
+	}
 
-	parts := strings.SplitN(cookie.Value, ".", 2)
+	var fullValue strings.Builder
+	for i := 0; i < numChunks; i++ {
+		chunkName := fmt.Sprintf("%s%s%d", DefaultCookieName, cookieChunkSuffix, i)
+		chunk, err := r.Cookie(chunkName)
+		if err != nil {
+			return nil
+		}
+		fullValue.WriteString(chunk.Value)
+	}
+	return parseCookieValue(fullValue.String(), secret)
+}
+
+func parseCookieValue(cookieValue, secret string) *Session {
+	parts := strings.SplitN(cookieValue, ".", 2)
 	if len(parts) != 2 {
 		return nil
 	}
@@ -112,7 +178,7 @@ func ParseSessionCookie(r *http.Request, secret string) *Session {
 	// Verify HMAC signature
 	expected := signData(encoded, secret)
 	if !hmac.Equal([]byte(sig), []byte(expected)) {
-		log.Printf("[auth] Session cookie HMAC verification failed — possible tampered cookie from %s", r.RemoteAddr)
+		log.Printf("[auth] Session cookie HMAC verification failed")
 		return nil
 	}
 
@@ -129,7 +195,7 @@ func ParseSessionCookie(r *http.Request, secret string) *Session {
 
 	// Check expiration
 	if time.Now().Unix() > p.ExpiresAt {
-		log.Printf("[auth] Session cookie expired for user %q — prompting re-auth", p.Username)
+		log.Printf("[auth] Session cookie expired for user %q", p.Username)
 		return nil
 	}
 
@@ -148,7 +214,7 @@ func ParseSessionCookie(r *http.Request, secret string) *Session {
 func buildCookieValue(p cookiePayload, secret string) string {
 	data, err := json.Marshal(p)
 	if err != nil {
-		log.Fatalf("[auth] Failed to marshal session cookie payload for user %s: %v", p.Username, err)
+		log.Fatalf("[auth] Failed to marshal session cookie payload: %v", err)
 	}
 	encoded := base64.RawURLEncoding.EncodeToString(data)
 	return encoded + "." + signData(encoded, secret)

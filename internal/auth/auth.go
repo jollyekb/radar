@@ -19,14 +19,14 @@ const DefaultCookieName = pkgauth.DefaultCookieName
 
 // Re-export functions from pkg/auth
 var (
-	UserFromContext          = pkgauth.UserFromContext
-	ContextWithUser          = pkgauth.ContextWithUser
-	NewPermissionCache       = pkgauth.NewPermissionCache
-	DiscoverNamespaces       = pkgauth.DiscoverNamespaces
-	SubjectCanI              = pkgauth.SubjectCanI
-	FilterNamespacesForUser  = pkgauth.FilterNamespacesForUser
-	CreateSessionCookie      = pkgauth.CreateSessionCookie
-	NewSessionID             = pkgauth.NewSessionID
-	ParseSessionCookie       = pkgauth.ParseSessionCookie
-	ClearSessionCookie       = pkgauth.ClearSessionCookie
+	UserFromContext         = pkgauth.UserFromContext
+	ContextWithUser         = pkgauth.ContextWithUser
+	NewPermissionCache      = pkgauth.NewPermissionCache
+	DiscoverNamespaces      = pkgauth.DiscoverNamespaces
+	SubjectCanI             = pkgauth.SubjectCanI
+	FilterNamespacesForUser = pkgauth.FilterNamespacesForUser
+	NewSessionID            = pkgauth.NewSessionID
+	CreateSessionCookie     = pkgauth.CreateSessionCookie
+	ParseSessionCookie      = pkgauth.ParseSessionCookie
+	ClearSessionCookie      = pkgauth.ClearSessionCookie
 )

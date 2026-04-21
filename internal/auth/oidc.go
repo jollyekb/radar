@@ -276,8 +276,11 @@ func (h *OIDCHandler) HandleCallback(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Create session cookie (include raw ID token for RP-Initiated Logout)
-	secure := true // OIDC typically behind TLS
-	http.SetCookie(w, CreateSessionCookie(user, sid, rawIDToken, h.cfg.Secret, h.cfg.CookieTTL, secure))
+	secure := r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https"
+	cookies := CreateSessionCookie(user, sid, rawIDToken, h.cfg.Secret, h.cfg.CookieTTL, secure)
+	for _, c := range cookies {
+		http.SetCookie(w, c)
+	}
 
 	log.Printf("[oidc] User %s authenticated (groups: %v)", username, groups)
 
