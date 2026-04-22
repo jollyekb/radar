@@ -155,6 +155,18 @@ auth:
 
 When using `caCert` in Kubernetes, mount the CA certificate into the pod via a ConfigMap or Secret volume.
 
+### Radar Cloud mode
+
+If you see `RADAR_CLOUD_MODE` or `cloud.*` values in the chart, they control a specialized deployment mode used by [Radar Cloud](https://radarhq.io) — a hosted SaaS that lets a single Cloud frontend manage many in-cluster Radar instances over an outbound tunnel. You don't need to use it to run Radar standalone; leave `cloud.enabled: false` (the default).
+
+Under cloud-mode (`RADAR_CLOUD_MODE=true`, set automatically by the chart when `cloud.enabled=true`), Radar:
+
+- Forces `--auth-mode=proxy` with pinned `X-Forwarded-User` / `X-Forwarded-Groups` headers — the Cloud tunnel is the trust boundary.
+- Ships three default ClusterRoleBindings mapping Cloud's `cloud:owner` / `cloud:member` / `cloud:viewer` groups to the standard K8s `admin` / `edit` / `view` ClusterRoles. Configurable via `cloud.defaultRbac.*` in `values.yaml`.
+- Hardens the listener (no `/debug/pprof/*`, narrower exempt paths).
+
+Customer-facing documentation for Radar Cloud lives on [radarhq.io](https://radarhq.io). The authoritative reference for the Cloud-mode chart values is the comment block in [`deploy/helm/radar/values.yaml`](../deploy/helm/radar/values.yaml) under `cloud:`.
+
 ## Setting Up User Permissions
 
 Radar delegates authorization entirely to K8s RBAC via impersonation. It doesn't have its own role system — permissions are managed with standard K8s tooling (kubectl, Terraform, Helm, GitOps, etc.).

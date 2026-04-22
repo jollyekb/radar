@@ -26,7 +26,6 @@ import (
 	"k8s.io/client-go/rest"
 
 	"github.com/skyhook-io/radar/internal/auth"
-	"github.com/skyhook-io/radar/internal/k8s"
 )
 
 // PortForwardSession represents an active port forward
@@ -122,20 +121,22 @@ func (s *Server) handleStartPortForward(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	// Audit before the client check so attempted-but-denied requests still
+	// leave a trail for security review.
+	auth.AuditLog(r, req.Namespace, req.PodName)
 	client := s.getClientForRequest(r)
 	config := s.getConfigForRequest(r)
 	if client == nil || config == nil {
 		s.writeError(w, http.StatusServiceUnavailable, "K8s client not initialized")
 		return
 	}
-	auth.AuditLog(r, req.Namespace, req.PodName)
 
 	// If service name provided, find a pod backing it and resolve the target port
 	podName := req.PodName
 	podPort := req.PodPort
 	serviceResolved := false
 	if req.ServiceName != "" && podName == "" {
-		foundPod, containerPort, err := findPodForService(r.Context(), req.Namespace, req.ServiceName, req.PodPort)
+		foundPod, containerPort, err := findPodForService(r.Context(), client, req.Namespace, req.ServiceName, req.PodPort)
 		if err != nil {
 			s.writeError(w, http.StatusNotFound, fmt.Sprintf("No pod found for service %s: %v", req.ServiceName, err))
 			return
@@ -148,7 +149,7 @@ func (s *Server) handleStartPortForward(w http.ResponseWriter, r *http.Request) 
 	// Validate that the pod actually exposes this port (skip for service-resolved ports
 	// since the service spec is authoritative and containers may not declare ports)
 	if !serviceResolved {
-		if err := validatePodPort(r.Context(), req.Namespace, podName, podPort); err != nil {
+		if err := validatePodPort(r.Context(), client, req.Namespace, podName, podPort); err != nil {
 			s.writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
@@ -334,8 +335,13 @@ func runPortForward(ctx context.Context, session *PortForwardSession) error {
 //   - Headless services (ClusterIP=None): use the service port directly
 //   - Integer targetPort: use the targetPort value (defaults to service port if unset)
 //   - Named targetPort: look up the container port by name from the pod spec
-func findPodForService(ctx context.Context, namespace, serviceName string, servicePort int) (string, int, error) {
-	client := k8s.GetClient()
+//
+// Callers pass the impersonated client from getClientForRequest so the
+// service/pod reads are subject to the user's K8s RBAC.
+func findPodForService(ctx context.Context, client kubernetes.Interface, namespace, serviceName string, servicePort int) (string, int, error) {
+	if client == nil {
+		return "", 0, fmt.Errorf("cluster client not available")
+	}
 
 	// Get service
 	svc, err := client.CoreV1().Services(namespace).Get(ctx, serviceName, metav1.GetOptions{})
@@ -424,9 +430,13 @@ func resolveNamedPort(pod *corev1.Pod, portName string) (int, bool) {
 	return 0, false
 }
 
-// validatePodPort checks if the pod actually exposes the requested port
-func validatePodPort(ctx context.Context, namespace, podName string, port int) error {
-	client := k8s.GetClient()
+// validatePodPort checks if the pod actually exposes the requested port.
+// Uses the caller-supplied impersonated client so the pod read is subject
+// to the user's K8s RBAC.
+func validatePodPort(ctx context.Context, client kubernetes.Interface, namespace, podName string, port int) error {
+	if client == nil {
+		return fmt.Errorf("cluster client not available")
+	}
 
 	pod, err := client.CoreV1().Pods(namespace).Get(ctx, podName, metav1.GetOptions{})
 	if err != nil {
@@ -505,9 +515,9 @@ func (s *Server) handleGetAvailablePorts(w http.ResponseWriter, r *http.Request)
 	resourceType := chi.URLParam(r, "type") // "pod" or "service"
 	name := chi.URLParam(r, "name")
 
-	client := k8s.GetClient()
+	client := s.getClientForRequest(r)
 	if client == nil {
-		s.writeError(w, http.StatusServiceUnavailable, "K8s client not initialized")
+		s.writeError(w, http.StatusServiceUnavailable, "cluster client not available — check cluster connection")
 		return
 	}
 
