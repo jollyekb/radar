@@ -1,8 +1,11 @@
 import { useState, useMemo, useRef, useEffect } from 'react'
-import { ShieldAlert, AlertTriangle, ChevronRight, Search, ExternalLink, MoreHorizontal, EyeOff, Layers } from 'lucide-react'
+import { ShieldAlert, AlertTriangle, ChevronRight, CheckCircle2, Search, ExternalLink, MoreHorizontal, EyeOff, Layers } from 'lucide-react'
 import { clsx } from 'clsx'
 import type { AuditFinding } from './AuditAlerts'
 import { SEVERITY_TEXT, BP_CATEGORY_BADGE, DEFAULT_BADGE_COLOR } from '../../utils/badge-colors'
+import { EmptyState } from '../ui/EmptyState'
+import { FilterPill } from '../ui/FilterPill'
+import { pluralize } from '../../utils/pluralize'
 
 const CATEGORIES = ['Security', 'Reliability', 'Efficiency'] as const
 const SEVERITIES = ['danger', 'warning'] as const
@@ -32,9 +35,19 @@ export interface AuditFindingsTableProps {
   onHideCheck?: (checkID: string, title: string) => void
   onHideCategory?: (category: string) => void
   onHideNamespace?: (namespace: string) => void
+  /** When true, render a Cluster column on flat findings rows. Set this
+   *  when findings come from multiple clusters (cross-cluster aggregation).
+   *  Each finding's clusterId/clusterName fields populate the column.
+   *  (Currently flat-rows only; grouped views don't surface a Cluster
+   *  column today.) */
+  multiCluster?: boolean
+  /** Click-through for cluster-name links in the multi-cluster view.
+   *  Defaults to no-op; multi-cluster hosts pass a navigator that opens
+   *  the cluster's per-cluster audit page. */
+  onClusterClick?: (clusterId: string) => void
 }
 
-export function AuditFindingsTable({ groups, findings, checks, onResourceClick, onHideCheck, onHideCategory, onHideNamespace }: AuditFindingsTableProps) {
+export function AuditFindingsTable({ groups, findings, checks, onResourceClick, onHideCheck, onHideCategory, onHideNamespace, multiCluster, onClusterClick }: AuditFindingsTableProps) {
   const [categoryFilter, setCategoryFilter] = useState<string | null>(null)
   const [severityFilter, setSeverityFilter] = useState<string | null>(null)
   const [frameworkFilter, setFrameworkFilter] = useState<string | null>(null)
@@ -232,20 +245,20 @@ export function AuditFindingsTable({ groups, findings, checks, onResourceClick, 
 
         {/* Row 2: Filter chips */}
         <div className="flex flex-wrap items-center gap-1">
-          <FilterChip label="All" active={!categoryFilter && !severityFilter && !frameworkFilter} onClick={() => { setCategoryFilter(null); setSeverityFilter(null); setFrameworkFilter(null) }} />
+          <FilterPill label="All" active={!categoryFilter && !severityFilter && !frameworkFilter} onClick={() => { setCategoryFilter(null); setSeverityFilter(null); setFrameworkFilter(null) }} />
           <span className="w-px h-4 bg-theme-text-tertiary/30 mx-3" />
           {CATEGORIES.map(cat => (
-            <FilterChip key={cat} label={cat} active={categoryFilter === cat} onClick={() => setCategoryFilter(categoryFilter === cat ? null : cat)} />
+            <FilterPill key={cat} label={cat} active={categoryFilter === cat} onClick={() => setCategoryFilter(categoryFilter === cat ? null : cat)} />
           ))}
           <span className="w-px h-4 bg-theme-text-tertiary/30 mx-3" />
           {SEVERITIES.map(sev => (
-            <FilterChip key={sev} label={sev === 'danger' ? 'Critical' : 'Warning'} active={severityFilter === sev} onClick={() => setSeverityFilter(severityFilter === sev ? null : sev)} />
+            <FilterPill key={sev} label={sev === 'danger' ? 'Critical' : 'Warning'} active={severityFilter === sev} onClick={() => setSeverityFilter(severityFilter === sev ? null : sev)} />
           ))}
           {frameworks.length > 0 && (
             <>
               <span className="w-px h-4 bg-theme-text-tertiary/30 mx-3" />
               {frameworks.map(fw => (
-                <FilterChip key={fw} label={fw} active={frameworkFilter === fw} onClick={() => setFrameworkFilter(frameworkFilter === fw ? null : fw)} />
+                <FilterPill key={fw} label={fw} active={frameworkFilter === fw} onClick={() => setFrameworkFilter(frameworkFilter === fw ? null : fw)} />
               ))}
             </>
           )}
@@ -254,9 +267,24 @@ export function AuditFindingsTable({ groups, findings, checks, onResourceClick, 
 
       {/* Content */}
       {isEmpty ? (
-        <div className="flex items-center justify-center py-12 text-theme-text-tertiary text-sm">
-          {totalEmpty ? 'All checks passing — no issues found' : 'No findings match the current filters'}
-        </div>
+        totalEmpty ? (
+          // Healthy state — communicates "you're winning", not "no data".
+          // Replaces a grey one-liner that conflated both meanings.
+          <EmptyState
+            tone="healthy"
+            variant="card"
+            icon={CheckCircle2}
+            headline="All checks passing"
+            body="No issues found across these resources."
+          />
+        ) : (
+          <EmptyState
+            tone="filtered"
+            variant="card"
+            headline="No findings match the current filters"
+            body="Try clearing one or more filters to see more results."
+          />
+        )
       ) : namespacedGroups ? (
         /* Namespace-grouped view */
         <div className="flex flex-col gap-1">
@@ -272,7 +300,7 @@ export function AuditFindingsTable({ groups, findings, checks, onResourceClick, 
                 >
                   <ChevronRight className={clsx('w-4 h-4 text-theme-text-tertiary shrink-0 transition-transform duration-200', nsExpanded && 'rotate-90')} />
                   <span className="text-sm font-semibold text-theme-text-primary">{ns}</span>
-                  <span className="text-xs text-theme-text-tertiary">{nsGroups.length} resource{nsGroups.length !== 1 ? 's' : ''}</span>
+                  <span className="text-xs text-theme-text-tertiary">{pluralize(nsGroups.length, 'resource')}</span>
                   <span className="flex-1" />
                   <div className="flex items-center gap-3 shrink-0">
                     {nsDanger > 0 && <span className={clsx('text-xs font-semibold tabular-nums', SEVERITY_TEXT.error)}>{nsDanger} critical</span>}
@@ -309,7 +337,13 @@ export function AuditFindingsTable({ groups, findings, checks, onResourceClick, 
         /* Flat fallback (per-resource view) */
         <div className="flex flex-col gap-1">
           {filteredFindings?.map((f, i) => (
-            <FlatFindingRow key={`${f.checkID}-${i}`} finding={f} onResourceClick={onResourceClick} />
+            <FlatFindingRow
+              key={`${f.cluster?.id ?? ''}-${f.checkID}-${i}`}
+              finding={f}
+              onResourceClick={onResourceClick}
+              showCluster={multiCluster}
+              onClusterClick={onClusterClick}
+            />
           ))}
         </div>
       )}
@@ -425,7 +459,7 @@ function ResourceGroupRow({ group: g, checks, expanded, onToggle, onResourceClic
   )
 }
 
-function FlatFindingRow({ finding, onResourceClick }: { finding: AuditFinding; onResourceClick?: (kind: string, namespace: string, name: string) => void }) {
+function FlatFindingRow({ finding, onResourceClick, showCluster, onClusterClick }: { finding: AuditFinding; onResourceClick?: (kind: string, namespace: string, name: string) => void; showCluster?: boolean; onClusterClick?: (clusterId: string) => void }) {
   const isDanger = finding.severity === 'danger'
   const severityColor = isDanger ? SEVERITY_TEXT.error : SEVERITY_TEXT.warning
 
@@ -435,6 +469,23 @@ function FlatFindingRow({ finding, onResourceClick }: { finding: AuditFinding; o
         <ShieldAlert className={clsx('w-4 h-4 shrink-0', severityColor)} />
       ) : (
         <AlertTriangle className={clsx('w-4 h-4 shrink-0', severityColor)} />
+      )}
+      {showCluster && finding.cluster && (
+        // Cluster column for multi-cluster contexts. Renders before
+        // the kind/namespace/name path so cluster scope is established
+        // first in the read order.
+        onClusterClick ? (
+          <button
+            onClick={() => onClusterClick(finding.cluster!.id)}
+            className="text-xs text-[var(--color-radar-accent)] hover:underline shrink-0 max-w-[160px] truncate text-left"
+          >
+            {finding.cluster.name}
+          </button>
+        ) : (
+          <span className="text-xs text-theme-text-secondary shrink-0 max-w-[160px] truncate">
+            {finding.cluster.name}
+          </span>
+        )
       )}
       {onResourceClick ? (
         <button
@@ -462,22 +513,6 @@ function SummaryBadge({ label, count, color }: { label: string; count: number; c
       <span className={clsx('text-2xl font-bold tabular-nums', count > 0 ? color : 'text-theme-text-tertiary')}>{count}</span>
       <span className="text-xs text-theme-text-secondary">{label}</span>
     </div>
-  )
-}
-
-function FilterChip({ label, active, onClick }: { label: string; active: boolean; onClick: () => void }) {
-  return (
-    <button
-      onClick={onClick}
-      className={clsx(
-        'px-2 py-0.5 text-xs rounded-md transition-colors focus-visible:ring-2 focus-visible:ring-theme-text-primary/20 focus-visible:outline-none',
-        active
-          ? 'bg-theme-text-primary/10 text-theme-text-primary font-medium'
-          : 'text-theme-text-tertiary hover:text-theme-text-secondary hover:bg-theme-hover'
-      )}
-    >
-      {label}
-    </button>
   )
 }
 

@@ -11,6 +11,12 @@ export interface AuditFinding {
   category: string
   severity: string
   message: string
+  /** Cluster context — set when findings come from multiple clusters
+   *  (cross-cluster aggregation). Rendered as a Cluster column when the
+   *  host passes `multiCluster` to AuditFindingsTable. Grouped as one
+   *  optional object so id and name stay in lockstep — `name` is
+   *  meaningless without `id`. */
+  cluster?: { id: string; name: string }
 }
 
 interface AuditAlertsProps {

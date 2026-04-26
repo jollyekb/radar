@@ -1,6 +1,7 @@
 // Utility functions for resource display in tables
 
 import { formatCPUString, formatMemoryString, formatBytes } from '../../utils/format'
+import { pluralize } from '../../utils/pluralize'
 
 // Import functions from sub-modules used internally by getCellFilterValue
 import { getCertificateStatus, getCertificateRequestStatus, getClusterIssuerStatus, getClusterIssuerType, getOrderState, getChallengeState, getChallengeType } from './resource-utils-certmanager'
@@ -16,7 +17,13 @@ import { getExternalSecretStatus as _getExternalSecretStatus, getClusterExternal
 // STATUS & HEALTH UTILITIES
 // ============================================================================
 
-export type HealthLevel = 'healthy' | 'degraded' | 'unhealthy' | 'unknown' | 'neutral'
+// Six health levels in escalating urgency order:
+//   healthy < neutral < unknown < degraded < alert < unhealthy
+// `alert` (orange) is the intermediate tier between degraded (amber) and
+// unhealthy (red). Used for severity gradients like Problems/Audit
+// (critical/high/medium → unhealthy/alert/degraded), where collapsing
+// `high` into either neighbor erases real signal.
+export type HealthLevel = 'healthy' | 'degraded' | 'alert' | 'unhealthy' | 'unknown' | 'neutral'
 
 export interface StatusBadge {
   text: string
@@ -28,6 +35,7 @@ export interface StatusBadge {
 export const healthColors: Record<HealthLevel, string> = {
   healthy: 'status-healthy',
   degraded: 'status-degraded',
+  alert: 'status-alert',
   unhealthy: 'status-unhealthy',
   unknown: 'status-unknown',
   neutral: 'status-neutral',
@@ -904,7 +912,7 @@ export function getNodeTaints(node: any): { count: number; text: string } {
   const taints = node.spec?.taints || []
   const count = taints.length
   if (count === 0) return { count: 0, text: 'None' }
-  return { count, text: count === 1 ? '1 taint' : `${count} taints` }
+  return { count, text: pluralize(count, 'taint') }
 }
 
 export function getNodeVersion(node: any): string {
