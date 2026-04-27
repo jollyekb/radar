@@ -15,3 +15,4 @@ export {
   getCredentialsMode,
 } from './api/config';
 export type { NavCustomization } from './context/NavCustomization';
+export { ShortcutHelpOverlay } from './components/ui/ShortcutHelpOverlay';

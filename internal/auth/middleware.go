@@ -4,9 +4,15 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 )
+
+// cloudMode reports whether Radar is running under Radar Cloud. Mirrored in
+// the server package; duplicated here to avoid an import cycle and because
+// the auth tightening under cloud-mode is its own concern.
+func cloudMode() bool { return os.Getenv("RADAR_CLOUD_MODE") == "true" }
 
 // Authenticate returns a chi middleware that extracts user identity from
 // proxy headers or session cookies. Returns 401 if unauthenticated.
@@ -111,6 +117,20 @@ func Authenticate(cfg Config) func(http.Handler) http.Handler {
 
 // isExemptPath returns true for paths that don't require authentication
 func isExemptPath(path string) bool {
+	// Under cloud-mode the listener is only reachable via the Cloud
+	// tunnel, but we still harden against a misconfigured intercept
+	// forwarding debug paths or static-asset requests. Keep the exempt
+	// set minimal: health for kubelet probes, /auth/* for the login/
+	// callback roundtrip. /debug/pprof/* in particular leaks the entire
+	// in-memory K8s cache, so it must pass through auth (and is not
+	// mounted at all under cloud-mode — see server.go).
+	if cloudMode() {
+		if path == "/api/health" || strings.HasPrefix(path, "/auth/") {
+			return true
+		}
+		return false
+	}
+
 	exemptPrefixes := []string{
 		"/api/health",
 		"/api/connection",

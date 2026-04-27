@@ -290,6 +290,14 @@ source .playwright-mcp/visual-test-state.env # Load $RADAR_URL, $SCREENSHOT_DIR,
 ```
 Use `/visual-test` command for the full workflow (cluster check, Playwright MCP, screenshots, report). Screenshots go under `.playwright-mcp/visual-test/`.
 
+**Before calling a feature done — consider visual-test.** When you wrap up work that touches what the user actually sees (layout, copy, motion, color, theming, loading / empty / error states, modals, navigation, new pages, anything that changed how a screen reads), it's worth pausing to ask whether `/visual-test` would add value. `make tsc` + `make test` verify code correctness; `/visual-test` complements them by checking *feature* correctness — that the screen renders, behaves under interaction, and doesn't obviously regress neighboring surfaces. Not every UI change warrants one; this is a nudge to consider, not a hard rule.
+
+- **Run it yourself** when the change is self-contained and you can predict what the test should assert ("the new audit-finding card should show a severity badge and an expand affordance; clicking expands"). Cheap, catches obvious breakage.
+- **Ask the user** when the change is broad (touches many views), the right validation set is non-obvious, or you'd be picking which screens to capture — that judgment is theirs.
+- **Skip** for pure refactors with no visual diff, backend-only Go changes that don't surface in the UI, type-only changes, or doc edits.
+
+If a UI change feels worth checking, mention it when you wrap up — even just flagging "want me to run /visual-test on this?" is fine.
+
 ### Development Ports
 - **9280**: Backend API server (Go)
 - **9273**: Vite dev server (proxies /api to 9280)
@@ -479,7 +487,8 @@ Error responses are parsed as `{"error": "message"}` and displayed in toasts.
 - `web/src/components/resources/ResourcesView.tsx` is a thin wrapper that instantiates hooks and passes data to the package's `ResourcesView`
 - Linked via npm workspaces; Vite aliases `@skyhook-io/k8s-ui` to `../packages/k8s-ui/src` (source-level, no build step)
 - Key exports: `ResourcesView`, `ResourceRendererDispatch`, `ResourceActionsBar`, `EditableYamlView`, all renderers, resource-utils, `categorizeResources`, `getKindLabel`, `getKindPlural`
-- **Badge colors**: `packages/k8s-ui/src/components/ui/Badge.tsx` is the source of truth for badge color definitions (static strings for Tailwind scanning — never use template literals for class names). `packages/k8s-ui/src/utils/badge-colors.ts` re-exports these and provides derived constants (`SEVERITY_BADGE`, `KIND_BADGE_COLORS`, `HEALTH_BADGE_COLORS`, `HELM_STATUS_COLORS`, etc.). For status badges in tables, use CSS classes `.status-healthy`, `.status-degraded`, `.status-unhealthy`, `.status-neutral`, `.status-unknown` defined in `packages/k8s-ui/src/theme/components.css`.
+- **Badge colors**: `packages/k8s-ui/src/components/ui/Badge.tsx` is the source of truth for badge color definitions (static strings for Tailwind scanning — never use template literals for class names). `packages/k8s-ui/src/utils/badge-colors.ts` re-exports these and provides derived constants (`SEVERITY_BADGE`, `KIND_BADGE_COLORS`, `HEALTH_BADGE_COLORS`, `HELM_STATUS_COLORS`, etc.). For status badges in tables, use CSS classes `.status-healthy`, `.status-degraded`, `.status-alert`, `.status-unhealthy`, `.status-neutral`, `.status-unknown` defined in `packages/k8s-ui/src/theme/components.css`.
+- **Status vocabulary** (one source, three layers): `HealthLevel` type in `resource-utils.ts` (`healthy | degraded | alert | unhealthy | neutral | unknown`) → `.status-*` CSS classes (`theme/components.css`) → typed helpers in `components/ui/status-tone.tsx` (`StatusDot` for tiny indicator dots, `mapHealthToTone` to normalize API strings). All three carry the same six tones; no parallel vocabulary exists. For pill-shaped status badges, use the canonical pattern directly: `<span className={`badge ${healthColors[tone]}`}>...</span>` (used in 56+ sites across OSS). The `alert` (orange) tier is the intermediate between `degraded` (amber) and `unhealthy` (red) — used for severity gradients (Problems pages, Audit findings, Cert expiry) where the data carries a 3-step urgency that must be visually distinguishable. Use `mapHealthToTone(severityOrHealthString)` to normalize raw API values onto a tone.
 - **Centralized CSS classes** (all in `@layer components` in `packages/k8s-ui/src/theme/components.css` — Tailwind utilities can override them):
   - `.badge` / `.badge-sm` — badge structure (padding, radius, border-width)
   - `.btn-brand` / `.btn-brand-muted` / `.btn-brand-toggle` — brand buttons (reference `--color-brand` CSS variables)

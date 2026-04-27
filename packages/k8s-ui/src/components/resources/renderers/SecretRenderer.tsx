@@ -1,10 +1,11 @@
 import { useState, useCallback, useRef, useEffect } from 'react'
-import { AlertTriangle, Copy, Check, Shield, Pencil, Save, XCircle, RefreshCw } from 'lucide-react'
+import { AlertTriangle, Copy, Check, Shield, Pencil, Save, XCircle, RefreshCw, Eye, EyeOff } from 'lucide-react'
 import { clsx } from 'clsx'
 import { stringify as yamlStringify } from 'yaml'
 import { Section, PropertyList, Property, AlertBanner } from '../../ui/drawer-components'
 import { ConfirmDialog } from '../../ui/ConfirmDialog'
 import type { SecretCertificateInfo, CertificateInfo } from '../../../types'
+import { pluralize } from '../../../utils/pluralize'
 
 interface SecretRendererProps {
   data: any
@@ -125,7 +126,7 @@ export function SecretRenderer({ data, certificateInfo, resourceData, onSaveSecr
       {leafCert && !leafCert.expired && leafCert.daysLeft <= 7 && (
         <AlertBanner
           variant="error"
-          title={`Certificate expires in ${leafCert.daysLeft} day${leafCert.daysLeft !== 1 ? 's' : ''}`}
+          title={`Certificate expires in ${pluralize(leafCert.daysLeft, 'day')}`}
           message="Check that cert-manager or your CA is renewing this certificate."
         />
       )}
@@ -133,7 +134,7 @@ export function SecretRenderer({ data, certificateInfo, resourceData, onSaveSecr
       {leafCert && !leafCert.expired && leafCert.daysLeft > 7 && leafCert.daysLeft <= 30 && (
         <AlertBanner
           variant="warning"
-          title={`Certificate expires in ${leafCert.daysLeft} day${leafCert.daysLeft !== 1 ? 's' : ''}`}
+          title={`Certificate expires in ${pluralize(leafCert.daysLeft, 'day')}`}
           message="Renewal should happen automatically before expiry."
         />
       )}
@@ -190,8 +191,13 @@ export function SecretRenderer({ data, certificateInfo, resourceData, onSaveSecr
                     {!isEditing && (
                       <button
                         onClick={() => toggleReveal(key)}
-                        className="text-xs text-theme-text-secondary hover:text-theme-text-primary px-1.5 py-0.5 rounded hover:bg-theme-elevated transition-colors"
+                        className="inline-flex items-center gap-1 text-xs text-theme-text-secondary hover:text-theme-text-primary px-1.5 py-0.5 rounded hover:bg-theme-elevated transition-colors"
                       >
+                        {revealed.has(key) ? (
+                          <EyeOff className="w-3.5 h-3.5" />
+                        ) : (
+                          <Eye className="w-3.5 h-3.5" />
+                        )}
                         {revealed.has(key) ? 'Hide' : 'Reveal'}
                       </button>
                     )}

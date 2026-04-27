@@ -140,6 +140,38 @@ func registerTools(server *mcp.Server) {
 		Annotations: readOnly,
 	}, logToolCall("get_helm_release", handleGetHelmRelease))
 
+	// --- Packages tool (read-only) ---
+	//
+	// Higher-level than list_helm_releases: collapses Helm releases,
+	// workload labels, CRD registrations, and GitOps declarations
+	// (Argo Applications + Flux HelmReleases/Kustomizations) into a
+	// unified "what's installed in this cluster" view with source
+	// provenance. Each row's `sources` field shows which detection
+	// channels voted "this is installed" — H, L, C, A, F.
+	mcp.AddTool(server, &mcp.Tool{
+		Name: "list_packages",
+		Description: "List installed packages (Helm releases, label-managed workloads, CRDs, " +
+			"Argo Applications, Flux HelmReleases + Kustomizations) with their sources, " +
+			"versions, and health. Each row carries a `sources` array (H=Helm API, " +
+			"L=workload labels, C=CRD registrations, A=Argo declaration, F=Flux declaration) " +
+			"so the caller can see WHY this package is detected, plus a `contributors` " +
+			"array with per-source detail (each source's view of health/version, plus the " +
+			"GitOps controller resource identity in declarationName/declarationNamespace " +
+			"for sources A and F). Aggregated row-level health is worst-of contributors; " +
+			"row-level version is first-source-priority — read `contributors` to detect " +
+			"same-cluster disagreement. Use to answer 'what's installed?' / 'what version " +
+			"of cert-manager is running?' / 'are there orphaned operators?' in a single " +
+			"call instead of combining list_helm_releases + list_resources + manual merge. " +
+			"Filter by namespace, source, or chart substring. Response includes " +
+			"`sourcesErrored` listing any sources that failed (e.g. RBAC denied for Helm " +
+			"release secrets, Helm client not initialized, GitOps informer errors other " +
+			"than the controller's CRDs being absent). When this is non-empty, results " +
+			"are still returned but are partial — fewer rows than expected may indicate a " +
+			"dropped source rather than nothing installed. ArgoCD/FluxCD CRDs that are " +
+			"simply not installed in the cluster do NOT appear in sourcesErrored.",
+		Annotations: readOnly,
+	}, logToolCall("list_packages", handleListPackages))
+
 	// --- Workload logs tool (read-only) ---
 
 	mcp.AddTool(server, &mcp.Tool{
@@ -431,7 +463,7 @@ func attachResourceExtras(ctx context.Context, cache *k8s.ResourceCache, result 
 
 	if includes["logs"] {
 		if isPodKind(kind) {
-			if client := k8s.GetClient(); client != nil {
+			if client := k8s.ClientFromContext(ctx); client != nil {
 				tailLines := int64(100)
 				opts := &corev1.PodLogOptions{TailLines: &tailLines}
 				stream, err := client.CoreV1().Pods(namespace).GetLogs(name, opts).Stream(ctx)
@@ -828,7 +860,7 @@ func handleGetEvents(ctx context.Context, req *mcp.CallToolRequest, input events
 }
 
 func handleGetPodLogs(ctx context.Context, req *mcp.CallToolRequest, input podLogsInput) (*mcp.CallToolResult, any, error) {
-	clientset := k8s.GetClient()
+	clientset := k8s.ClientFromContext(ctx)
 	if clientset == nil {
 		return nil, nil, fmt.Errorf("not connected to cluster")
 	}
@@ -1128,8 +1160,13 @@ func buildDashboard(ctx context.Context, cache *k8s.ResourceCache, namespace str
 
 	// Helm releases — sort failed-first before slicing
 	if helmClient := helm.GetClient(); helmClient != nil {
-		releases, err := helmClient.ListReleases(namespace)
-		if err == nil {
+		username, groups := userFromContext(ctx)
+		releases, err := helmClient.ListReleasesAsUser(namespace, username, groups)
+		if err != nil {
+			// Not fatal for the dashboard — a viewer with no helm access
+			// still sees everything else. Log so the absence isn't silent.
+			log.Printf("[mcp] Dashboard helm list failed: %v", err)
+		} else {
 			d.HelmReleases.Total = len(releases)
 
 			// Sort: failed/pending-install first, then unhealthy/degraded
@@ -1151,9 +1188,11 @@ func buildDashboard(ctx context.Context, cache *k8s.ResourceCache, namespace str
 		}
 	}
 
-	// Metrics (best-effort — silently skip if metrics-server unavailable)
-	if client := k8s.GetClient(); client != nil {
-		data, err := client.RESTClient().Get().
+	// Metrics (best-effort — silently skip if metrics-server unavailable).
+	// Metrics-server forwards the impersonation headers, so a user without
+	// metrics.k8s.io/nodes access gets a 403 here and the field is left empty.
+	if client := k8s.ClientFromContext(ctx); client != nil {
+		data, err := client.CoreV1().RESTClient().Get().
 			AbsPath("/apis/metrics.k8s.io/v1beta1/nodes").
 			DoRaw(ctx)
 		if err == nil {

@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { ChevronRight, Copy, Check, Tag, AlertTriangle, CheckCircle, ExternalLink, Layers } from 'lucide-react'
+import { ChevronRight, Copy, Check, Tag, AlertTriangle, CheckCircle, ExternalLink, Layers, X, Minus } from 'lucide-react'
 import { clsx } from 'clsx'
 import { formatAge, formatDuration } from '../resources/resource-utils'
 import { Tooltip } from './Tooltip'
@@ -182,6 +182,106 @@ export function Property({ label, value, copyable, onCopy, copied }: PropertyPro
 // COMMON SECTIONS
 // ============================================================================
 
+// Condition types where status=True means a problem and status=False means healthy.
+//
+// K8s has no canonical API metadata for polarity — SIG-API Machinery explicitly
+// declined to add it (https://gateway-api.sigs.k8s.io/geps/gep-1364/), so every
+// consumer has to maintain a list. This one is assembled from:
+//   - Core K8s (kubelet node conditions, Pod, workload controllers)
+//   - Node Problem Detector default configs (kubernetes/node-problem-detector)
+//   - GKE's NPD plugin set (observed in-cluster)
+//   - ArgoCD Application conditions (argoproj/argo-cd)
+//   - FluxCD meta conditions (fluxcd/pkg/apis/meta)
+//   - Conventional Operator-pattern conditions (Degraded, OutOfSync)
+// Patterns only cover two NPD naming families whose convention is
+// strict ("Deprecated*" for deprecation checks, "Frequent*" for restart
+// counters) — everything else is explicit to avoid guessing wrong.
+const NEGATIVE_POLARITY_TYPES = new Set([
+  // Core K8s — Node (kubelet)
+  'MemoryPressure',
+  'DiskPressure',
+  'PIDPressure',
+  'NetworkUnavailable',
+  // Core K8s — Pod
+  'DisruptionTarget',
+  // Core K8s — workloads
+  'ReplicaFailure',
+  // NPD — upstream default configs
+  'KernelDeadlock',
+  'CperHardwareErrorFatal',
+  'XfsShutdown',
+  'CorruptDockerOverlay2',
+  'ReadonlyFilesystem',
+  'ContainerRuntimeUnhealthy',
+  'KubeletUnhealthy',
+  // NPD — GKE extensions (observed)
+  'ReadOnlyRootFileSystem',
+  'ResourceExhausted',
+  'Swap',
+  // NPD — AKS extensions (learn.microsoft.com/azure/aks/node-problem-detector)
+  'FilesystemCorruptionProblem',
+  'KubeletProblem',
+  'ContainerRuntimeProblem',
+  'VMEventScheduled',
+  'GPUMissing',
+  'NVLinkStatusInactive',
+  'XIDErrors',
+  'IBLinkFlapping',
+  'GPUClockThrottling',
+  'UnhealthyNvidiaDevicePlugin',
+  // ArgoCD Application
+  'DeletionError',
+  'InvalidSpecError',
+  'ComparisonError',
+  'SyncError',
+  'UnknownError',
+  'SharedResourceWarning',
+  'RepeatedResourceWarning',
+  'OrphanedResourceWarning',
+  'ExcludedResourceWarning',
+  'OutOfSync',
+  // ArgoCD ApplicationSet
+  'ErrorOccurred',
+  // FluxCD (meta)
+  'Stalled',
+  // Gateway API (sigs.k8s.io/gateway-api v1)
+  'Conflicted',
+  'OverlappingTLSConfig',
+  'PartiallyInvalid',
+  'InsecureFrontendValidationMode',
+  // cert-manager (CertificateRequest)
+  'Denied',
+  'InvalidRequest',
+  // Karpenter NodeClaim
+  'Drifted',
+  // VPA
+  'ConfigUnsupported',
+  'LowConfidence',
+  // KEDA ScaledObject
+  'Fallback',
+  // Operator-pattern CRDs (widespread)
+  'Degraded',
+  'Failed',
+])
+
+const NEGATIVE_POLARITY_PATTERNS: RegExp[] = [
+  // NPD deprecation-check family (e.g. DeprecatedAuthsFieldInContainerdConfiguration)
+  /^Deprecated/,
+  // NPD restart-counter family (e.g. FrequentKubeletRestart, FrequentUnregisterNetDevice)
+  /^Frequent/,
+]
+
+function isInvertedPolarityCondition(type: string | undefined): boolean {
+  if (!type) return false
+  if (NEGATIVE_POLARITY_TYPES.has(type)) return true
+  return NEGATIVE_POLARITY_PATTERNS.some((re) => re.test(type))
+}
+
+function isConditionHealthy(cond: { type?: string; status?: string }): boolean {
+  const inverted = isInvertedPolarityCondition(cond.type)
+  return inverted ? cond.status === 'False' : cond.status === 'True'
+}
+
 export function ConditionsSection({ conditions }: { conditions?: any[] }) {
   if (!conditions || conditions.length === 0) return null
 
@@ -193,7 +293,7 @@ export function ConditionsSection({ conditions }: { conditions?: any[] }) {
     return (a.type || '').localeCompare(b.type || '')
   })
 
-  const failCount = sorted.filter((c: any) => c.status === 'False').length
+  const failCount = sorted.filter((c: any) => (c.status === 'True' || c.status === 'False') && !isConditionHealthy(c)).length
 
   return (
     <Section
@@ -206,8 +306,8 @@ export function ConditionsSection({ conditions }: { conditions?: any[] }) {
 
         <div className="space-y-0.5">
           {sorted.map((cond: any) => {
-            const isOk = cond.status === 'True'
-            const isUnknown = cond.status === 'Unknown'
+            const isUnknown = cond.status !== 'True' && cond.status !== 'False'
+            const isOk = !isUnknown && isConditionHealthy(cond)
             const isFail = !isOk && !isUnknown
             return (
               <div key={cond.type} className={clsx(
@@ -220,12 +320,14 @@ export function ConditionsSection({ conditions }: { conditions?: any[] }) {
                 </div>
                 {/* Timeline dot */}
                 <span className={clsx(
-                  'w-[13px] h-[13px] rounded-full flex items-center justify-center text-[8px] shrink-0 mt-[3px] z-10 ring-2 ring-theme-surface',
+                  'w-3 h-3 rounded-full flex items-center justify-center shrink-0 mt-1 z-10 ring-2 ring-theme-surface',
                   isOk ? 'bg-emerald-500/20 text-emerald-500 dark:bg-emerald-500/30'
                     : isUnknown ? 'bg-gray-400/20 text-gray-400 dark:bg-gray-400/30'
                     : 'bg-red-500/25 text-red-500 dark:bg-red-500/35'
                 )}>
-                  {isOk ? '✓' : isUnknown ? '?' : '✗'}
+                  {isOk ? <Check className="w-2 h-2" strokeWidth={4} />
+                    : isUnknown ? <Minus className="w-2 h-2" strokeWidth={4} />
+                    : <X className="w-2 h-2" strokeWidth={4} />}
                 </span>
                 {/* Content */}
                 <div className="min-w-0 flex-1 pl-2">
@@ -538,6 +640,17 @@ export function AppInfoSection({ data }: { data: any }) {
 /** Get kind badge color — delegates to Badge.tsx's static color lookup */
 export function getKindColor(kind: string): string {
   return getKindColorClass(kind)
+}
+
+// In drawer headers, kind sits next to a status pill ("Pod" / "Running"). Both
+// filled creates two pills competing for attention even though kind is just
+// metadata (the user already clicked the resource) and status is the signal.
+// Stripping the fills makes kind read as a label and status as a value.
+export function getKindColorOutline(kind: string): string {
+  return getKindColorClass(kind)
+    .replace(/\b(?:dark:)?bg-\S+/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
 }
 
 export function formatKindName(kind: string): string {

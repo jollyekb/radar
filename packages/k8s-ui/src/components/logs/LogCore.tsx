@@ -1,19 +1,29 @@
 import { useRef, useCallback, useState, useMemo, useEffect, type ReactNode } from 'react'
 import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso'
-import { Play, Square, Download, Search, X, Terminal, RotateCcw, ChevronUp, ChevronDown, CaseSensitive, Regex, WrapText, Clock, Copy, Trash2, Filter, Braces, Sun, Moon } from 'lucide-react'
+import { Play, Square, Download, Search, X, Terminal, RotateCcw, ChevronUp, ChevronDown, ChevronRight, CaseSensitive, Regex, WrapText, Clock, Copy, Trash2, Filter, Braces, Palette, ListCollapse, Sun, Moon } from 'lucide-react'
 import type { LogEntry, LogLevel } from './useLogBuffer'
 import { useLogSearch } from './useLogSearch'
 import { StructuredLogLine } from './StructuredLogLine'
 import { Tooltip } from '../ui/Tooltip'
 import {
   formatLogTimestamp,
-  getLevelColor,
   highlightSearchMatches,
   stripAnsi,
   ansiToHtml,
+  type TimestampFormat,
+  TIMESTAMP_FORMAT_LABELS,
 } from '../../utils/log-format'
+import { getLogPalette, getLogLevelColor, type LogPalette } from './log-palette'
 
 export type DownloadFormat = 'txt' | 'json' | 'csv'
+
+/**
+ * `toolbarExtra` may be a plain ReactNode, or a function that receives the
+ * current dark/light context so wrappers can produce palette-matched controls.
+ */
+export type ToolbarExtraRenderer =
+  | ReactNode
+  | ((ctx: { isDark: boolean; palette: LogPalette }) => ReactNode)
 
 interface LogCoreProps {
   entries: LogEntry[]
@@ -24,20 +34,65 @@ interface LogCoreProps {
   onRefresh: () => void
   onDownload: (format: DownloadFormat) => void
   onClear?: () => void
-  toolbarExtra?: ReactNode
+  toolbarExtra?: ToolbarExtraRenderer
   showPodName?: boolean
   emptyMessage?: string
   errorMessage?: string | null
-  /** Force dark mode on the logs container (default: true). Logs are typically dark-themed. */
+  /**
+   * Hard override for the viewer palette. When set, the viewer stays pinned to
+   * that mode and hides the in-viewer dark/light toggle. When undefined,
+   * the viewer manages its own palette via localStorage and the Sun/Moon button.
+   */
   forceDark?: boolean
 }
 
-const LEVEL_OPTIONS: { level: LogLevel; label: string; color: string; activeColor: string }[] = [
-  { level: 'error', label: 'ERR', color: 'text-red-400', activeColor: 'bg-red-500/30 dark:bg-red-500/20 text-red-600 dark:text-red-400 border-red-500/60 dark:border-red-500/40' },
-  { level: 'warn', label: 'WARN', color: 'text-yellow-400', activeColor: 'bg-yellow-400/30 dark:bg-yellow-500/20 text-yellow-700 dark:text-yellow-400 border-yellow-500/60 dark:border-yellow-500/40' },
-  { level: 'info', label: 'INFO', color: 'text-blue-400', activeColor: 'bg-blue-500/25 dark:bg-blue-500/20 text-blue-700 dark:text-blue-400 border-blue-500/60 dark:border-blue-500/40' },
-  { level: 'debug', label: 'DBG', color: 'text-theme-text-secondary', activeColor: 'bg-theme-surface text-theme-text-secondary border-theme-border-light' },
+interface LevelOption {
+  level: LogLevel
+  label: string
+}
+
+const LEVEL_OPTIONS: LevelOption[] = [
+  { level: 'error', label: 'ERR' },
+  { level: 'warn', label: 'WARN' },
+  { level: 'info', label: 'INFO' },
+  { level: 'debug', label: 'DBG' },
 ]
+
+function getLevelActiveColor(level: LogLevel, palette: LogPalette): string {
+  switch (level) {
+    case 'error': return palette.levelActiveError
+    case 'warn': return palette.levelActiveWarn
+    case 'info': return palette.levelActiveInfo
+    case 'debug': return palette.levelActiveDebug
+    default: return palette.levelActiveDebug
+  }
+}
+
+const TIMESTAMP_FORMAT_ORDER: TimestampFormat[] = [
+  'time-local', 'time-utc', 'iso-local', 'iso-utc', 'relative', 'epoch',
+]
+
+const TIMESTAMP_FORMAT_SHORT_LABELS: Record<TimestampFormat, string> = {
+  'time-local': 'Local time',
+  'time-utc': 'UTC time',
+  'iso-local': 'Full date',
+  'iso-utc': 'UTC date',
+  'relative': 'Relative',
+  'epoch': 'Unix time',
+}
+
+function isContinuationLine(content: string): boolean {
+  // Lines starting with whitespace are the dominant stack-trace continuation pattern:
+  // Java `\tat com.foo.Bar`, Go `\tpackage.func`, Node `    at func`, Python `  File "..."`.
+  if (/^\s/.test(content)) return true
+  // Java's secondary chain markers that don't start with whitespace.
+  return /^(Caused by:|Suppressed:|\.\.\. \d+ more)/.test(content)
+}
+
+interface LogGroup {
+  head: LogEntry
+  continuations: LogEntry[]
+}
 
 const TIP_DELAY = 150
 
@@ -54,24 +109,70 @@ export function LogCore({
   showPodName = false,
   emptyMessage = 'No logs available',
   errorMessage,
-  forceDark = true,
+  forceDark,
 }: LogCoreProps) {
   const virtuosoRef = useRef<VirtuosoHandle>(null)
   const [atBottom, setAtBottom] = useState(true)
-  const [isDark, setIsDark] = useState(() => {
-    try { const v = localStorage.getItem('radar-logs-dark'); return v !== null ? v !== 'false' : forceDark } catch { return forceDark }
+  const themeLocked = typeof forceDark === 'boolean'
+  // Seed isDark: forceDark prop wins; else localStorage['radar-logs-dark'];
+  // else default dark. See log-palette.ts for why the viewer is palette-driven
+  // instead of theme-token-driven.
+  const [isDark, setIsDark] = useState<boolean>(() => {
+    if (typeof forceDark === 'boolean') return forceDark
+    try {
+      const v = localStorage.getItem('radar-logs-dark')
+      if (v === 'false') return false
+      if (v === 'true') return true
+    } catch {}
+    return true
   })
+  useEffect(() => {
+    if (typeof forceDark === 'boolean') {
+      setIsDark(forceDark)
+    }
+  }, [forceDark])
+  const palette = useMemo(() => getLogPalette(isDark), [isDark])
+  const toggleDark = useCallback(() => {
+    if (themeLocked) return
+    setIsDark(prev => {
+      const next = !prev
+      try { localStorage.setItem('radar-logs-dark', String(next)) } catch {}
+      return next
+    })
+  }, [themeLocked])
   const [wordWrap, setWordWrap] = useState(() => {
     try { return localStorage.getItem('radar-logs-wrap') !== 'false' } catch { return true }
   })
   const [showTimestamps, setShowTimestamps] = useState(() => {
     try { return localStorage.getItem('radar-logs-timestamps') !== 'false' } catch { return true }
   })
+  const [tsFormat, setTsFormat] = useState<TimestampFormat>(() => {
+    try {
+      const v = localStorage.getItem('radar-logs-ts-format') as TimestampFormat | null
+      return v && TIMESTAMP_FORMAT_ORDER.includes(v) ? v : 'time-local'
+    } catch { return 'time-local' }
+  })
+  const [ansiEnabled, setAnsiEnabled] = useState(() => {
+    try { return localStorage.getItem('radar-logs-ansi') !== 'false' } catch { return true }
+  })
+  const [collapseStacks, setCollapseStacks] = useState(() => {
+    try { return localStorage.getItem('radar-logs-collapse-stacks') !== 'false' } catch { return true }
+  })
   const [enabledLevels, setEnabledLevels] = useState<Set<LogLevel>>(
     new Set(['error', 'warn', 'info', 'debug'])
   )
   const [showDownloadMenu, setShowDownloadMenu] = useState(false)
+  const [showTsMenu, setShowTsMenu] = useState(false)
   const [expandAllStructured, setExpandAllStructured] = useState(false)
+  const [expandedStacks, setExpandedStacks] = useState<Set<number>>(() => new Set())
+
+  // Re-render every 15s so "relative" timestamps tick forward during idle viewing.
+  const [, setNowTick] = useState(0)
+  useEffect(() => {
+    if (tsFormat !== 'relative' || !showTimestamps) return
+    const id = setInterval(() => setNowTick(n => n + 1), 15_000)
+    return () => clearInterval(id)
+  }, [tsFormat, showTimestamps])
 
   // Level-filtered entries
   // 'unknown' logs are shown when all 4 known levels are enabled (no active filtering)
@@ -112,6 +213,18 @@ export function LogCore({
     return () => window.removeEventListener('click', handleClick)
   }, [showDownloadMenu])
 
+  // Same close-on-outside-click for the timestamp format menu.
+  const tsMenuRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!showTsMenu) return
+    const handleClick = (e: MouseEvent) => {
+      if (tsMenuRef.current?.contains(e.target as Node)) return
+      setShowTsMenu(false)
+    }
+    window.addEventListener('click', handleClick)
+    return () => window.removeEventListener('click', handleClick)
+  }, [showTsMenu])
+
   // Keyboard shortcut: Ctrl+F to open search
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -133,14 +246,6 @@ export function LogCore({
     setAtBottom(bottom)
   }, [])
 
-  const scrollToBottom = useCallback(() => {
-    virtuosoRef.current?.scrollToIndex({
-      index: displayEntries.length - 1,
-      align: 'end',
-      behavior: 'smooth',
-    })
-  }, [displayEntries.length])
-
   const toggleWrap = useCallback(() => {
     setWordWrap(prev => {
       const next = !prev
@@ -156,6 +261,50 @@ export function LogCore({
       return next
     })
   }, [])
+
+  const pickTsFormat = useCallback((fmt: TimestampFormat) => {
+    setTsFormat(fmt)
+    try { localStorage.setItem('radar-logs-ts-format', fmt) } catch {}
+    // Auto-show timestamps when user picks a format — otherwise the change isn't visible.
+    setShowTimestamps(true)
+    try { localStorage.setItem('radar-logs-timestamps', 'true') } catch {}
+    setShowTsMenu(false)
+  }, [])
+
+  const toggleAnsi = useCallback(() => {
+    setAnsiEnabled(prev => {
+      const next = !prev
+      try { localStorage.setItem('radar-logs-ansi', String(next)) } catch {}
+      return next
+    })
+  }, [])
+
+  const toggleCollapseStacks = useCallback(() => {
+    setCollapseStacks(prev => {
+      const next = !prev
+      try { localStorage.setItem('radar-logs-collapse-stacks', String(next)) } catch {}
+      return next
+    })
+  }, [])
+
+  const toggleStackExpanded = useCallback((id: number) => {
+    setExpandedStacks(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }, [])
+
+  // Clicking a filter chip in a structured log value pushes the value into the
+  // log search and enables filter mode so only matching lines are shown.
+  const handleFilterValue = useCallback((value: string) => {
+    search.setQuery(value)
+    // Values often contain regex metacharacters — force literal-substring matching.
+    search.setIsRegex(false)
+    search.setFilterMode(true)
+    if (!search.isOpen) search.open()
+  }, [search])
 
   const toggleLevel = useCallback((level: LogLevel) => {
     setEnabledLevels(prev => {
@@ -176,11 +325,57 @@ export function LogCore({
         : levelFilteredEntries[search.matchIndices[search.currentMatch]]?.id)
     : -1
 
+  // Group stack-trace continuation lines under their preceding head line.
+  // Disabled while search is active so matches inside continuations remain visible.
+  const groupedEntries = useMemo<LogGroup[]>(() => {
+    if (!collapseStacks || search.query) {
+      return displayEntries.map(e => ({ head: e, continuations: [] }))
+    }
+    const groups: LogGroup[] = []
+    for (const entry of displayEntries) {
+      if (groups.length > 0 && isContinuationLine(entry.content)) {
+        groups[groups.length - 1].continuations.push(entry)
+      } else {
+        groups.push({ head: entry, continuations: [] })
+      }
+    }
+    return groups
+  }, [displayEntries, collapseStacks, search.query])
+
+  const scrollToBottom = useCallback(() => {
+    virtuosoRef.current?.scrollToIndex({
+      index: groupedEntries.length - 1,
+      align: 'end',
+      behavior: 'smooth',
+    })
+  }, [groupedEntries.length])
+
+  const toolbarExtraNode = typeof toolbarExtra === 'function'
+    ? toolbarExtra({ isDark, palette })
+    : toolbarExtra
+
+  // Composite "inactive toolbar button" classes — static literals so
+  // Tailwind's class scanner picks them up. Two variants for secondary
+  // vs tertiary default text color.
+  const iconBtnInactive = isDark
+    ? 'p-1.5 rounded transition-colors text-slate-400 hover:text-slate-100 hover:bg-slate-800'
+    : 'p-1.5 rounded transition-colors text-slate-600 hover:text-slate-900 hover:bg-slate-200'
+  const iconBtnInactiveTertiary = isDark
+    ? 'p-1.5 rounded transition-colors text-slate-500 hover:text-slate-100 hover:bg-slate-800'
+    : 'p-1.5 rounded transition-colors text-slate-400 hover:text-slate-900 hover:bg-slate-200'
+  // "disabled → tertiary on hover" for inactive level filter chips.
+  const levelChipInactive = isDark
+    ? 'border-transparent text-slate-600 hover:text-slate-500'
+    : 'border-transparent text-slate-300 hover:text-slate-400'
+
   return (
-    <div className={`flex flex-col h-full bg-theme-base${isDark ? ' dark' : ''}`} style={{ colorScheme: isDark ? 'dark' : 'light', fontFamily: "'SF Mono', 'Cascadia Code', 'Fira Code', Menlo, Consolas, 'DejaVu Sans Mono', monospace" }}>
+    <div
+      className={`flex flex-col h-full ${palette.containerBg}`}
+      style={{ colorScheme: isDark ? 'dark' : 'light', fontFamily: "'SF Mono', 'Cascadia Code', 'Fira Code', Menlo, Consolas, 'DejaVu Sans Mono', monospace" }}
+    >
       {/* Toolbar */}
-      <div className="flex items-center gap-2 px-3 py-2 border-b border-theme-border bg-theme-surface">
-        {toolbarExtra}
+      <div className={`flex items-center gap-2 px-3 py-2 border-b ${palette.border} ${palette.toolbarBg}`}>
+        {toolbarExtraNode}
 
         {/* Stream / Stop toggle — only shown when streaming is supported */}
         {onStartStream && (
@@ -190,7 +385,7 @@ export function LogCore({
               className={`flex items-center gap-1.5 px-2 py-1.5 text-xs rounded transition-colors ${
                 isStreaming
                   ? 'bg-green-600 text-white hover:bg-green-700'
-                  : 'bg-theme-elevated text-theme-text-secondary hover:bg-theme-hover'
+                  : `${palette.elevatedBg} ${palette.textSecondary} ${palette.hoverBg}`
               }`}
             >
               {isStreaming ? <Square className="w-3 h-3" /> : <Play className="w-3 h-3" />}
@@ -204,7 +399,7 @@ export function LogCore({
           <button
             onClick={onRefresh}
             disabled={isLoading || isStreaming}
-            className="flex items-center gap-1.5 px-2 py-1.5 text-xs rounded bg-theme-elevated text-theme-text-secondary hover:bg-theme-hover disabled:opacity-50 disabled:cursor-not-allowed"
+            className={`flex items-center gap-1.5 px-2 py-1.5 text-xs rounded ${palette.elevatedBg} ${palette.textSecondary} ${palette.hoverBg} disabled:opacity-50 disabled:cursor-not-allowed`}
           >
             <RotateCcw className={`w-3 h-3 ${isLoading ? 'animate-spin' : ''}`} />
           </button>
@@ -221,8 +416,8 @@ export function LogCore({
                   onClick={() => toggleLevel(opt.level)}
                   className={`px-1.5 py-0.5 text-[10px] font-medium rounded border transition-colors ${
                     active
-                      ? opt.activeColor
-                      : 'border-transparent text-theme-text-disabled hover:text-theme-text-tertiary'
+                      ? getLevelActiveColor(opt.level, palette)
+                      : levelChipInactive
                   }`}
                 >
                   {opt.label}{count > 0 ? ` ${count}` : ''}
@@ -240,7 +435,7 @@ export function LogCore({
             <button
               onClick={() => setExpandAllStructured(prev => !prev)}
               className={`p-1.5 rounded transition-colors ${
-                expandAllStructured ? 'btn-brand-toggle' : 'text-theme-text-secondary hover:text-theme-text-primary hover:bg-theme-elevated'
+                expandAllStructured ? palette.toolbarActive : iconBtnInactive
               }`}
             >
               <Braces className="w-4 h-4" />
@@ -248,15 +443,76 @@ export function LogCore({
           </Tooltip>
         )}
 
-        {/* Timestamp toggle */}
-        <Tooltip content={showTimestamps ? 'Hide timestamps' : 'Show timestamps'} delay={TIP_DELAY} position="bottom">
+        {/* Timestamp toggle + format picker */}
+        <div className="flex items-center">
+          <Tooltip content={showTimestamps ? 'Hide timestamps' : 'Show timestamps'} delay={TIP_DELAY} position="bottom">
+            <button
+              onClick={toggleTimestamps}
+              className={`p-1.5 rounded-l transition-colors ${
+                showTimestamps ? palette.toolbarActive : iconBtnInactive
+              }`}
+            >
+              <Clock className="w-4 h-4" />
+            </button>
+          </Tooltip>
+          <div className="relative" ref={tsMenuRef}>
+            <Tooltip content={`Timestamp format: ${TIMESTAMP_FORMAT_LABELS[tsFormat]}`} delay={TIP_DELAY} position="bottom">
+              <button
+                onClick={() => setShowTsMenu(prev => !prev)}
+                className={`px-2 py-1.5 rounded-r text-[10px] font-medium transition-colors whitespace-nowrap ${
+                  showTimestamps ? palette.toolbarActive : iconBtnInactiveTertiary
+                }`}
+                aria-label="Pick timestamp format"
+              >
+                <span className="inline-flex items-center gap-1">
+                  <span>{TIMESTAMP_FORMAT_SHORT_LABELS[tsFormat]}</span>
+                  <ChevronDown className="w-3 h-3" />
+                </span>
+              </button>
+            </Tooltip>
+            {showTsMenu && (
+              <div className={`absolute top-full right-0 mt-1 w-44 ${palette.menuBg} border ${palette.border} rounded-lg shadow-lg z-50`}>
+                <div className={`px-3 py-1.5 text-[10px] uppercase tracking-wide ${palette.textTertiary} border-b ${palette.border}`}>
+                  Timestamp format
+                </div>
+                {TIMESTAMP_FORMAT_ORDER.map(fmt => (
+                  <button
+                    key={fmt}
+                    onClick={() => pickTsFormat(fmt)}
+                    className={`w-full text-left px-3 py-1.5 text-xs ${palette.hoverBg} flex items-center justify-between ${
+                      tsFormat === fmt ? palette.textPrimary : palette.textSecondary
+                    }`}
+                  >
+                    <span>{TIMESTAMP_FORMAT_LABELS[fmt]}</span>
+                    {tsFormat === fmt && <span className={`text-[10px] ${palette.textAccent}`}>✓</span>}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Collapse stack-trace continuations toggle */}
+        <Tooltip content={collapseStacks ? 'Stop grouping stack traces' : 'Group stack-trace lines'} delay={TIP_DELAY} position="bottom">
           <button
-            onClick={toggleTimestamps}
+            onClick={toggleCollapseStacks}
             className={`p-1.5 rounded transition-colors ${
-              showTimestamps ? 'btn-brand-toggle' : 'text-theme-text-secondary hover:text-theme-text-primary hover:bg-theme-elevated'
+              collapseStacks ? palette.toolbarActive : iconBtnInactive
             }`}
           >
-            <Clock className="w-4 h-4" />
+            <ListCollapse className="w-4 h-4" />
+          </button>
+        </Tooltip>
+
+        {/* ANSI color rendering toggle */}
+        <Tooltip content={ansiEnabled ? 'Hide ANSI colors' : 'Render ANSI colors'} delay={TIP_DELAY} position="bottom">
+          <button
+            onClick={toggleAnsi}
+            className={`p-1.5 rounded transition-colors ${
+              ansiEnabled ? palette.toolbarActive : iconBtnInactive
+            }`}
+          >
+            <Palette className="w-4 h-4" />
           </button>
         </Tooltip>
 
@@ -265,7 +521,7 @@ export function LogCore({
           <button
             onClick={toggleWrap}
             className={`p-1.5 rounded transition-colors ${
-              wordWrap ? 'btn-brand-toggle' : 'text-theme-text-secondary hover:text-theme-text-primary hover:bg-theme-elevated'
+              wordWrap ? palette.toolbarActive : iconBtnInactive
             }`}
           >
             <WrapText className="w-4 h-4" />
@@ -277,30 +533,42 @@ export function LogCore({
           <button
             onClick={() => search.isOpen ? search.close() : search.open()}
             className={`p-1.5 rounded transition-colors ${
-              search.isOpen ? 'btn-brand-toggle' : 'text-theme-text-secondary hover:text-theme-text-primary hover:bg-theme-elevated'
+              search.isOpen ? palette.toolbarActive : iconBtnInactive
             }`}
           >
             <Search className="w-4 h-4" />
           </button>
         </Tooltip>
 
+        {!themeLocked && (
+          <Tooltip content={isDark ? 'Switch to light mode' : 'Switch to dark mode'} delay={TIP_DELAY} position="bottom">
+            <button
+              onClick={toggleDark}
+              className={iconBtnInactive}
+              aria-label={isDark ? 'Switch log viewer to light mode' : 'Switch log viewer to dark mode'}
+            >
+              {isDark ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+            </button>
+          </Tooltip>
+        )}
+
         {/* Download */}
         <div className="relative flex items-center" ref={downloadMenuRef}>
           <Tooltip content="Download logs" delay={TIP_DELAY} position="bottom">
             <button
               onClick={() => setShowDownloadMenu(prev => !prev)}
-              className="p-1.5 rounded text-theme-text-secondary hover:text-theme-text-primary hover:bg-theme-elevated"
+              className={iconBtnInactive}
             >
               <Download className="w-4 h-4" />
             </button>
           </Tooltip>
           {showDownloadMenu && (
-            <div className="absolute top-full right-0 mt-1 w-32 bg-theme-elevated border border-theme-border rounded-lg shadow-lg z-50">
+            <div className={`absolute top-full right-0 mt-1 w-32 ${palette.menuBg} border ${palette.border} rounded-lg shadow-lg z-50`}>
               {(['txt', 'json', 'csv'] as DownloadFormat[]).map(fmt => (
                 <button
                   key={fmt}
                   onClick={() => { onDownload(fmt); setShowDownloadMenu(false) }}
-                  className="w-full text-left px-3 py-2 text-xs text-theme-text-primary hover:bg-theme-hover first:rounded-t-lg last:rounded-b-lg"
+                  className={`w-full text-left px-3 py-2 text-xs ${palette.textPrimary} ${palette.hoverBg} first:rounded-t-lg last:rounded-b-lg`}
                 >
                   {fmt.toUpperCase()}
                 </button>
@@ -309,26 +577,12 @@ export function LogCore({
           )}
         </div>
 
-        {/* Dark/Light toggle */}
-        <Tooltip content={isDark ? 'Light mode' : 'Dark mode'} delay={TIP_DELAY} position="bottom">
-          <button
-            onClick={() => {
-              const next = !isDark
-              setIsDark(next)
-              try { localStorage.setItem('radar-logs-dark', String(next)) } catch {}
-            }}
-            className="p-1.5 rounded text-theme-text-secondary hover:text-theme-text-primary hover:bg-theme-elevated"
-          >
-            {isDark ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
-          </button>
-        </Tooltip>
-
         {/* Clear */}
         {onClear && (
           <Tooltip content="Clear logs" delay={TIP_DELAY} position="bottom">
             <button
               onClick={onClear}
-              className="p-1.5 rounded text-theme-text-secondary hover:text-theme-text-primary hover:bg-theme-elevated"
+              className={iconBtnInactive}
             >
               <Trash2 className="w-4 h-4" />
             </button>
@@ -338,8 +592,8 @@ export function LogCore({
 
       {/* Search bar */}
       {search.isOpen && (
-        <div className="flex items-center gap-2 px-3 py-2 border-b border-theme-border bg-theme-surface/50">
-          <Search className="w-4 h-4 text-theme-text-secondary shrink-0" />
+        <div className={`flex items-center gap-2 px-3 py-2 border-b ${palette.border} ${palette.toolbarBgMuted}`}>
+          <Search className={`w-4 h-4 ${palette.textSecondary} shrink-0`} />
           <input
             type="text"
             value={search.query}
@@ -356,7 +610,7 @@ export function LogCore({
               }
             }}
             placeholder="Search logs..."
-            className="flex-1 bg-transparent text-theme-text-primary text-sm placeholder-theme-text-disabled focus:outline-none min-w-0"
+            className={`flex-1 bg-transparent ${palette.textPrimary} text-sm ${palette.placeholder} focus:outline-none min-w-0`}
             autoFocus
           />
 
@@ -365,7 +619,7 @@ export function LogCore({
             <button
               onClick={search.toggleRegex}
               className={`p-1 rounded transition-colors ${
-                search.isRegex ? 'btn-brand-toggle' : 'text-theme-text-tertiary hover:text-theme-text-secondary'
+                search.isRegex ? palette.toolbarActive : `${palette.textTertiary} ${palette.hoverText}`
               }`}
             >
               <Regex className="w-3.5 h-3.5" />
@@ -377,7 +631,7 @@ export function LogCore({
             <button
               onClick={search.toggleCaseSensitive}
               className={`p-1 rounded transition-colors ${
-                search.isCaseSensitive ? 'btn-brand-toggle' : 'text-theme-text-tertiary hover:text-theme-text-secondary'
+                search.isCaseSensitive ? palette.toolbarActive : `${palette.textTertiary} ${palette.hoverText}`
               }`}
             >
               <CaseSensitive className="w-3.5 h-3.5" />
@@ -389,7 +643,7 @@ export function LogCore({
             <button
               onClick={search.toggleFilterMode}
               className={`p-1 rounded transition-colors ${
-                search.isFilterMode ? 'btn-brand-toggle' : 'text-theme-text-tertiary hover:text-theme-text-secondary'
+                search.isFilterMode ? palette.toolbarActive : `${palette.textTertiary} ${palette.hoverText}`
               }`}
             >
               <Filter className="w-3.5 h-3.5" />
@@ -398,7 +652,7 @@ export function LogCore({
 
           {search.query && (
             <>
-              <span className={`text-xs whitespace-nowrap ${search.regexError ? 'text-red-400' : 'text-theme-text-tertiary'}`}>
+              <span className={`text-xs whitespace-nowrap ${search.regexError ? palette.textError : palette.textTertiary}`}>
                 {search.regexError
                   ? 'Invalid regex'
                   : search.matchCount > 0
@@ -411,7 +665,7 @@ export function LogCore({
                 <button
                   onClick={search.goToPrev}
                   disabled={search.matchCount === 0}
-                  className="p-1 rounded text-theme-text-secondary hover:text-theme-text-primary disabled:opacity-30"
+                  className={`p-1 rounded ${palette.textSecondary} ${palette.hoverText} disabled:opacity-30`}
                 >
                   <ChevronUp className="w-3.5 h-3.5" />
                 </button>
@@ -420,7 +674,7 @@ export function LogCore({
                 <button
                   onClick={search.goToNext}
                   disabled={search.matchCount === 0}
-                  className="p-1 rounded text-theme-text-secondary hover:text-theme-text-primary disabled:opacity-30"
+                  className={`p-1 rounded ${palette.textSecondary} ${palette.hoverText} disabled:opacity-30`}
                 >
                   <ChevronDown className="w-3.5 h-3.5" />
                 </button>
@@ -428,7 +682,7 @@ export function LogCore({
 
               <button
                 onClick={() => search.setQuery('')}
-                className="p-1 rounded text-theme-text-secondary hover:text-theme-text-primary"
+                className={`p-1 rounded ${palette.textSecondary} ${palette.hoverText}`}
               >
                 <X className="w-3 h-3" />
               </button>
@@ -439,19 +693,19 @@ export function LogCore({
 
       {/* Log content */}
       {isLoading && entries.length === 0 ? (
-        <div className="flex-1 flex items-center justify-center text-theme-text-tertiary">
+        <div className={`flex-1 flex items-center justify-center ${palette.textTertiary}`}>
           <div className="flex items-center gap-2">
             <RotateCcw className="w-4 h-4 animate-spin" />
             <span>Loading logs...</span>
           </div>
         </div>
       ) : errorMessage ? (
-        <div className="flex-1 flex flex-col items-center justify-center text-red-400 gap-2">
+        <div className={`flex-1 flex flex-col items-center justify-center gap-2 ${palette.textError}`}>
           <Terminal className="w-8 h-8" />
           <span>{errorMessage}</span>
         </div>
-      ) : displayEntries.length === 0 ? (
-        <div className="flex-1 flex flex-col items-center justify-center text-theme-text-tertiary gap-2">
+      ) : groupedEntries.length === 0 ? (
+        <div className={`flex-1 flex flex-col items-center justify-center gap-2 ${palette.textTertiary}`}>
           <Terminal className="w-8 h-8" />
           <span>{emptyMessage}</span>
         </div>
@@ -459,23 +713,30 @@ export function LogCore({
         <div className="flex-1 relative">
           <Virtuoso
             ref={virtuosoRef}
-            data={displayEntries}
+            data={groupedEntries}
             followOutput={handleFollowOutput}
-            initialTopMostItemIndex={displayEntries.length - 1}
+            initialTopMostItemIndex={groupedEntries.length - 1}
             atBottomStateChange={handleAtBottomStateChange}
             atBottomThreshold={50}
             increaseViewportBy={200}
-            itemContent={(_index, entry) => (
-              <LogLine
-                entry={entry}
+            itemContent={(_index, group) => (
+              <LogGroupItem
+                group={group}
                 searchQuery={search.query}
                 searchIsRegex={search.isRegex}
                 searchIsCaseSensitive={search.isCaseSensitive}
                 showPodName={showPodName}
                 showTimestamp={showTimestamps}
-                isCurrentMatch={entry.id === currentHighlightId}
+                tsFormat={tsFormat}
+                ansiEnabled={ansiEnabled}
+                isCurrentMatch={group.head.id === currentHighlightId}
                 wordWrap={wordWrap}
                 defaultExpanded={expandAllStructured}
+                onFilterValue={handleFilterValue}
+                isStackExpanded={expandedStacks.has(group.head.id)}
+                onToggleStack={toggleStackExpanded}
+                isDark={isDark}
+                palette={palette}
               />
             )}
             className="h-full font-mono text-xs"
@@ -493,23 +754,42 @@ export function LogCore({
       )}
 
       {/* Keyboard shortcut hints */}
-      <div className="flex items-center gap-4 px-3 py-1 border-t border-theme-border bg-theme-surface text-[10px] text-theme-text-disabled">
-        <Shortcut keys="Ctrl+F" label="Search" />
-        <Shortcut keys="Enter" label="Next match" />
-        <Shortcut keys="Shift+Enter" label="Prev match" />
-        <Shortcut keys="Esc" label="Close search" />
+      <div className={`flex items-center gap-4 px-3 py-1 border-t ${palette.border} ${palette.toolbarBg} text-[10px] ${palette.textDisabled}`}>
+        <Shortcut keys="Ctrl+F" label="Search" palette={palette} />
+        <Shortcut keys="Enter" label="Next match" palette={palette} />
+        <Shortcut keys="Shift+Enter" label="Prev match" palette={palette} />
+        <Shortcut keys="Esc" label="Close search" palette={palette} />
       </div>
     </div>
   )
 }
 
-function Shortcut({ keys, label }: { keys: string; label: string }) {
+function Shortcut({ keys, label, palette }: { keys: string; label: string; palette: LogPalette }) {
   return (
     <span className="flex items-center gap-1">
-      <kbd className="px-1 py-px rounded bg-theme-elevated border border-theme-border-light font-mono">{keys}</kbd>
+      <kbd className={`px-1 py-px rounded ${palette.elevatedBg} border ${palette.borderLight} font-mono`}>{keys}</kbd>
       <span>{label}</span>
     </span>
   )
+}
+
+interface LogLineProps {
+  entry: LogEntry
+  searchQuery: string
+  searchIsRegex: boolean
+  searchIsCaseSensitive: boolean
+  showPodName: boolean
+  showTimestamp: boolean
+  tsFormat: TimestampFormat
+  ansiEnabled: boolean
+  isCurrentMatch: boolean
+  wordWrap: boolean
+  defaultExpanded: boolean
+  onFilterValue?: (value: string) => void
+  /** Optional lead element rendered at the start of the row (e.g. stack-trace toggle). */
+  leadSlot?: ReactNode
+  isDark: boolean
+  palette: LogPalette
 }
 
 function LogLine({
@@ -519,23 +799,22 @@ function LogLine({
   searchIsCaseSensitive,
   showPodName,
   showTimestamp,
+  tsFormat,
+  ansiEnabled,
   isCurrentMatch,
   wordWrap,
   defaultExpanded,
-}: {
-  entry: LogEntry
-  searchQuery: string
-  searchIsRegex: boolean
-  searchIsCaseSensitive: boolean
-  showPodName: boolean
-  showTimestamp: boolean
-  isCurrentMatch: boolean
-  wordWrap: boolean
-  defaultExpanded: boolean
-}) {
-  const levelColor = getLevelColor(entry.level)
+  onFilterValue,
+  leadSlot,
+  isDark,
+  palette,
+}: LogLineProps) {
+  const levelColor = getLogLevelColor(entry.level, isDark)
+  const podTextColor = entry.podColorIndex !== undefined
+    ? palette.podColors[entry.podColorIndex % palette.podColors.length].text
+    : palette.textPrimary
 
-  // Determine content rendering
+  // Determine content rendering. Priority: search highlight > structured > ANSI/plain.
   let contentElement: React.ReactNode
   if (searchQuery) {
     const plain = stripAnsi(entry.content)
@@ -554,15 +833,23 @@ function LogLine({
         wordWrap={wordWrap}
         isLogfmt={entry.isLogfmt}
         defaultExpanded={defaultExpanded}
+        onFilterValue={onFilterValue}
+        isDark={isDark}
       />
     )
-  } else {
+  } else if (ansiEnabled) {
     const html = ansiToHtml(entry.content)
     contentElement = (
       <span
         className={`${wordWrap ? 'whitespace-pre-wrap break-all' : 'whitespace-pre'} ${levelColor}`}
         dangerouslySetInnerHTML={{ __html: html }}
       />
+    )
+  } else {
+    contentElement = (
+      <span className={`${wordWrap ? 'whitespace-pre-wrap break-all' : 'whitespace-pre'} ${levelColor}`}>
+        {stripAnsi(entry.content)}
+      </span>
     )
   }
 
@@ -572,15 +859,19 @@ function LogLine({
   }
 
   return (
-    <div className={`flex hover:bg-theme-surface/50 group leading-5 px-2 ${isCurrentMatch ? 'bg-yellow-500/10' : ''}`}>
+    <div className={`flex ${palette.hoverSurface} group leading-5 px-2 ${isCurrentMatch ? palette.currentMatchBg : ''}`}>
+      {leadSlot}
       {showTimestamp && entry.timestamp && (
-        <span className="text-theme-text-tertiary select-none pr-2 whitespace-nowrap">
-          {formatLogTimestamp(entry.timestamp)}
+        <span
+          className={`${palette.textTertiary} select-none pr-2 whitespace-nowrap`}
+          title={entry.timestamp}
+        >
+          {formatLogTimestamp(entry.timestamp, tsFormat)}
         </span>
       )}
       {showPodName && entry.pod && (
         <span
-          className={`${entry.podColor || 'text-theme-text-primary'} select-none pr-2 whitespace-nowrap min-w-[80px] max-w-[120px] truncate`}
+          className={`${podTextColor} select-none pr-2 whitespace-nowrap min-w-[80px] max-w-[120px] truncate`}
           title={entry.pod}
         >
           [{entry.pod.split('-').slice(-2).join('-')}]
@@ -589,11 +880,71 @@ function LogLine({
       <span className="flex-1 min-w-0">{contentElement}</span>
       <button
         onClick={handleCopy}
-        className="opacity-0 group-hover:opacity-100 ml-1 p-0.5 rounded text-theme-text-tertiary hover:text-theme-text-secondary shrink-0 transition-opacity"
+        className={`opacity-0 group-hover:opacity-100 ml-1 p-0.5 rounded ${palette.textTertiary} ${palette.hoverText} shrink-0 transition-opacity`}
         title="Copy line"
       >
         <Copy className="w-3 h-3" />
       </button>
+    </div>
+  )
+}
+
+interface LogGroupItemProps {
+  group: LogGroup
+  searchQuery: string
+  searchIsRegex: boolean
+  searchIsCaseSensitive: boolean
+  showPodName: boolean
+  showTimestamp: boolean
+  tsFormat: TimestampFormat
+  ansiEnabled: boolean
+  isCurrentMatch: boolean
+  wordWrap: boolean
+  defaultExpanded: boolean
+  onFilterValue: (value: string) => void
+  isStackExpanded: boolean
+  onToggleStack: (id: number) => void
+  isDark: boolean
+  palette: LogPalette
+}
+
+function LogGroupItem(props: LogGroupItemProps) {
+  const { group, isStackExpanded, onToggleStack, palette, ...rest } = props
+  const hasStack = group.continuations.length > 0
+
+  const stackToggle = hasStack ? (
+    <button
+      onClick={() => onToggleStack(group.head.id)}
+      className={`mr-1 self-start p-0.5 rounded ${palette.textTertiary} ${palette.hoverText} ${palette.hoverSurface} shrink-0`}
+      title={isStackExpanded ? 'Collapse stack trace' : `Expand ${group.continuations.length} stack frames`}
+    >
+      {isStackExpanded
+        ? <ChevronDown className="w-3 h-3" />
+        : <ChevronRight className="w-3 h-3" />}
+    </button>
+  ) : null
+
+  return (
+    <div>
+      <LogLine
+        entry={group.head}
+        {...rest}
+        palette={palette}
+        leadSlot={stackToggle}
+      />
+      {hasStack && !isStackExpanded && (
+        <button
+          onClick={() => onToggleStack(group.head.id)}
+          className={`block w-full text-left pl-6 pr-2 py-0 text-[10px] ${palette.textTertiary} ${palette.hoverText} ${palette.hoverSurface}`}
+        >
+          [+{group.continuations.length} stack {group.continuations.length === 1 ? 'line' : 'lines'}]
+        </button>
+      )}
+      {hasStack && isStackExpanded && group.continuations.map(cont => (
+        <div key={cont.id} className="pl-4">
+          <LogLine entry={cont} {...rest} palette={palette} isCurrentMatch={false} />
+        </div>
+      ))}
     </div>
   )
 }

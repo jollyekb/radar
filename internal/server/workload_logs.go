@@ -35,10 +35,15 @@ type workloadLogEntry struct {
 	Content   string `json:"content"`
 }
 
-// validWorkloadKinds defines which resource types support workload logs
+// validWorkloadKinds defines which resource types support workload logs.
+// Accepts both singular and plural forms so the frontend can send K8s canonical
+// Kind names ("Deployment") without additional pluralization.
 var validWorkloadKinds = map[string]bool{
+	"deployment":   true,
 	"deployments":  true,
+	"statefulset":  true,
 	"statefulsets": true,
+	"daemonset":    true,
 	"daemonsets":   true,
 }
 
@@ -89,9 +94,9 @@ func (s *Server) handleWorkloadLogs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	client := k8s.GetClient()
+	client := s.getClientForRequest(r)
 	if client == nil {
-		s.writeError(w, http.StatusServiceUnavailable, "kubernetes client not available")
+		s.writeError(w, http.StatusServiceUnavailable, "cluster client not available — check cluster connection")
 		return
 	}
 
@@ -146,9 +151,9 @@ func (s *Server) handleWorkloadLogsStream(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	client := k8s.GetClient()
+	client := s.getClientForRequest(r)
 	if client == nil {
-		sendSSEError(w, flusher, "kubernetes client not available")
+		sendSSEError(w, flusher, "cluster client not available — check cluster connection")
 		return
 	}
 
@@ -283,7 +288,7 @@ func (s *Server) handleWorkloadLogsStream(w http.ResponseWriter, r *http.Request
 }
 
 // streamPodLogs streams logs from a single pod/container to the log channel
-func streamPodLogs(ctx context.Context, client *kubernetes.Clientset, namespace, podName, containerName string, tailLines int64, sinceSeconds *int64, logCh chan<- workloadLogEntry) {
+func streamPodLogs(ctx context.Context, client kubernetes.Interface, namespace, podName, containerName string, tailLines int64, sinceSeconds *int64, logCh chan<- workloadLogEntry) {
 	stream, err := k8score.GetContainerLogs(ctx, client, namespace, podName, containerName, k8score.LogOptions{
 		TailLines:    &tailLines,
 		SinceSeconds: sinceSeconds,
@@ -437,7 +442,7 @@ func parseTailLines(str string, defaultVal int64) int64 {
 }
 
 // collectLogsFromPods fetches logs from all pods concurrently
-func collectLogsFromPods(ctx context.Context, client *kubernetes.Clientset, namespace string, pods []*corev1.Pod, container string, tailLines int64, sinceSeconds *int64) []workloadLogEntry {
+func collectLogsFromPods(ctx context.Context, client kubernetes.Interface, namespace string, pods []*corev1.Pod, container string, tailLines int64, sinceSeconds *int64) []workloadLogEntry {
 	var allLogs []workloadLogEntry
 	var mu sync.Mutex
 	var wg sync.WaitGroup
@@ -464,7 +469,7 @@ func collectLogsFromPods(ctx context.Context, client *kubernetes.Clientset, name
 }
 
 // fetchPodContainerLogs fetches logs for a single pod/container
-func fetchPodContainerLogs(ctx context.Context, client *kubernetes.Clientset, namespace, podName, containerName string, tailLines int64, sinceSeconds *int64) []workloadLogEntry {
+func fetchPodContainerLogs(ctx context.Context, client kubernetes.Interface, namespace, podName, containerName string, tailLines int64, sinceSeconds *int64) []workloadLogEntry {
 	stream, err := k8score.GetContainerLogs(ctx, client, namespace, podName, containerName, k8score.LogOptions{
 		TailLines:    &tailLines,
 		SinceSeconds: sinceSeconds,

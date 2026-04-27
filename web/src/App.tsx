@@ -881,19 +881,35 @@ function AppInner() {
             </button>
           )}
 
-          {/* Theme toggle */}
-          <div className="hidden md:block">
-            <ThemeToggle />
-          </div>
+          {/* Theme toggle — hidden in embedded mode. Host apps (e.g. Radar
+              Cloud) own the user-theme preference and mount their own picker
+              in the account menu; a second toggle in Radar's topbar would
+              fight them (one writes to Radar's localStorage key, the other
+              to the host's cookie/backend) and the user would see the theme
+              bounce on every navigation between host routes and /c/:id. */}
+          {!navCustomization.embedded && (
+            <div className="hidden md:block">
+              <ThemeToggle />
+            </div>
+          )}
 
-          {/* Settings */}
-          <button
-            onClick={() => setShowSettings(true)}
-            className="p-1.5 rounded-md bg-theme-elevated hover:bg-theme-hover text-theme-text-secondary hover:text-theme-text-primary transition-colors"
-            title="Settings"
-          >
-            <Settings className="w-4 h-4" />
-          </button>
+          {/* Settings — hidden in embedded mode. The standalone dialog
+              exposes local-binary controls (kubeconfig paths, server port,
+              "open browser on start", "Stop and restart the radar command
+              to apply") that don't apply to a hosted user who doesn't SSH
+              into the cluster. The audit view still opens the dialog via
+              its "N namespaces hidden" link for the narrow audit-ignores
+              setting — that's a deliberate escape hatch, not a general
+              surface. */}
+          {!navCustomization.embedded && (
+            <button
+              onClick={() => setShowSettings(true)}
+              className="p-1.5 rounded-md bg-theme-elevated hover:bg-theme-hover text-theme-text-secondary hover:text-theme-text-primary transition-colors"
+              title="Settings"
+            >
+              <Settings className="w-4 h-4" />
+            </button>
+          )}
 
           {/* User menu (when auth enabled) — hidden in embedded mode;
               host app typically provides its own via rightExtras. */}

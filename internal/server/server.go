@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/http/pprof"
 	"net/url"
+	"os"
 	"reflect"
 	"runtime"
 	"strings"
@@ -175,21 +176,26 @@ func (s *Server) setupRoutes() {
 		r.Get("/auth/logout", s.handleLogout)
 	}
 
-	// pprof routes for profiling (dev mode only, but always available for debugging)
-	r.Route("/debug/pprof", func(r chi.Router) {
-		r.Get("/", pprof.Index)
-		r.Get("/cmdline", pprof.Cmdline)
-		r.Get("/profile", pprof.Profile)
-		r.Get("/symbol", pprof.Symbol)
-		r.Get("/trace", pprof.Trace)
-		r.Get("/allocs", pprof.Handler("allocs").ServeHTTP)
-		r.Get("/block", pprof.Handler("block").ServeHTTP)
-		r.Get("/goroutine", pprof.Handler("goroutine").ServeHTTP)
-		r.Get("/heap", pprof.Handler("heap").ServeHTTP)
-		r.Get("/mutex", pprof.Handler("mutex").ServeHTTP)
-		r.Get("/threadcreate", pprof.Handler("threadcreate").ServeHTTP)
-		r.Get("/goroutineleak", pprof.Handler("goroutineleak").ServeHTTP) // requires GOEXPERIMENT=goroutineleakprofile at build time
-	})
+	// pprof routes for profiling. Not mounted under cloud-mode — they'd be
+	// reachable via the Cloud tunnel and leak the in-memory K8s cache (every
+	// Secret, ConfigMap, Pod spec) via /debug/pprof/heap. Local/standalone
+	// installs keep them for debugging.
+	if !cloudMode() {
+		r.Route("/debug/pprof", func(r chi.Router) {
+			r.Get("/", pprof.Index)
+			r.Get("/cmdline", pprof.Cmdline)
+			r.Get("/profile", pprof.Profile)
+			r.Get("/symbol", pprof.Symbol)
+			r.Get("/trace", pprof.Trace)
+			r.Get("/allocs", pprof.Handler("allocs").ServeHTTP)
+			r.Get("/block", pprof.Handler("block").ServeHTTP)
+			r.Get("/goroutine", pprof.Handler("goroutine").ServeHTTP)
+			r.Get("/heap", pprof.Handler("heap").ServeHTTP)
+			r.Get("/mutex", pprof.Handler("mutex").ServeHTTP)
+			r.Get("/threadcreate", pprof.Handler("threadcreate").ServeHTTP)
+			r.Get("/goroutineleak", pprof.Handler("goroutineleak").ServeHTTP) // requires GOEXPERIMENT=goroutineleakprofile at build time
+		})
+	}
 
 	// API routes
 	r.Route("/api", func(r chi.Router) {
@@ -232,6 +238,11 @@ func (s *Server) setupRoutes() {
 			// Cluster audit
 			r.Get("/audit", s.handleAudit)
 			r.Get("/audit/resource/{kind}/{namespace}/{name}", s.handleAuditResource)
+
+			// Packages — merged "what's installed" view across Helm
+			// releases, workload labels, CRD registrations, and GitOps
+			// declarations. See pkg/packages for merge semantics.
+			r.Get("/packages", s.handleListPackages)
 			r.Get("/settings/audit", s.handleGetAuditSettings)
 			r.Put("/settings/audit", s.handlePutAuditSettings)
 			r.Get("/events", s.handleEvents)
@@ -350,6 +361,12 @@ func (s *Server) setupRoutes() {
 			r.Get("/github/starred", s.handleGitHubStarStatus)
 			r.Post("/github/star", s.handleGitHubStar)
 			r.Post("/github/dismiss", s.handleGitHubDismiss)
+
+			// Self-upgrade: Hub calls this over the yamux tunnel to patch this
+			// Deployment's image. Uses the SA client (not user impersonation).
+			// Requires MY_POD_NAMESPACE + MY_DEPLOYMENT_NAME env vars (set by
+			// the Helm chart when rbac.selfUpgrade=true).
+			r.Post("/agent/self-upgrade", s.handleSelfUpgrade)
 
 			// Settings (persisted user preferences)
 			r.Get("/settings", s.handleGetSettings)
@@ -2383,9 +2400,9 @@ func (s *Server) handleCAPIClusterKubeconfig(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	client := k8s.GetClient()
+	client := s.getClientForRequest(r)
 	if client == nil {
-		s.writeError(w, http.StatusServiceUnavailable, "kubernetes client not initialized")
+		s.writeError(w, http.StatusServiceUnavailable, "cluster client not available — check cluster connection")
 		return
 	}
 
@@ -2438,9 +2455,9 @@ func (s *Server) handleCAPIClusterConnect(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	client := k8s.GetClient()
+	client := s.getClientForRequest(r)
 	if client == nil {
-		s.writeError(w, http.StatusServiceUnavailable, "kubernetes client not initialized")
+		s.writeError(w, http.StatusServiceUnavailable, "cluster client not available — check cluster connection")
 		return
 	}
 
@@ -2489,8 +2506,10 @@ func (s *Server) handleCAPIClusterConnect(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	// Merge into the user's kubeconfig
-	mergedPath, err := k8s.MergeAndSwitchContext(kubeconfigData, contextName)
+	// Merge into the user's kubeconfig. The returned qualifiedName reflects
+	// any disambiguation the registry had to do (e.g. if another file already
+	// owned this context name). Always switch using the qualified name.
+	qualifiedName, mergedPath, err := k8s.MergeAndSwitchContext(kubeconfigData, contextName)
 	if err != nil {
 		log.Printf("[capi] Failed to merge kubeconfig for cluster %s/%s: %v", ns, name, err)
 		s.writeError(w, http.StatusInternalServerError, "failed to connect: "+err.Error())
@@ -2504,10 +2523,10 @@ func (s *Server) handleCAPIClusterConnect(w http.ResponseWriter, r *http.Request
 	}
 
 	// Switch to the new context
-	if err := k8s.PerformContextSwitch(contextName); err != nil {
+	if err := k8s.PerformContextSwitch(qualifiedName); err != nil {
 		k8s.SetConnectionStatus(k8s.ConnectionStatus{
 			State:     k8s.StateDisconnected,
-			Context:   contextName,
+			Context:   qualifiedName,
 			Error:     err.Error(),
 			ErrorType: k8s.ClassifyError(err),
 		})
@@ -2521,11 +2540,16 @@ func (s *Server) handleCAPIClusterConnect(w http.ResponseWriter, r *http.Request
 		ClusterName: k8s.GetClusterName(),
 	})
 
-	log.Printf("[capi] Connected to workload cluster %s/%s (context: %s, kubeconfig: %s)", ns, name, contextName, mergedPath)
+	// Use %q on user-influenced values (context name derived from an uploaded
+	// kubeconfig YAML, temp path partly includes the system TMPDIR) so a
+	// crafted context name can't inject forged log lines when Radar's stderr
+	// is scraped by a log aggregator. CodeQL alert "Log entries created from
+	// user input".
+	log.Printf("[capi] Connected to workload cluster %s/%s (context: %q, kubeconfig: %q)", ns, name, qualifiedName, mergedPath)
 
 	s.writeJSON(w, map[string]string{
 		"status":  "connected",
-		"context": contextName,
+		"context": qualifiedName,
 	})
 }
 
@@ -2624,7 +2648,14 @@ func (s *Server) getClientForRequest(r *http.Request) kubernetes.Interface {
 		}
 		return client
 	}
-	return k8s.GetClient()
+	// Typed-nil guard: k8s.GetClient returns *Clientset, and wrapping a nil
+	// pointer in kubernetes.Interface produces a non-nil interface. Callers
+	// do `if client == nil { ... }`, which would slip past and NPE on the
+	// first method call.
+	if c := k8s.GetClient(); c != nil {
+		return c
+	}
+	return nil
 }
 
 // getUserNamespaces returns namespace filtering for the current user.
@@ -2696,14 +2727,40 @@ func (s *Server) handleSSE(w http.ResponseWriter, r *http.Request) {
 
 // Settings handlers
 
+// cloudMode reports whether Radar is running under Radar Cloud. The Helm
+// chart sets RADAR_CLOUD_MODE=true when cloud.enabled. When true, user-
+// scoped fields (theme, pinnedKinds) are owned by Cloud's user_preferences
+// table — not settings.json — because a single in-cluster Radar is shared
+// across every Cloud user of the cluster and can't meaningfully store
+// per-user state.
+func cloudMode() bool {
+	return os.Getenv("RADAR_CLOUD_MODE") == "true"
+}
+
 func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
-	s.writeJSON(w, settings.Load())
+	loaded := settings.Load()
+	if cloudMode() {
+		// Strip user-scoped fields — Cloud's intercept layer fills them from
+		// user_preferences. Audit stays because it's cluster-shared policy.
+		loaded.Theme = ""
+		loaded.PinnedKinds = nil
+	}
+	s.writeJSON(w, loaded)
 }
 
 func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 	var patch settings.Settings
 	if err := json.NewDecoder(r.Body).Decode(&patch); err != nil {
 		s.writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	// Under cloud mode, reject writes to user-scoped fields. Cloud's
+	// intercept layer splits the PUT before forwarding — this is a
+	// defense-in-depth check so a raw call that bypasses the intercept
+	// doesn't silently succeed and cause a cluster-shared settings.json
+	// to get mutated by one user.
+	if cloudMode() && (patch.Theme != "" || patch.PinnedKinds != nil) {
+		s.writeError(w, http.StatusBadRequest, "theme and pinnedKinds are managed by Radar Cloud; use /api/preferences instead")
 		return
 	}
 	result, err := settings.Update(func(current *settings.Settings) {
@@ -2718,6 +2775,10 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 		log.Printf("[settings] Failed to save settings: %v", err)
 		s.writeError(w, http.StatusInternalServerError, err.Error())
 		return
+	}
+	if cloudMode() {
+		result.Theme = ""
+		result.PinnedKinds = nil
 	}
 	s.writeJSON(w, result)
 }

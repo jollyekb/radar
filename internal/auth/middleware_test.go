@@ -306,6 +306,45 @@ func TestIsExemptPath(t *testing.T) {
 	}
 }
 
+// TestIsExemptPath_CloudMode verifies that cloud-mode narrows the exempt
+// set to /api/health + /auth/*. Under cloud-mode, static assets,
+// /api/connection, and /debug/pprof/* must all require auth — a regression
+// that silently re-added them would let an unauthenticated request through
+// the Cloud tunnel reach those paths.
+func TestIsExemptPath_CloudMode(t *testing.T) {
+	t.Setenv("RADAR_CLOUD_MODE", "true")
+
+	tests := []struct {
+		path string
+		want bool
+	}{
+		{"/api/health", true},
+		{"/auth/login", true},
+		{"/auth/callback", true},
+		// Under non-cloud mode these would be exempt. Under cloud-mode
+		// they must require auth.
+		{"/api/connection", false},
+		{"/api/connection/retry", false},
+		{"/", false},
+		{"/index.html", false},
+		{"/assets/main.js", false},
+		{"/debug/pprof/heap", false},
+		{"/debug/pprof/goroutine", false},
+		{"/api/resources/pods", false},
+		{"/api/topology", false},
+		{"/mcp", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.path, func(t *testing.T) {
+			got := isExemptPath(tt.path)
+			if got != tt.want {
+				t.Errorf("isExemptPath(%q) under cloud-mode = %v, want %v", tt.path, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestIsSoftAuthPath(t *testing.T) {
 	tests := []struct {
 		path string

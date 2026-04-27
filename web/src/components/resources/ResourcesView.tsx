@@ -2,7 +2,7 @@ import { useState, useMemo, useCallback, useEffect } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { ApiError, fetchJSON, isForbiddenError, useSecretCertExpiry, useTopPodMetrics, useTopNodeMetrics } from '../../api/client'
-import { apiUrl, getAuthHeaders, getCredentialsMode } from '../../api/config'
+import { apiUrl, getAuthHeaders, getCredentialsMode, getBasename } from '../../api/config'
 import { useAPIResources } from '../../api/apiResources'
 import { initNavigationMap } from '@skyhook-io/k8s-ui'
 import { usePinnedKinds } from '../../hooks/useFavorites'
@@ -166,7 +166,15 @@ export function ResourcesView({ namespaces, selectedResource, onResourceClick, o
       pinned={pinned}
       togglePin={togglePin}
       isPinned={(kind: string, group?: string) => isPinned(kind, group ?? '')}
-      // Navigation
+      // Navigation. basePath is the full URL prefix where the Resources view
+      // lives — '/resources' for standalone Radar, '/c/{cluster}/resources'
+      // when embedded in a host app that mounts RadarApp under a basename.
+      // k8s-ui's ResourcesView uses this to read the current kind out of
+      // window.location.pathname and to write URL updates (drawer open/close,
+      // filter changes) back via history.replaceState. Without the basename
+      // prefix, those writes would drop the host-app route context and the
+      // URL would no longer be reloadable.
+      basePath={getBasename() + '/resources'}
       locationSearch={location.search}
       locationPathname={location.pathname}
       onNavigate={handleNavigate}

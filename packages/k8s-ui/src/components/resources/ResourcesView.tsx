@@ -122,6 +122,7 @@ import {
   SEVERITY_DOT_COLOR,
 } from './resource-utils'
 import { SEVERITY_BADGE, EVENT_TYPE_COLORS } from '../../utils/badge-colors'
+import { pluralize } from '../../utils/pluralize'
 import { Tooltip } from '../ui/Tooltip'
 // CRD-specific cell components (extracted)
 import { GitRepositoryCell, OCIRepositoryCell, HelmRepositoryCell, KustomizationCell, FluxHelmReleaseCell, FluxAlertCell } from './renderers/flux-cells'
@@ -177,6 +178,31 @@ interface Column {
   defaultVisible?: boolean // false = hidden by default, shown via column picker
   defaultWidth?: number // default width in px (used for resizable columns)
   minWidth?: number // minimum width in px
+}
+
+/**
+ * Extra column injected by the parent — for example, a leading "Cluster"
+ * column when the table is rendered inside a multi-cluster host.
+ * Self-contained: carries its own render/sort/filter functions so the
+ * host code doesn't need to extend KNOWN_COLUMNS or the per-kind cell
+ * renderers.
+ *
+ * When extraLeadingColumns is undefined or empty (the standard
+ * single-cluster path), the rest of ResourcesView's behavior is
+ * byte-identical to today.
+ *
+ * Keys must NOT collide with existing KNOWN_COLUMNS keys (name,
+ * namespace, age, status, ready, etc.) — collisions silently bypass
+ * the extra and fall through to the built-in cell.
+ */
+export interface ExtraColumn extends Column {
+  /** Cell content for this column. Receives the resource row. */
+  render: (resource: any) => React.ReactNode
+  /** Sort key extractor. Falls back to localeCompare on render output. */
+  getSortValue?: (resource: any) => string | number
+  /** Filter value extractor used by the column-filter dropdown's
+   *  unique-values pull. Falls back to row not being filterable. */
+  getFilterValue?: (resource: any) => string
 }
 
 // Tailwind width class → pixel minimum mapping for CSS Grid column sizing
@@ -364,7 +390,7 @@ const KNOWN_COLUMNS: Record<string, Column[]> = {
     { key: 'name', label: 'Name' },
     { key: 'namespace', label: 'Namespace', width: 'w-48' },
     { key: 'status', label: 'Ready', width: 'w-24' },
-    { key: 'domains', label: 'Domains', width: 'w-48' },
+    { key: 'domains', label: 'Domains', width: 'w-56' },
     { key: 'issuer', label: 'Issuer', width: 'w-36', hideOnMobile: true },
     { key: 'expires', label: 'Expires', width: 'w-24', tooltip: 'Days until certificate expires' },
     { key: 'age', label: 'Age', width: 'w-24' },
@@ -1628,21 +1654,54 @@ interface ResourcesViewProps {
   hideSidebar?: boolean
   /** Callback when the [+] create button is clicked. Receives the currently selected kind info. */
   onCreateResource?: (kind: { name: string; kind: string; group: string } | null) => void
+  /** Columns prepended to KNOWN_COLUMNS for every kind. For example, a
+   *  multi-cluster host can inject a leading Cluster column. Each extra
+   *  column is self-contained (own render/sort/filter), so the host
+   *  doesn't need to extend KNOWN_COLUMNS or per-kind cell renderers.
+   *  When undefined, behavior is byte-identical to single-cluster mode. */
+  extraLeadingColumns?: ExtraColumn[]
+  /** Escape hatch for full-page-nav row selection: receive the FULL
+   *  resource object on row click / Enter / `d` / search-Enter, instead
+   *  of the stripped {kind, namespace, name, group} shape onResourceClick
+   *  gets. Lets the parent read injected fields (e.g. multi-cluster
+   *  row-level metadata for cross-tree drill-in nav) without a parallel
+   *  (kind, ns, name) → owner lookup that wouldn't dedup for resources
+   *  sharing a namespaced name across cluster boundaries. When set,
+   *  fires INSTEAD OF onResourceClick on those selection paths.
+   *
+   *  Not honored on: `y` (open YAML — routes through onResourceClickYaml)
+   *  and `l` (open logs — different intent). URL deep-link hydration on
+   *  mount (`?resource=ns/name`) only has stripped params and always
+   *  calls onResourceClick — hosts using onRowSelect for full-page nav
+   *  should also wire onResourceClick to handle the deep-link-on-load
+   *  case. */
+  onRowSelect?: (resource: any) => void
 }
 
 // Default selected kind
 const DEFAULT_KIND_INFO: SelectedKindInfo = { name: 'pods', kind: 'Pod', group: '' }
 
 // Read initial state from URL — kind is in the path: {basePath}/{kind}
-function getInitialKindFromURL(basePath: string = '/resources'): SelectedKindInfo {
-  // Read kind from URL path segment after basePath: {basePath}/{kind}
-  const pathname = window.location.pathname
+//
+// Hosts that own their own URL shape (an embedding host with custom
+// routes outside the `{basePath}/{kind}` convention) pass a synthetic
+// pathname/search via the locationPathname/locationSearch props. When
+// those are provided, prefer them over window.location — otherwise the
+// host's URL wouldn't resolve against the synthetic basePath and we'd
+// fall through to DEFAULT_KIND.
+function getInitialKindFromURL(
+  basePath: string = '/resources',
+  locationPathname?: string,
+  locationSearch?: string,
+): SelectedKindInfo {
+  const pathname = locationPathname || window.location.pathname
+  const search = locationSearch || window.location.search
   const base = basePath.replace(/\/$/, '') // strip trailing slash
   let kind: string | null = null
   if (pathname.startsWith(base + '/')) {
     kind = pathname.slice(base.length + 1).split('/')[0] || null
   }
-  const group = new URLSearchParams(window.location.search).get('apiGroup') || ''
+  const group = new URLSearchParams(search).get('apiGroup') || ''
   if (kind) {
     // Find matching resource from CORE_RESOURCES or use as-is
     // Only match core resources when no apiGroup is specified (avoids collisions like KNative Service)
@@ -1700,13 +1759,15 @@ export function ResourcesView({
   onSelectedKindChange,
   hideSidebar = false,
   onCreateResource,
+  extraLeadingColumns,
+  onRowSelect,
 }: ResourcesViewProps) {
   const location = useMemo(() => ({ search: locationSearch, pathname: locationPathname }), [locationSearch, locationPathname])
   const initialFilters = getInitialFiltersFromURL()
-  const [selectedKind, setSelectedKind] = useState<SelectedKindInfo>(() => getInitialKindFromURL(basePath))
+  const [selectedKind, setSelectedKind] = useState<SelectedKindInfo>(() => getInitialKindFromURL(basePath, locationPathname, locationSearch))
   // Sync selectedKind from URL when locationPathname changes (e.g., browser back, external sidebar navigation)
   useEffect(() => {
-    const kindFromURL = getInitialKindFromURL(basePath)
+    const kindFromURL = getInitialKindFromURL(basePath, locationPathname, locationSearch)
     if (kindFromURL.name !== selectedKind.name || kindFromURL.group !== selectedKind.group) {
       setSelectedKind(kindFromURL)
     }
@@ -1804,8 +1865,36 @@ export function ResourcesView({
     return { pods, nodes }
   }, [topPodMetrics, topNodeMetrics])
 
-  // Load column settings from localStorage when kind changes
-  const allColumns = useMemo(() => getColumnsForKind(selectedKind.name, selectedKind.group), [selectedKind.name, selectedKind.group])
+  // Prepend extraLeadingColumns (host-injected leading columns) before
+  // the kind-specific KNOWN_COLUMNS entries. When extras are undefined,
+  // this collapses to single-cluster behavior. Built-in keys win on
+  // collision: a colliding extra is filtered out (with a dev-mode warn)
+  // so we don't render two columns sharing one key — that would yield
+  // duplicate React keys and corrupt visibleColumns / columnWidths state.
+  const allColumns = useMemo(() => {
+    const kindColumns = getColumnsForKind(selectedKind.name, selectedKind.group)
+    if (!extraLeadingColumns?.length) return kindColumns
+    const builtinKeys = new Set(kindColumns.map(c => c.key))
+    const filteredExtras = extraLeadingColumns.filter(c => {
+      if (builtinKeys.has(c.key)) {
+        if (import.meta.env?.DEV) {
+          // eslint-disable-next-line no-console
+          console.warn(`[ResourcesView] extraLeadingColumns key "${c.key}" collides with a built-in column for kind "${selectedKind.name}" — extra ignored`)
+        }
+        return false
+      }
+      return true
+    })
+    return [...filteredExtras, ...kindColumns]
+  }, [selectedKind.name, selectedKind.group, extraLeadingColumns])
+
+  // Map of extra column keys for fast O(1) lookup on each render path
+  // (cell render, sort, column-filter unique-values).
+  const extraColumnsByKey = useMemo(() => {
+    const m = new Map<string, ExtraColumn>()
+    extraLeadingColumns?.forEach(c => m.set(c.key, c))
+    return m
+  }, [extraLeadingColumns])
 
   useEffect(() => {
     const saved = loadColumnSettings(selectedKind.name, selectedKind.group)
@@ -1985,6 +2074,28 @@ export function ResourcesView({
     return highlightedResourceRef.current
   }, [])
 
+  // Selection handler shared by row click, Enter / `d` shortcuts, and the
+  // search-Enter path. Honors the onRowSelect escape hatch when set so
+  // full-page-nav consumers stay consistent across activation paths;
+  // otherwise falls through to the drawer-pattern onResourceClick with
+  // the stripped {kind, namespace, name, group} shape.
+  // (Distinct from `y` / `l` shortcuts, which open YAML / logs rather
+  // than "select the row" — those route to their own callbacks.)
+  const selectResource = useCallback((resource: any, isSelected = false) => {
+    if (!resource?.metadata?.name) return
+    if (onRowSelect) {
+      onRowSelect(resource)
+      return
+    }
+    const stripped = {
+      kind: selectedKind.name,
+      namespace: resource.metadata.namespace || '',
+      name: resource.metadata.name,
+      group: selectedKind.group,
+    }
+    onResourceClick?.(isSelected ? null : stripped)
+  }, [onRowSelect, onResourceClick, selectedKind.name, selectedKind.group])
+
   // Register navigation shortcuts
   useRegisterShortcuts([
     {
@@ -2047,11 +2158,7 @@ export function ResourcesView({
       description: 'Open resource detail',
       category: 'Resource Actions',
       scope: 'resources',
-      handler: () => {
-        const res = getHighlightedResource()
-        if (!res?.metadata?.name) return
-        onResourceClick?.({ kind: selectedKind.name, namespace: res.metadata.namespace || '', name: res.metadata.name, group: selectedKind.group })
-      },
+      handler: () => selectResource(getHighlightedResource()),
       enabled: highlightedIndex >= 0,
     },
     {
@@ -2060,11 +2167,7 @@ export function ResourcesView({
       description: 'Open resource detail',
       category: 'Resource Actions',
       scope: 'resources',
-      handler: () => {
-        const res = getHighlightedResource()
-        if (!res?.metadata?.name) return
-        onResourceClick?.({ kind: selectedKind.name, namespace: res.metadata.namespace || '', name: res.metadata.name, group: selectedKind.group })
-      },
+      handler: () => selectResource(getHighlightedResource()),
       enabled: highlightedIndex >= 0,
     },
     {
@@ -2221,7 +2324,7 @@ export function ResourcesView({
     isSyncingFromURL.current = true
 
     // Re-read URL params and update state
-    const newKind = getInitialKindFromURL(basePath)
+    const newKind = getInitialKindFromURL(basePath, locationPathname, locationSearch)
     const newFilters = getInitialFiltersFromURL()
 
     // Update kind if it changed
@@ -2318,13 +2421,13 @@ export function ResourcesView({
 
     const newPath = `${basePath}/${kindInfo.name}`
     const queryStr = params.toString()
-    const newURL = queryStr ? `${newPath}?${queryStr}` : newPath
 
-    if (pushHistory) {
-      navigate({ pathname: newPath, search: queryStr }, { replace: false })
-    } else {
-      window.history.replaceState({}, '', newURL)
-    }
+    // Route both push and replace through `navigate` (which honors the
+    // onNavigate prop). The previous direct `window.history.replaceState`
+    // bypass meant a host that wants to suppress URL writes (passing
+    // `onNavigate={() => {}}`) couldn't suppress filter-change
+    // updates — they'd still rewrite the address bar through history.
+    navigate({ pathname: newPath, search: queryStr }, { replace: !pushHistory })
   }, [navigate, basePath])
 
   // Update URL when any filter changes
@@ -2373,12 +2476,13 @@ export function ResourcesView({
     // Signal that initial resource param has been processed — URL update effect can now run
     hasProcessedInitialResource.current = true
 
-    // If the URL has no kind segment (e.g., /resources), update to include the default kind
+    // If the URL has no kind segment (e.g., /resources), update to include the default kind.
+    // Route through `navigate` so an onNavigate-suppressing host can opt out.
     const base = basePath.replace(/\/$/, '')
     const path = window.location.pathname
     if (path === base || path === base + '/') {
       const search = window.location.search
-      window.history.replaceState({}, '', `${base}/${selectedKind.name}${search}`)
+      navigate({ pathname: `${base}/${selectedKind.name}`, search: search.replace(/^\?/, '') }, { replace: true })
     }
   }, []) // Only on mount
 
@@ -2701,13 +2805,17 @@ export function ResourcesView({
     }
 
     // Apply column filters (generic, multi-select per column — OR within column, AND across columns)
+    // Extra columns override the built-in getCellFilterValue
+    // when the parent supplied a custom getFilterValue.
     const activeColFilters = Object.entries(columnFilters).filter(([, vals]) => vals.length > 0)
     if (activeColFilters.length > 0) {
       const kindLower = normalizeKindToPlural(selectedKind.name, selectedKind.group)
       result = result.filter((r: any) =>
-        activeColFilters.every(([col, vals]) =>
-          vals.includes(getCellFilterValue(r, col, kindLower))
-        )
+        activeColFilters.every(([col, vals]) => {
+          const extra = extraColumnsByKey.get(col)
+          const cellVal = extra?.getFilterValue ? extra.getFilterValue(r) : getCellFilterValue(r, col, kindLower)
+          return vals.includes(cellVal)
+        })
       )
     }
 
@@ -2762,11 +2870,13 @@ export function ResourcesView({
       })
     }
 
-    // Apply custom sorting if set
+    // Apply custom sorting if set. Extra columns override
+    // the built-in getSortValue for their key.
     if (sortColumn && sortDirection) {
+      const extra = extraColumnsByKey.get(sortColumn)
       result = [...result].sort((a: any, b: any) => {
-        const aVal = getSortValue(a, sortColumn, selectedKind.name)
-        const bVal = getSortValue(b, sortColumn, selectedKind.name)
+        const aVal = extra?.getSortValue ? extra.getSortValue(a) : getSortValue(a, sortColumn, selectedKind.name)
+        const bVal = extra?.getSortValue ? extra.getSortValue(b) : getSortValue(b, sortColumn, selectedKind.name)
         let comparison = 0
         if (typeof aVal === 'number' && typeof bVal === 'number') {
           comparison = aVal - bVal
@@ -2951,7 +3061,12 @@ export function ResourcesView({
     if (!resources || resources.length === 0) return null
 
     const kindLower = normalizeKindToPlural(selectedKind.name, selectedKind.group)
-    const columns = KNOWN_COLUMNS[kindLower] || DEFAULT_COLUMNS
+    // Iterate over allColumns (built-ins + injected extras) so an
+    // ExtraColumn with getFilterValue gets a column-filter dropdown like
+    // any built-in does. The previous formulation iterated KNOWN_COLUMNS
+    // directly, which silently skipped extras whose keys weren't already
+    // in the built-in set.
+    const columns = allColumns
 
     // Auto-detect filterable columns
     const filterableColumns: Array<{
@@ -2963,10 +3078,16 @@ export function ResourcesView({
     for (const col of columns) {
       if (SKIP_FILTER_COLUMNS.has(col.key)) continue
 
+      // Extra columns supply their own filter value extractor.
+      // Skip the dropdown for extras that didn't supply one (no way to
+      // build the unique-values list without it).
+      const extra = extraColumnsByKey.get(col.key)
+      if (extra && !extra.getFilterValue) continue
+
       // Count distinct values for this column
       const valueCounts: Record<string, number> = {}
       for (const r of resources) {
-        const val = getCellFilterValue(r, col.key, kindLower)
+        const val = extra?.getFilterValue ? extra.getFilterValue(r) : getCellFilterValue(r, col.key, kindLower)
         if (val) {
           valueCounts[val] = (valueCounts[val] || 0) + 1
         }
@@ -3052,7 +3173,7 @@ export function ResourcesView({
 
     if (filterableColumns.length === 0 && !problems && labelValues.length === 0) return null
     return { columns: filterableColumns, problems, labels: labelValues }
-  }, [resources, selectedKind.name])
+  }, [resources, selectedKind.name, selectedKind.group, allColumns])
 
   // Map filterable columns by key for O(1) lookup in header rendering
   const filterableColumnMap = useMemo(() => {
@@ -3090,17 +3211,18 @@ export function ResourcesView({
         ? existing.filter(p => p !== pair)
         : [...existing, pair]
       const newSelector = newLabels.join(',')
-      // Sync to URL
+      // Sync to URL — route through `navigate` so the onNavigate prop
+      // can suppress the write.
       const params = new URLSearchParams(window.location.search)
       if (newSelector) {
         params.set('labels', newSelector)
       } else {
         params.delete('labels')
       }
-      window.history.replaceState({}, '', `${window.location.pathname}?${params.toString()}`)
+      navigate({ pathname: window.location.pathname, search: params.toString() }, { replace: true })
       return newSelector
     })
-  }, [])
+  }, [navigate])
 
   // Parse active label pairs for display
   const activeLabelPairs = useMemo(() => {
@@ -3170,9 +3292,7 @@ export function ResourcesView({
                   // Defer to next frame so the highlight renders before we open
                   requestAnimationFrame(() => {
                     const res = highlightedResourceRef.current ?? filteredResources[0]
-                    if (res?.metadata?.name) {
-                      onResourceClick?.({ kind: selectedKind.name, namespace: res.metadata.namespace || '', name: res.metadata.name, group: selectedKind.group })
-                    }
+                    selectResource(res)
                   })
                 } else if (e.key === 'Escape') {
                   searchInputRef.current?.blur()
@@ -3322,10 +3442,12 @@ export function ResourcesView({
                 onClick={() => {
                   setOwnerKind('')
                   setOwnerName('')
+                  // Route through `navigate` so onNavigate-suppressing hosts
+                  // can opt out of the URL write.
                   const params = new URLSearchParams(window.location.search)
                   params.delete('ownerKind')
                   params.delete('ownerName')
-                  window.history.replaceState({}, '', `${window.location.pathname}?${params.toString()}`)
+                  navigate({ pathname: window.location.pathname, search: params.toString() }, { replace: true })
                 }}
                 className="hover:text-theme-text-primary"
               >
@@ -3676,14 +3798,12 @@ export function ResourcesView({
                     kind={selectedKind.name}
                     group={selectedKind.group}
                     columns={columns}
+                    extraColumnsByKey={extraColumnsByKey}
                     hasSpacerColumn={hasResizedColumns}
                     isSelected={isSelected}
                     isHighlighted={isHighlighted}
                     majorityNodeMinorVersion={majorityNodeMinorVersion}
-                    onClick={() => {
-                      const res = { kind: selectedKind.name, namespace: resource.metadata?.namespace || '', name: resource.metadata?.name, group: selectedKind.group }
-                      onResourceClick?.(isSelected ? null : res)
-                    }}
+                    onClick={() => selectResource(resource, isSelected)}
                     onMouseEnter={() => setHighlightedIndex(-1)}
                   />
                 )
@@ -3711,6 +3831,7 @@ interface ResourceRowCellsProps {
   kind: string
   group?: string
   columns: Column[]
+  extraColumnsByKey?: Map<string, ExtraColumn>
   hasSpacerColumn: boolean
   isSelected?: boolean
   isHighlighted?: boolean
@@ -3719,7 +3840,7 @@ interface ResourceRowCellsProps {
   onMouseEnter?: () => void
 }
 
-function ResourceRowCells({ resource, kind, group, columns, hasSpacerColumn, isSelected, isHighlighted, majorityNodeMinorVersion, onClick, onMouseEnter }: ResourceRowCellsProps) {
+function ResourceRowCells({ resource, kind, group, columns, extraColumnsByKey, hasSpacerColumn, isSelected, isHighlighted, majorityNodeMinorVersion, onClick, onMouseEnter }: ResourceRowCellsProps) {
   return (
     <>
       {columns.map((col) => (
@@ -3737,7 +3858,7 @@ function ResourceRowCells({ resource, kind, group, columns, hasSpacerColumn, isS
                 : 'group-hover/row:bg-theme-surface/50'
           )}
         >
-          <CellContent resource={resource} kind={kind} group={group} column={col.key} majorityNodeMinorVersion={majorityNodeMinorVersion} />
+          <CellContent resource={resource} kind={kind} group={group} column={col.key} majorityNodeMinorVersion={majorityNodeMinorVersion} extraColumn={extraColumnsByKey?.get(col.key)} />
         </td>
       ))}
       {hasSpacerColumn && <td className="border-b-subtle p-0" />}
@@ -3777,9 +3898,19 @@ interface CellContentProps {
   column: string
   group?: string
   majorityNodeMinorVersion?: string
+  /** When provided, the parent has injected an ExtraColumn for this
+   *  column key. Render via the extra's render() and short-circuit
+   *  the built-in cell logic. */
+  extraColumn?: ExtraColumn
 }
 
-function CellContent({ resource, kind, column, group, majorityNodeMinorVersion }: CellContentProps) {
+function CellContent({ resource, kind, column, group, majorityNodeMinorVersion, extraColumn }: CellContentProps) {
+  // Parent-injected extra columns short-circuit the built-in switch.
+  // Used by hosts that inject leading columns (e.g. a multi-cluster Cluster column).
+  if (extraColumn) {
+    return <>{extraColumn.render(resource)}</>
+  }
+
   const meta = resource.metadata || {}
 
   // Common columns
@@ -4291,7 +4422,7 @@ function PodCell({ resource, column }: { resource: any; column: string }) {
                 {sq.restarts > 0 && (
                   <div className={clsx('border-t border-theme-border/50 pt-1 space-y-0.5', restartColor)}>
                     <div className="flex items-center gap-1.5">
-                      <span>{sq.restarts} restart{sq.restarts !== 1 ? 's' : ''}</span>
+                      <span>{pluralize(sq.restarts, 'restart')}</span>
                       {lt?.finishedAt && <span className="text-theme-text-tertiary">· last {timeAgo(lt.finishedAt)}</span>}
                     </div>
                     {lt?.reason && (
